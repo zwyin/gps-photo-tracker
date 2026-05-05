@@ -21,6 +21,7 @@ class Worker(QThread):
     progress_signal = Signal(str, int, int, str, float)  # phase, current, total, filename, elapsed
     photo_signal = Signal(dict)  # MatchResult as dict
     done_signal = Signal(dict)  # BatchResult as dict
+    scan_done_signal = Signal(list)  # list of GPX segment dicts for browser
 
     def __init__(
         self,
@@ -49,6 +50,17 @@ class Worker(QThread):
         except Exception as e:
             self.done_signal.emit({"error": str(e), "total": 0, "matched": 0})
             return
+
+        # Emit segment summaries for GPX browser
+        seg_dicts = []
+        for seg in segments:
+            seg_dicts.append({
+                "filename": seg.filename,
+                "start": seg.start,
+                "end": seg.end,
+                "point_count": len(seg.points),
+            })
+        self.scan_done_signal.emit(seg_dicts)
 
         # Process
         def on_progress(update):
