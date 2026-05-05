@@ -2,9 +2,10 @@
 
 import pytest
 from pathlib import Path
+from unittest.mock import patch
 
-from gps_photo_tracker.core.file_provider import FileProvider
-from gps_photo_tracker.core.models import PermissionDeniedError
+from gps_photo_tracker.core.file_provider import FileProvider, _COPY_TIMEOUT
+from gps_photo_tracker.core.models import NetworkTimeoutError, PermissionDeniedError
 
 
 class TestListPhotos:
@@ -120,3 +121,70 @@ class TestCopyFile:
         provider.copy_file(src, dst)
 
         assert dst.read_bytes() == content
+
+
+class TestCopyTimeout:
+    """Network disk timeout handling."""
+
+    def test_timeout_raises_network_timeout_error(self, tmp_path):
+        """Hanging copy raises NetworkTimeoutError."""
+        src = tmp_path / "src.jpg"
+        dst = tmp_path / "dst.jpg"
+        src.write_bytes(b"data")
+
+        provider = FileProvider()
+
+        # Mock shutil.copy2 to simulate a hang (sleep longer than timeout)
+        import shutil
+        original_copy2 = shutil.copy2
+        def slow_copy(*args, **kwargs):
+            import time
+            time.sleep(_COPY_TIMEOUT + 5)
+
+        with patch("gps_photo_tracker.core.file_provider.shutil.copy2", side_effect=slow_copy):
+            with pytest.raises(NetworkTimeoutError):
+                provider.copy_file(src, dst)
+
+    def test_normal_copy_completes_within_timeout(self, tmp_path):
+        """Normal copy completes without timeout."""
+        src = tmp_path / "src.jpg"
+        dst = tmp_path / "dst.jpg"
+        src.write_bytes(b"data")
+
+        provider = FileProvider()
+        provider.copy_file(src, dst)
+        assert dst.exists()
+
+    def test_permission_error_wrapped(self, tmp_path):
+        """PermissionError is wrapped in PermissionDeniedError."""
+        src = tmp_path / "src.jpg"
+        dst = tmp_path / "dst.jpg"
+        src.write_bytes(b"data")
+
+        provider = FileProvider()
+        with patch("gps_photo_tracker.core.file_provider.shutil.copy2", side_effect=PermissionError("denied")):
+            with pytest.raises(PermissionDeniedError):
+                provider.copy_file(src, dst)
+
+    def test_retry_on_oserror(self, tmp_path):
+        """OSError triggers retry (3 attempts)."""
+        src = tmp_path / "src.jpg"
+        dst = tmp_path / "dst.jpg"
+        src.write_bytes(b"data")
+
+        call_count = [0]
+        import shutil
+        original_copy2 = shutil.copy2
+
+        def flaky_copy(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] < 3:
+                raise OSError("Network error")
+            return original_copy2(*args, **kwargs)
+
+        provider = FileProvider()
+        with patch("gps_photo_tracker.core.file_provider.shutil.copy2", side_effect=flaky_copy):
+            provider.copy_file(src, dst)
+
+        assert call_count[0] == 3
+        assert dst.exists()
