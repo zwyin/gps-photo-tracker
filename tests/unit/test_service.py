@@ -549,3 +549,151 @@ class TestRejectGroups:
         result = service.preview(segments, photos, MatcherConfig())
         if result.failed > 0:
             assert len(result.reject_groups) > 0
+
+
+class TestOperationLoggerIntegration:
+    """OperationLogger wired into GPSTaggingService produces log files."""
+
+    def _setup_gpx_and_photos(self, tmp_path):
+        import textwrap, piexif
+        from PIL import Image
+
+        gpx = textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time><ele>100</ele></trkpt>
+            <trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time><ele>110</ele></trkpt>
+          </trkseg></trk>
+        </gpx>""")
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(tmp_path / "photo.jpg", "JPEG", exif=piexif.dump(exif))
+
+    def test_no_log_dir_no_logging(self, tmp_path):
+        """Service without log_dir works normally (backward compatible)."""
+        self._setup_gpx_and_photos(tmp_path)
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        result = service.preview(segments, photos, MatcherConfig())
+        assert result.total == 1
+
+    def test_operations_log_on_preview(self, tmp_path):
+        """operations.log has START and END entries."""
+        import logging
+        for name in ["gps_ops", "gps_matches", "gps_writes", "gps_errors"]:
+            logging.getLogger(name).handlers.clear()
+
+        self._setup_gpx_and_photos(tmp_path)
+        log_dir = tmp_path / "logs"
+        service = GPSTaggingService(log_dir=log_dir)
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        service.preview(segments, photos, MatcherConfig())
+
+        ops = (log_dir / "operations.log").read_text()
+        assert "START" in ops
+        assert "END" in ops
+        assert "preview" in ops
+
+    def test_matches_log_on_success(self, tmp_path):
+        """matches.log records successful match."""
+        import logging
+        for name in ["gps_ops", "gps_matches", "gps_writes", "gps_errors"]:
+            logging.getLogger(name).handlers.clear()
+
+        self._setup_gpx_and_photos(tmp_path)
+        log_dir = tmp_path / "logs"
+        service = GPSTaggingService(log_dir=log_dir)
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        result = service.preview(segments, photos, MatcherConfig())
+
+        if result.matched > 0:
+            matches = (log_dir / "matches.log").read_text()
+            assert "OK photo.jpg" in matches
+
+    def test_matches_log_on_failure(self, tmp_path):
+        """matches.log records failed match."""
+        import logging, textwrap, piexif
+        from PIL import Image
+        for name in ["gps_ops", "gps_matches", "gps_writes", "gps_errors"]:
+            logging.getLogger(name).handlers.clear()
+
+        gpx = textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>
+          </trkseg></trk>
+        </gpx>""")
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        # Photo time outside track coverage
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 20:00:00"}}
+        img.save(tmp_path / "photo.jpg", "JPEG", exif=piexif.dump(exif))
+
+        log_dir = tmp_path / "logs"
+        service = GPSTaggingService(log_dir=log_dir)
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        result = service.preview(segments, photos, MatcherConfig())
+
+        if result.failed > 0:
+            matches = (log_dir / "matches.log").read_text()
+            assert "FAIL photo.jpg" in matches
+
+    def test_writes_log_on_copy(self, tmp_path):
+        """writes.log records GPS write in COPY mode."""
+        import logging
+        for name in ["gps_ops", "gps_matches", "gps_writes", "gps_errors"]:
+            logging.getLogger(name).handlers.clear()
+
+        self._setup_gpx_and_photos(tmp_path)
+        output = tmp_path / "output"
+        output.mkdir()
+
+        log_dir = tmp_path / "logs"
+        service = GPSTaggingService(log_dir=log_dir)
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
+        result = service.process(segments, photos, MatcherConfig(), options)
+
+        if result.matched > 0:
+            writes = (log_dir / "writes.log").read_text()
+            assert "WRITE" in writes
+
+    def test_error_log_on_bad_gpx(self, tmp_path):
+        """errors.log records unparseable GPX file."""
+        import logging
+        for name in ["gps_ops", "gps_matches", "gps_writes", "gps_errors"]:
+            logging.getLogger(name).handlers.clear()
+
+        (tmp_path / "bad.gpx").write_text("not xml")
+        log_dir = tmp_path / "logs"
+        service = GPSTaggingService(log_dir=log_dir)
+        service.scan_gpx(tmp_path)
+
+        errors = (log_dir / "errors.log").read_text()
+        assert "scan_gpx" in errors
+        assert "bad.gpx" in errors
+
+    def test_error_log_on_bad_photo(self, tmp_path):
+        """errors.log records unreadable photo."""
+        import logging
+        for name in ["gps_ops", "gps_matches", "gps_writes", "gps_errors"]:
+            logging.getLogger(name).handlers.clear()
+
+        (tmp_path / "bad.jpg").write_bytes(b"not a real image")
+        log_dir = tmp_path / "logs"
+        service = GPSTaggingService(log_dir=log_dir)
+        service.scan_photos(tmp_path)
+
+        errors = (log_dir / "errors.log").read_text()
+        assert "scan_photos" in errors
+        assert "bad.jpg" in errors
