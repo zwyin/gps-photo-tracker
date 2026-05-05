@@ -64,6 +64,7 @@ class GPXBrowserDialog(QDialog):
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSortingEnabled(True)
+        self._table.selectionModel().selectionChanged.connect(self._on_selection)
 
         for i, row in enumerate(self._rows):
             check_widget = QWidget()
@@ -81,6 +82,14 @@ class GPXBrowserDialog(QDialog):
             self._table.setItem(i, 5, QTableWidgetItem(self._fmt_time(row["end"])))
 
         layout.addWidget(self._table)
+
+        # File detail panel (updates on selection)
+        self._detail_group = QGroupBox("选中文件详情")
+        self._detail_layout = QVBoxLayout(self._detail_group)
+        self._detail_label = QLabel("点击表格中的行查看文件详情")
+        self._detail_label.setWordWrap(True)
+        self._detail_layout.addWidget(self._detail_label)
+        layout.addWidget(self._detail_group)
 
         # File summary group
         file_group = QGroupBox("文件统计")
@@ -143,6 +152,34 @@ class GPXBrowserDialog(QDialog):
                 cb = widget.findChild(QCheckBox)
                 if cb:
                     cb.setChecked(checked)
+
+    def _on_selection(self):
+        rows = self._table.selectionModel().selectedRows()
+        if not rows:
+            self._detail_label.setText("点击表格中的行查看文件详情")
+            return
+        row = rows[0].row()
+        if 0 <= row < len(self._rows):
+            selected = self._rows[row]
+            filename = selected["filename"]
+            # Collect all segments for this file
+            file_segs = [r for r in self._rows if r["filename"] == filename]
+            total_pts = sum(s["point_count"] for s in file_segs)
+            earliest = min(s["start"] for s in file_segs)
+            latest = max(s["end"] for s in file_segs)
+            duration_h = (latest - earliest) / 3600 if latest > earliest else 0
+
+            lines = [
+                f"文件: {filename}",
+                f"段数: {len(file_segs)}  总点数: {total_pts}",
+                f"时间: {self._fmt_time(earliest)} ~ {self._fmt_time(latest)}  (跨度 {duration_h:.1f} 小时)",
+            ]
+            for s in file_segs:
+                lines.append(
+                    f"  Segment {s['index'] + 1}: {s['point_count']} 点, "
+                    f"{self._fmt_time(s['start'])} - {self._fmt_time(s['end'])}"
+                )
+            self._detail_label.setText("\n".join(lines))
 
     def get_excluded_filenames(self) -> set[str]:
         """Return set of filenames whose rows are unchecked."""

@@ -2,8 +2,8 @@
 
 from datetime import datetime, timezone
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QPixmap, QPixmapCache
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -90,6 +90,8 @@ class PhotoBrowserDialog(QDialog):
 
         # Initial populate
         self._filtered: list[dict] = list(self._photos)
+        self._pending_thumb_path: str = ""
+        QPixmapCache.setCacheLimit(51200)  # 50 MB
         self._populate_table()
 
     def _populate_table(self):
@@ -142,17 +144,8 @@ class PhotoBrowserDialog(QDialog):
         if 0 <= row < len(self._filtered):
             p = self._filtered[row]
             photo_path = p.get("path", "")
-            if photo_path:
-                pixmap = QPixmap(photo_path)
-                if not pixmap.isNull():
-                    scaled = pixmap.scaled(
-                        150, 150,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
-                    self._thumb_label.setPixmap(scaled)
-                else:
-                    self._thumb_label.clear()
+
+            # Update info immediately
             lat = p.get("latitude")
             lon = p.get("longitude")
             alt = p.get("altitude")
@@ -165,6 +158,36 @@ class PhotoBrowserDialog(QDialog):
                 f"GPS: {coord}  海拔: {alt_str}"
             )
             self._info_label.setText(info)
+
+            # Async thumbnail with QPixmapCache
+            if photo_path:
+                cache_key = f"thumb:{photo_path}"
+                cached = QPixmapCache.find(cache_key)
+                if cached:
+                    self._thumb_label.setPixmap(cached)
+                else:
+                    self._thumb_label.setText("加载中...")
+                    self._pending_thumb_path = photo_path
+                    QTimer.singleShot(10, self._load_thumbnail)
+
+    def _load_thumbnail(self):
+        path = self._pending_thumb_path
+        if not path:
+            return
+        cache_key = f"thumb:{path}"
+        pixmap = QPixmap(path)
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(
+                150, 150,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            QPixmapCache.insert(cache_key, scaled)
+            # Only apply if still viewing the same photo
+            if path == self._pending_thumb_path:
+                self._thumb_label.setPixmap(scaled)
+        else:
+            self._thumb_label.clear()
 
     @staticmethod
     def _fmt_time(ts: float) -> str:
