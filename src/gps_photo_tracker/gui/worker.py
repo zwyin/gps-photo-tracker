@@ -1,0 +1,88 @@
+"""Worker thread for GPS tagging processing."""
+
+from pathlib import Path
+from dataclasses import asdict
+
+from PySide6.QtCore import QThread, Signal
+
+from gps_photo_tracker.core.models import (
+    BatchResult,
+    MatcherConfig,
+    ProcessOptions,
+    ProgressPhase,
+)
+from gps_photo_tracker.service.cancel_token import CancellationToken
+from gps_photo_tracker.service.tagging_service import GPSTaggingService
+
+
+class Worker(QThread):
+    """Background thread for scan → match → write pipeline."""
+
+    progress_signal = Signal(str, int, int, str, float)  # phase, current, total, filename, elapsed
+    photo_signal = Signal(dict)  # MatchResult as dict
+    done_signal = Signal(dict)  # BatchResult as dict
+
+    def __init__(
+        self,
+        gps_dir: Path,
+        photo_dir: Path,
+        config: MatcherConfig,
+        options: ProcessOptions,
+    ):
+        super().__init__()
+        self._gps_dir = gps_dir
+        self._photo_dir = photo_dir
+        self._config = config
+        self._options = options
+        self._token = CancellationToken()
+
+    def cancel(self):
+        self._token.cancel()
+
+    def run(self):
+        service = GPSTaggingService()
+
+        # Scan
+        try:
+            segments = service.scan_gpx(self._gps_dir)
+            photos = service.scan_photos(self._photo_dir)
+        except Exception as e:
+            self.done_signal.emit({"error": str(e), "total": 0, "matched": 0})
+            return
+
+        # Process
+        def on_progress(update):
+            self.progress_signal.emit(
+                update.phase.value,
+                update.current,
+                update.total,
+                update.current_file,
+                update.elapsed_seconds,
+            )
+
+        def on_photo(result):
+            self.photo_signal.emit({
+                "filename": result.photo.filename,
+                "success": result.success,
+                "method": result.method,
+                "reject_reason": result.reject_reason,
+                "latitude": result.gps.latitude if result.gps else None,
+                "longitude": result.gps.longitude if result.gps else None,
+                "altitude": result.gps.altitude if result.gps else None,
+            })
+
+        result = service.process(
+            segments, photos, self._config, self._options,
+            on_progress=on_progress,
+            on_photo_processed=on_photo,
+            cancel=self._token,
+        )
+
+        self.done_signal.emit({
+            "total": result.total,
+            "matched": result.matched,
+            "failed": result.failed,
+            "skipped": result.skipped,
+            "overwritten": result.overwritten,
+            "success_rate": result.success_rate,
+        })
