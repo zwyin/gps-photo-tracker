@@ -191,3 +191,73 @@ class TestSettingsDialog:
         assert dialog._isolated is not None
         assert dialog._match_tail is not None
         assert dialog._overwrite is not None
+
+
+# ── GPXBrowserDialog tests ─────────────────────────────────
+
+class TestGPXBrowserDialog:
+
+    def test_gpx_browser_with_dicts(self, qapp):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+        segments = [
+            {"filename": "track1.gpx", "start": 1700000000.0, "end": 1700003600.0, "point_count": 120},
+            {"filename": "track2.gpx", "start": 1700100000.0, "end": 1700101800.0, "point_count": 60},
+        ]
+        dialog = GPXBrowserDialog(segments)
+        assert dialog.windowTitle() == "GPX 轨迹详情"
+
+    def test_gpx_browser_with_objects(self, qapp):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+        from gps_photo_tracker.core.models import GPXSegment, TrackPoint
+        segs = [
+            GPXSegment(
+                filename="walk.gpx",
+                start=1700000000.0,
+                end=1700003600.0,
+                points=[TrackPoint(1700000000.0, 25.0, 100.0)],
+            )
+        ]
+        dialog = GPXBrowserDialog(segs)
+        assert dialog is not None
+
+    def test_gpx_browser_empty(self, qapp):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+        dialog = GPXBrowserDialog([])
+        assert dialog is not None
+
+
+# ── MainWindow scan_done tests ─────────────────────────────
+
+class TestMainWindowScanDone:
+
+    def test_on_scan_done_caches_segments(self, main_window):
+        segments = [
+            {"filename": "a.gpx", "start": 1000.0, "end": 2000.0, "point_count": 50},
+        ]
+        main_window._on_scan_done(segments)
+        assert main_window._cached_segments == segments
+        assert "1 段" in main_window._scan_summary.text()
+        assert "50 点" in main_window._scan_summary.text()
+
+    def test_on_scan_done_multiple_segments(self, main_window):
+        segments = [
+            {"filename": "a.gpx", "start": 1000.0, "end": 2000.0, "point_count": 100},
+            {"filename": "b.gpx", "start": 3000.0, "end": 4000.0, "point_count": 200},
+        ]
+        main_window._on_scan_done(segments)
+        assert len(main_window._cached_segments) == 2
+        assert "2 段" in main_window._scan_summary.text()
+        assert "300 点" in main_window._scan_summary.text()
+
+    def test_on_scan_done_empty(self, main_window):
+        main_window._on_scan_done([])
+        assert main_window._cached_segments == []
+
+    def test_worker_has_scan_done_signal(self, qapp):
+        worker = Worker(
+            gps_dir=Path("/tmp"),
+            photo_dir=Path("/tmp"),
+            config=MatcherConfig(),
+            options=ProcessOptions(mode=ProcessMode.PREVIEW),
+        )
+        assert hasattr(worker, 'scan_done_signal')

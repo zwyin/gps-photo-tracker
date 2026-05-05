@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from gps_photo_tracker.core.models import MatcherConfig, ProcessMode, ProcessOptions
 from gps_photo_tracker.gui.detail_dialog import DetailDialog
+from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
 from gps_photo_tracker.gui.settings_dialog import SettingsDialog, load_settings
 from gps_photo_tracker.gui.worker import Worker
 
@@ -40,6 +41,7 @@ class MainWindow(QMainWindow):
 
         self._worker: Worker | None = None
         self._result_details: list[dict] = []
+        self._cached_segments = []
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -127,8 +129,12 @@ class MainWindow(QMainWindow):
         row3.addWidget(btn_output)
         layout.addLayout(row3)
 
-        # Scan summary
+        # Scan summary (clickable to browse GPX)
         self._scan_summary = QLabel("GPS: — | 照片: —")
+        self._scan_summary.setStyleSheet(
+            "padding: 4px; background: #e8e8e8; border-radius: 3px; cursor: pointer;"
+        )
+        self._scan_summary.mousePressEvent = lambda e: self._open_gpx_browser()
         layout.addWidget(self._scan_summary)
 
         return group
@@ -340,6 +346,7 @@ class MainWindow(QMainWindow):
         self._worker.progress_signal.connect(self._on_progress)
         self._worker.photo_signal.connect(self._on_photo_processed)
         self._worker.done_signal.connect(self._on_done)
+        self._worker.scan_done_signal.connect(self._on_scan_done)
         self._worker.start()
 
     def _on_cancel(self):
@@ -410,6 +417,12 @@ class MainWindow(QMainWindow):
         self._progress_label.setText("完成")
         self.statusBar().showMessage(f"处理完成: {matched}/{total} 成功")
 
+    def _on_scan_done(self, segments: list[dict]):
+        self._cached_segments = segments
+        gpx_count = len(segments)
+        total_pts = sum(s.get("point_count", 0) for s in segments)
+        self._scan_summary.setText(f"GPS: {gpx_count} 段, {total_pts} 点 (点击查看)")
+
     def _on_table_double_click(self, index):
         row = index.row()
         if 0 <= row < len(self._result_details):
@@ -430,6 +443,11 @@ class MainWindow(QMainWindow):
         self._offset_spin.setValue(int(s.get("time_offset", 0)))
         self._match_tail_cb.setChecked(bool(s.get("match_tail", True)))
         self._overwrite_gps_cb.setChecked(bool(s.get("overwrite_gps", False)))
+
+    def _open_gpx_browser(self):
+        if self._cached_segments:
+            dialog = GPXBrowserDialog(self._cached_segments, self)
+            dialog.exec()
 
     def closeEvent(self, event):
         if self._worker and self._worker.isRunning():
