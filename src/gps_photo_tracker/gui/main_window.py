@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenuBar,
     QMessageBox,
     QPushButton,
     QSpinBox,
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from gps_photo_tracker.core.models import MatcherConfig, ProcessMode, ProcessOptions
 from gps_photo_tracker.gui.detail_dialog import DetailDialog
+from gps_photo_tracker.gui.settings_dialog import SettingsDialog, load_settings
 from gps_photo_tracker.gui.worker import Worker
 
 
@@ -58,6 +60,15 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 2)
 
         self.statusBar().showMessage("就绪")
+
+        # Menu bar
+        menu = self.menuBar()
+        file_menu = menu.addMenu("文件")
+        settings_action = file_menu.addAction("设置")
+        settings_action.triggered.connect(self._open_settings)
+
+        # Load saved settings
+        self._apply_saved_settings()
 
     # ── Left panel ──────────────────────────────────────────
 
@@ -404,6 +415,21 @@ class MainWindow(QMainWindow):
         if 0 <= row < len(self._result_details):
             dialog = DetailDialog(self._result_details[row], self)
             dialog.exec()
+
+    def _open_settings(self):
+        dialog = SettingsDialog(self)
+        if dialog.exec():
+            self._apply_saved_settings()
+
+    def _apply_saved_settings(self):
+        s = load_settings()
+        self._isolated_spin.setValue(int(s.get("isolated_window", 300)))
+        self._middle_spin.setValue(int(s.get("middle_time_window", 3600)))
+        self._context_spin.setValue(int(s.get("context_window", 300)))
+        self._distance_spin.setValue(int(s.get("max_gps_distance", 200)))
+        self._offset_spin.setValue(int(s.get("time_offset", 0)))
+        self._match_tail_cb.setChecked(bool(s.get("match_tail", True)))
+        self._overwrite_gps_cb.setChecked(bool(s.get("overwrite_gps", False)))
 
     def closeEvent(self, event):
         if self._worker and self._worker.isRunning():

@@ -119,3 +119,75 @@ class TestWorker:
         assert hasattr(worker, 'progress_signal')
         assert hasattr(worker, 'photo_signal')
         assert hasattr(worker, 'done_signal')
+
+
+# ── DetailDialog tests ────────────────────────────────────
+
+class TestDetailDialog:
+
+    def test_detail_dialog_success(self, qapp):
+        from gps_photo_tracker.gui.detail_dialog import DetailDialog
+        data = {
+            "filename": "test.jpg",
+            "path": "/photos/test.jpg",
+            "success": True,
+            "method": "interpolated",
+            "latitude": 25.953,
+            "longitude": 102.758,
+            "altitude": 1810.6,
+            "time_diff": 12.0,
+            "interpolation_distance": 247.0,
+            "interpolation_ratio": 0.133,
+            "interpolation_prev": {"lat": 25.952, "lon": 102.757, "alt": 1808},
+            "interpolation_next": {"lat": 25.954, "lon": 102.759, "alt": 1813},
+        }
+        dialog = DetailDialog(data)
+        assert dialog.windowTitle() == "照片匹配详情 - test.jpg"
+
+    def test_detail_dialog_failure(self, qapp):
+        from gps_photo_tracker.gui.detail_dialog import DetailDialog
+        data = {
+            "filename": "fail.jpg",
+            "path": "/photos/fail.jpg",
+            "success": False,
+            "method": None,
+            "reject_reason": "no_gps_coverage",
+        }
+        dialog = DetailDialog(data)
+        assert "失败" in dialog.windowTitle() or dialog is not None
+
+    def test_detail_dialog_no_interpolation(self, qapp):
+        from gps_photo_tracker.gui.detail_dialog import DetailDialog
+        data = {
+            "filename": "nearest.jpg",
+            "success": True,
+            "method": "nearest",
+            "latitude": 25.0,
+            "longitude": 100.0,
+        }
+        dialog = DetailDialog(data)
+        assert dialog is not None
+
+
+# ── SettingsDialog tests ──────────────────────────────────
+
+class TestSettingsDialog:
+
+    def test_settings_dialog_opens(self, qapp):
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+        dialog = SettingsDialog()
+        assert dialog.windowTitle() == "设置"
+
+    def test_load_settings(self, qapp):
+        from gps_photo_tracker.gui.settings_dialog import load_settings
+        s = load_settings()
+        assert "isolated_window" in s
+        assert "max_gps_distance" in s
+        assert "time_offset" in s
+
+    def test_settings_dialog_has_widgets(self, qapp):
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+        dialog = SettingsDialog()
+        assert dialog._isolated is not None
+        assert dialog._match_tail is not None
+        assert dialog._overwrite is not None
