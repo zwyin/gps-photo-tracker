@@ -8,6 +8,7 @@ from PySide6.QtCore import QThread, Signal
 from gps_photo_tracker.core.models import (
     BatchResult,
     MatcherConfig,
+    ProcessMode,
     ProcessOptions,
     ProgressPhase,
 )
@@ -118,12 +119,21 @@ class Worker(QThread):
                 }
             self.photo_signal.emit(detail)
 
-        result = service.process(
-            segments, photos, self._config, self._options,
-            on_progress=on_progress,
-            on_photo_processed=on_photo,
-            cancel=self._token,
-        )
+        if self._options.mode == ProcessMode.PREVIEW:
+            result = service.preview(
+                segments, photos, self._config,
+                on_progress=on_progress,
+                on_photo_processed=on_photo,
+                cancel=self._token,
+            )
+        else:
+            result = service.process(
+                segments, photos, self._config, self._options,
+                photo_dir=self._photo_dir,
+                on_progress=on_progress,
+                on_photo_processed=on_photo,
+                cancel=self._token,
+            )
 
         self.done_signal.emit({
             "total": result.total,

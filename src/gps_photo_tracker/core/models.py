@@ -105,7 +105,7 @@ class GPSInfo:
 class PhotoInfo:
     path: Path
     filename: str
-    timestamp: float  # UTC timestamp (from EXIF capture time)
+    timestamp: float | None  # UTC timestamp (from EXIF capture time), None if unreadable
     has_gps: bool
     existing_gps: GPSInfo | None = None
 

@@ -83,7 +83,7 @@ class GPSTaggingService:
     ) -> BatchResult:
         """Match photos against GPS segments without writing."""
         return self._run_pipeline(
-            segments, photos, config, None,
+            segments, photos, config, None, None,
             on_progress, on_photo_processed, cancel,
         )
 
@@ -93,13 +93,14 @@ class GPSTaggingService:
         photos: list[PhotoInfo],
         config: MatcherConfig,
         options: ProcessOptions,
+        photo_dir: Path | None = None,
         on_progress: Callable | None = None,
         on_photo_processed: Callable | None = None,
         cancel: CancellationToken | None = None,
     ) -> BatchResult:
         """Match photos and write GPS EXIF data."""
         return self._run_pipeline(
-            segments, photos, config, options,
+            segments, photos, config, options, photo_dir,
             on_progress, on_photo_processed, cancel,
         )
 
@@ -109,6 +110,7 @@ class GPSTaggingService:
         photos: list[PhotoInfo],
         config: MatcherConfig,
         options: ProcessOptions | None,
+        photo_dir: Path | None,
         on_progress: Callable | None,
         on_photo_processed: Callable | None,
         cancel: CancellationToken | None,
@@ -116,6 +118,7 @@ class GPSTaggingService:
         start = time.time()
         matcher = GPSMatcher(config)
         is_preview = options is None or options.mode == ProcessMode.PREVIEW
+        is_copy = options and options.mode == ProcessMode.COPY
 
         # Filter photos with valid timestamps
         valid_photos = [p for p in photos if p.timestamp is not None]
@@ -129,13 +132,12 @@ class GPSTaggingService:
         skipped = 0
         failed = 0
         overwritten = 0
-        processed_count = 0
+        reject_groups: dict[str, list[str]] = {}
 
         for i, result in enumerate(match_results):
             if cancel and cancel.is_cancelled:
                 break
 
-            processed_count += 1
             elapsed = time.time() - start
             if on_progress:
                 on_progress(ProgressUpdate(
@@ -152,14 +154,21 @@ class GPSTaggingService:
                     if self._should_write(result, options):
                         if result.photo.has_gps:
                             overwritten += 1
-                        self._write_photo(result, options)
+                        self._write_photo(result, options, photo_dir)
                     else:
+                        # COPY mode: still copy even if not writing GPS
                         skipped += 1
+                        if is_copy and options.output_dir:
+                            dst = self._copy_destination(result.photo.path, options, photo_dir)
+                            self._file_provider.copy_file(result.photo.path, dst)
             else:
                 failed += 1
+                # Track reject reasons
+                reason = result.reject_reason or "unknown"
+                reject_groups.setdefault(reason, []).append(result.photo.filename)
                 # COPY mode: copy even unmatched photos
-                if not is_preview and options and options.mode == ProcessMode.COPY and options.output_dir:
-                    dst = self._copy_destination(result.photo.path, options)
+                if is_copy and options and options.output_dir:
+                    dst = self._copy_destination(result.photo.path, options, photo_dir)
                     self._file_provider.copy_file(result.photo.path, dst)
 
             if on_photo_processed:
@@ -181,6 +190,7 @@ class GPSTaggingService:
             overwritten=overwritten,
             success_rate=success_rate,
             results=match_results,
+            reject_groups=reject_groups,
         )
 
     def _should_write(self, result: MatchResult, options: ProcessOptions) -> bool:
@@ -189,24 +199,21 @@ class GPSTaggingService:
             return False
         return True
 
-    def _write_photo(self, result: MatchResult, options: ProcessOptions) -> None:
+    def _write_photo(self, result: MatchResult, options: ProcessOptions, photo_dir: Path | None = None) -> None:
         """Write GPS data to photo based on process mode."""
         if options.mode == ProcessMode.COPY and options.output_dir:
-            dst = self._copy_destination(result.photo.path, options)
+            dst = self._copy_destination(result.photo.path, options, photo_dir)
             self._file_provider.copy_file(result.photo.path, dst)
             EXIFWriter.write_gps(dst, dst, result.gps)
         elif options.mode == ProcessMode.OVERWRITE:
             EXIFWriter.write_gps(result.photo.path, result.photo.path, result.gps)
 
-    def _copy_destination(self, src_path: Path, options: ProcessOptions) -> Path:
+    def _copy_destination(self, src_path: Path, options: ProcessOptions, photo_dir: Path | None = None) -> Path:
         """Compute destination path, preserving directory structure if keep_structure."""
-        if options.keep_structure and options.output_dir:
-            # Preserve relative path from CWD or use filename only
+        if options.keep_structure and options.output_dir and photo_dir:
             try:
-                rel = src_path.relative_to(Path.cwd())
-                    # Keep everything after the first directory component
-                parts = rel.parts[1:] if len(rel.parts) > 1 else rel.parts
-                return options.output_dir / Path(*parts) if parts else options.output_dir / src_path.name
+                rel = src_path.relative_to(photo_dir)
+                return options.output_dir / rel
             except ValueError:
                 return options.output_dir / src_path.name
         return options.output_dir / src_path.name

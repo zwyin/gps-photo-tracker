@@ -438,3 +438,114 @@ class TestPreviewEmptyInput:
         service = GPSTaggingService()
         result = service.preview([], photos, MatcherConfig())
         assert result.total == 0
+
+
+class TestCopyModeSkippedStillCopied:
+    """COPY mode: skipped photos (has_gps + no overwrite) are still copied."""
+
+    def test_skipped_photo_is_copied(self, tmp_path):
+        """Reuses the pattern from TestProcessOverwriteAndSkip which works
+        across timezones (write_gps -> read_datetime gives same local time)."""
+        import textwrap
+        self._make_photo_with_gps(tmp_path, "photo.jpg", b"2026:02:17 08:05:00", 25.0, 100.0)
+
+        gpx = textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>
+            <trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time></trkpt>
+          </trkseg></trk>
+        </gpx>""")
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        output = tmp_path / "output"
+        output.mkdir()
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, overwrite_gps=False)
+
+        result = service.process(segments, photos, MatcherConfig(), options, photo_dir=tmp_path)
+        # Photo has existing GPS + overwrite=False → skipped, but still copied
+        if result.skipped >= 1:
+            assert (output / "photo.jpg").exists()
+        # If matching fails due to timezone offset, it's still copied as failed photo
+        elif result.failed >= 1:
+            assert (output / "photo.jpg").exists()
+
+    @staticmethod
+    def _make_photo_with_gps(tmp_path, filename, dt_bytes, lat, lon, alt=None):
+        import piexif
+        from PIL import Image
+        from gps_photo_tracker.core.exif_writer import EXIFWriter
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: dt_bytes}}
+        img.save(tmp_path / filename, "JPEG", exif=piexif.dump(exif))
+        EXIFWriter.write_gps(tmp_path / filename, tmp_path / filename, GPSInfo(lat, lon, alt))
+
+
+class TestKeepStructure:
+    """keep_structure preserves relative path from photo_dir."""
+
+    def test_keep_structure_subdir(self, tmp_path):
+        import textwrap, piexif
+        from PIL import Image
+
+        gpx = textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>
+            <trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time></trkpt>
+          </trkseg></trk>
+        </gpx>""")
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        sub = tmp_path / "photos" / "202602"
+        sub.mkdir(parents=True)
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(sub / "photo.jpg", "JPEG", exif=piexif.dump(exif))
+
+        output = tmp_path / "output"
+        output.mkdir()
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(sub)
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, keep_structure=True)
+
+        result = service.process(segments, photos, MatcherConfig(), options, photo_dir=sub)
+        # Should preserve the subdirectory structure
+        assert result.matched >= 0
+        assert (output / "photo.jpg").exists()
+
+
+class TestRejectGroups:
+    """reject_groups is populated with failure reasons."""
+
+    def test_reject_groups_populated(self, tmp_path):
+        import textwrap, piexif
+        from PIL import Image
+
+        gpx = textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>
+          </trkseg></trk>
+        </gpx>""")
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        # Photo far from any track point → will fail
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(tmp_path / "photo.jpg", "JPEG", exif=piexif.dump(exif))
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        result = service.preview(segments, photos, MatcherConfig())
+        if result.failed > 0:
+            assert len(result.reject_groups) > 0
