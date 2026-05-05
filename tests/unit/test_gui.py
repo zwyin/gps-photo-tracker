@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QTableWidgetItem
+from PySide6.QtWidgets import QApplication, QTableWidgetItem, QGroupBox
 from PySide6.QtCore import Qt, QSettings
 
 from gps_photo_tracker.gui.main_window import MainWindow
@@ -952,3 +952,52 @@ class TestDetailDialogEnhanced:
         }
         dlg = DetailDialog(data)
         assert dlg is not None
+
+
+class TestSettingsDialogEnhanced:
+    """Settings dialog: log directory, retention days, about section, restore defaults."""
+
+    def test_log_dir_edit_exists(self, qapp):
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+        dlg = SettingsDialog()
+        assert dlg._log_dir_edit is not None
+        assert dlg._log_dir_edit.placeholderText() != ""
+
+    def test_retention_spin_exists(self, qapp):
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+        dlg = SettingsDialog()
+        assert dlg._retention_spin is not None
+        assert dlg._retention_spin.value() == 30
+        assert dlg._retention_spin.minimum() == 1
+        assert dlg._retention_spin.maximum() == 365
+
+    def test_about_label_exists(self, qapp):
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+        dlg = SettingsDialog()
+        # About group should contain version info
+        groups = dlg.findChildren(QGroupBox)
+        about_found = any("关于" in g.title() for g in groups)
+        assert about_found
+
+    def test_restore_defaults_clears_log_dir(self, qapp):
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+        dlg = SettingsDialog()
+        dlg._log_dir_edit.setText("/some/path")
+        dlg._retention_spin.setValue(90)
+        dlg._reset_defaults()
+        assert dlg._log_dir_edit.text() == ""
+        assert dlg._retention_spin.value() == 30
+
+    def test_save_includes_log_settings(self, qapp, monkeypatch):
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+        saved = {}
+        def mock_save(values):
+            saved.update(values)
+        import gps_photo_tracker.gui.settings_dialog as sd_module
+        monkeypatch.setattr(sd_module, "save_settings", mock_save)
+        dlg = SettingsDialog()
+        dlg._log_dir_edit.setText("/test/logs")
+        dlg._retention_spin.setValue(60)
+        dlg._save()
+        assert saved.get("log_dir") == "/test/logs"
+        assert saved.get("log_retention_days") == 60
