@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QTableWidgetItem, QGroupBox, QTableWidget
+from PySide6.QtWidgets import QApplication, QCheckBox, QTableWidgetItem, QGroupBox, QTableWidget
 from PySide6.QtCore import Qt, QSettings
 
 from gps_photo_tracker.gui.main_window import MainWindow
@@ -1045,3 +1045,58 @@ class TestGPXBrowserEnhanced:
         from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
         dlg = GPXBrowserDialog([])
         assert dlg is not None
+
+
+class TestGPXBrowserCheckbox:
+    """GPX browser: checkbox filtering via get_excluded_filenames."""
+
+    def test_all_checked_returns_empty_excluded(self, qapp):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+        segments = [
+            {"filename": "a.gpx", "point_count": 100, "start": 1700000000.0, "end": 1700003600.0},
+            {"filename": "b.gpx", "point_count": 50, "start": 1700100000.0, "end": 1700105000.0},
+        ]
+        dlg = GPXBrowserDialog(segments)
+        excluded = dlg.get_excluded_filenames()
+        assert excluded == set()
+
+    def test_unchecked_returns_excluded(self, qapp):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+        segments = [
+            {"filename": "a.gpx", "point_count": 100, "start": 1700000000.0, "end": 1700003600.0},
+            {"filename": "b.gpx", "point_count": 50, "start": 1700100000.0, "end": 1700105000.0},
+        ]
+        dlg = GPXBrowserDialog(segments)
+        # Uncheck first row
+        widget = dlg._table.cellWidget(0, 0)
+        cb = widget.findChild(QCheckBox)
+        cb.setChecked(False)
+        excluded = dlg.get_excluded_filenames()
+        assert "a.gpx" in excluded
+        assert "b.gpx" not in excluded
+
+    def test_select_all_button(self, qapp):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+        segments = [
+            {"filename": "a.gpx", "point_count": 100, "start": 1700000000.0, "end": 1700003600.0},
+        ]
+        dlg = GPXBrowserDialog(segments)
+        # Uncheck first
+        widget = dlg._table.cellWidget(0, 0)
+        cb = widget.findChild(QCheckBox)
+        cb.setChecked(False)
+        # Click select all
+        dlg._set_all_checked(True)
+        assert cb.isChecked()
+        assert dlg.get_excluded_filenames() == set()
+
+    def test_deselect_all_button(self, qapp):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+        segments = [
+            {"filename": "a.gpx", "point_count": 100, "start": 1700000000.0, "end": 1700003600.0},
+            {"filename": "b.gpx", "point_count": 50, "start": 1700100000.0, "end": 1700105000.0},
+        ]
+        dlg = GPXBrowserDialog(segments)
+        dlg._set_all_checked(False)
+        excluded = dlg.get_excluded_filenames()
+        assert excluded == {"a.gpx", "b.gpx"}
