@@ -75,6 +75,7 @@ class MainWindow(QMainWindow):
 
         # Load saved settings
         self._apply_saved_settings()
+        self._load_path_history()
 
     # ── Left panel ──────────────────────────────────────────
 
@@ -102,8 +103,9 @@ class MainWindow(QMainWindow):
 
         # GPS directory
         row1 = QHBoxLayout()
-        self._gps_dir_edit = QLineEdit()
-        self._gps_dir_edit.setPlaceholderText("GPS 轨迹目录...")
+        self._gps_dir_edit = QComboBox()
+        self._gps_dir_edit.setEditable(True)
+        self._gps_dir_edit.lineEdit().setPlaceholderText("GPS 轨迹目录...")
         btn_gps = QPushButton("浏览")
         btn_gps.clicked.connect(self._browse_gps_dir)
         row1.addWidget(QLabel("GPS:"))
@@ -113,8 +115,9 @@ class MainWindow(QMainWindow):
 
         # Photo directory
         row2 = QHBoxLayout()
-        self._photo_dir_edit = QLineEdit()
-        self._photo_dir_edit.setPlaceholderText("照片目录...")
+        self._photo_dir_edit = QComboBox()
+        self._photo_dir_edit.setEditable(True)
+        self._photo_dir_edit.lineEdit().setPlaceholderText("照片目录...")
         btn_photo = QPushButton("浏览")
         btn_photo.clicked.connect(self._browse_photo_dir)
         row2.addWidget(QLabel("照片:"))
@@ -124,8 +127,9 @@ class MainWindow(QMainWindow):
 
         # Output directory
         row3 = QHBoxLayout()
-        self._output_dir_edit = QLineEdit()
-        self._output_dir_edit.setPlaceholderText("输出目录（拷贝模式）...")
+        self._output_dir_edit = QComboBox()
+        self._output_dir_edit.setEditable(True)
+        self._output_dir_edit.lineEdit().setPlaceholderText("输出目录（拷贝模式）...")
         btn_output = QPushButton("浏览")
         btn_output.clicked.connect(self._browse_output_dir)
         row3.addWidget(QLabel("输出:"))
@@ -338,17 +342,47 @@ class MainWindow(QMainWindow):
     def _browse_gps_dir(self):
         path = QFileDialog.getExistingDirectory(self, "选择 GPS 轨迹目录")
         if path:
-            self._gps_dir_edit.setText(path)
+            self._gps_dir_edit.setCurrentText(path)
+            self._add_path_history("gps_dir_history", path, self._gps_dir_edit)
 
     def _browse_photo_dir(self):
         path = QFileDialog.getExistingDirectory(self, "选择照片目录")
         if path:
-            self._photo_dir_edit.setText(path)
+            self._photo_dir_edit.setCurrentText(path)
+            self._add_path_history("photo_dir_history", path, self._photo_dir_edit)
 
     def _browse_output_dir(self):
         path = QFileDialog.getExistingDirectory(self, "选择输出目录")
         if path:
-            self._output_dir_edit.setText(path)
+            self._output_dir_edit.setCurrentText(path)
+            self._add_path_history("output_dir_history", path, self._output_dir_edit)
+
+    def _add_path_history(self, key: str, path: str, combo: QComboBox):
+        settings = QSettings()
+        history = settings.value(key, [])
+        if isinstance(history, str):
+            history = [history]
+        if path in history:
+            history.remove(path)
+        history.insert(0, path)
+        history = history[:10]
+        settings.setValue(key, history)
+        combo.clear()
+        combo.addItems(history)
+        combo.setCurrentText(path)
+
+    def _load_path_history(self):
+        settings = QSettings()
+        for key, combo in [
+            ("gps_dir_history", self._gps_dir_edit),
+            ("photo_dir_history", self._photo_dir_edit),
+            ("output_dir_history", self._output_dir_edit),
+        ]:
+            history = settings.value(key, [])
+            if isinstance(history, str):
+                history = [history]
+            if history:
+                combo.addItems(history)
 
     def _get_matcher_config(self) -> MatcherConfig:
         return MatcherConfig(
@@ -363,7 +397,7 @@ class MainWindow(QMainWindow):
     def _get_process_options(self) -> ProcessOptions:
         mode_id = self._mode_group.checkedId()
         mode = [ProcessMode.PREVIEW, ProcessMode.COPY, ProcessMode.OVERWRITE][mode_id]
-        output_dir = Path(self._output_dir_edit.text()) if self._output_dir_edit.text() else None
+        output_dir = Path(self._output_dir_edit.currentText()) if self._output_dir_edit.currentText() else None
         return ProcessOptions(
             mode=mode,
             output_dir=output_dir,
@@ -371,14 +405,14 @@ class MainWindow(QMainWindow):
         )
 
     def _on_start(self):
-        gps_dir = self._gps_dir_edit.text()
-        photo_dir = self._photo_dir_edit.text()
+        gps_dir = self._gps_dir_edit.currentText()
+        photo_dir = self._photo_dir_edit.currentText()
         if not gps_dir or not photo_dir:
             QMessageBox.warning(self, "提示", "请先选择 GPS 轨迹目录和照片目录")
             return
 
         mode_id = self._mode_group.checkedId()
-        if mode_id == 1 and not self._output_dir_edit.text():
+        if mode_id == 1 and not self._output_dir_edit.currentText():
             QMessageBox.warning(self, "提示", "拷贝模式需要指定输出目录")
             return
 
