@@ -61,8 +61,9 @@ class Worker(QThread):
             )
 
         def on_photo(result):
-            self.photo_signal.emit({
+            detail = {
                 "filename": result.photo.filename,
+                "path": str(result.photo.path),
                 "success": result.success,
                 "method": result.method,
                 "reject_reason": result.reject_reason,
@@ -70,7 +71,23 @@ class Worker(QThread):
                 "latitude": result.gps.latitude if result.gps else None,
                 "longitude": result.gps.longitude if result.gps else None,
                 "altitude": result.gps.altitude if result.gps else None,
-            })
+                "time_diff": result.time_diff,
+                "interpolation_distance": result.interpolation_distance,
+                "interpolation_ratio": result.interpolation_ratio,
+            }
+            if result.interpolation_prev:
+                detail["interpolation_prev"] = {
+                    "lat": result.interpolation_prev.latitude,
+                    "lon": result.interpolation_prev.longitude,
+                    "alt": result.interpolation_prev.altitude,
+                }
+            if result.interpolation_next:
+                detail["interpolation_next"] = {
+                    "lat": result.interpolation_next.latitude,
+                    "lon": result.interpolation_next.longitude,
+                    "alt": result.interpolation_next.altitude,
+                }
+            self.photo_signal.emit(detail)
 
         result = service.process(
             segments, photos, self._config, self._options,

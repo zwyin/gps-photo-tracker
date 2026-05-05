@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from gps_photo_tracker.core.models import MatcherConfig, ProcessMode, ProcessOptions
+from gps_photo_tracker.gui.detail_dialog import DetailDialog
 from gps_photo_tracker.gui.worker import Worker
 
 
@@ -36,6 +37,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1000, 600)
 
         self._worker: Worker | None = None
+        self._result_details: list[dict] = []
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -254,6 +256,7 @@ class MainWindow(QMainWindow):
         self._results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._results_table.doubleClicked.connect(self._on_table_double_click)
         layout.addWidget(self._results_table)
 
         return widget
@@ -312,6 +315,7 @@ class MainWindow(QMainWindow):
         self._progress_bar.setValue(0)
         self._progress_label.setText("扫描中...")
         self._results_table.setRowCount(0)
+        self._result_details.clear()
 
         config = self._get_matcher_config()
         options = self._get_process_options()
@@ -377,6 +381,7 @@ class MainWindow(QMainWindow):
         self._results_table.setItem(row, 4, QTableWidgetItem(status))
 
         self._results_table.scrollToBottom()
+        self._result_details.append(result_dict)
 
     def _on_done(self, result_dict: dict):
         self._start_btn.setEnabled(True)
@@ -393,6 +398,12 @@ class MainWindow(QMainWindow):
         )
         self._progress_label.setText("完成")
         self.statusBar().showMessage(f"处理完成: {matched}/{total} 成功")
+
+    def _on_table_double_click(self, index):
+        row = index.row()
+        if 0 <= row < len(self._result_details):
+            dialog = DetailDialog(self._result_details[row], self)
+            dialog.exec()
 
     def closeEvent(self, event):
         if self._worker and self._worker.isRunning():
