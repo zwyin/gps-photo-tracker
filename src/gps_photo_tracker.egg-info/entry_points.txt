@@ -1,0 +1,2 @@
+[console_scripts]
+gps-photo-tracker = gps_photo_tracker.__main__:main

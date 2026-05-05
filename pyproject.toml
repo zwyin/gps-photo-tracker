@@ -1,0 +1,36 @@
+[project]
+name = "gps-photo-tracker"
+version = "1.0.0"
+description = "Batch process photos with GPX tracks to write GPS EXIF tags"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6>=6.6",
+    "piexif>=1.1.3",
+    "gpxpy>=1.6.0",
+    "Pillow>=10.0.0",
+    "geopy>=2.4.0",
+    "tenacity>=8.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[project.scripts]
+gps-photo-tracker = "gps_photo_tracker.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: marks tests as slow"]
+
+[tool.coverage.run]
+source = ["src/gps_photo_tracker"]
+
+[tool.coverage.report]
+fail_under = 75
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
