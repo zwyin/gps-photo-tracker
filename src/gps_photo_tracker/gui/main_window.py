@@ -133,12 +133,26 @@ class MainWindow(QMainWindow):
         row3.addWidget(btn_output)
         layout.addLayout(row3)
 
-        # Scan summary (clickable to browse GPX)
-        self._scan_summary = QLabel("GPS: — | 照片: —")
-        self._scan_summary.setStyleSheet(
+        # Clickable labels for GPX and photo browsers
+        browser_row = QHBoxLayout()
+        self._gpx_browser_label = QLabel("GPS: —")
+        self._gpx_browser_label.setStyleSheet(
             "padding: 4px; background: #e8e8e8; border-radius: 3px; cursor: pointer;"
         )
-        self._scan_summary.mousePressEvent = lambda e: self._open_gpx_browser()
+        self._gpx_browser_label.mousePressEvent = lambda e: self._open_gpx_browser()
+        browser_row.addWidget(self._gpx_browser_label)
+
+        self._photo_browser_label = QLabel("照片: —")
+        self._photo_browser_label.setStyleSheet(
+            "padding: 4px; background: #e8e8e8; border-radius: 3px; cursor: pointer;"
+        )
+        self._photo_browser_label.mousePressEvent = lambda e: self._open_photo_browser()
+        browser_row.addWidget(self._photo_browser_label)
+        layout.addLayout(browser_row)
+
+        # Scan summary (read-only display)
+        self._scan_summary = QLabel("GPS: — | 照片: —")
+        self._scan_summary.setStyleSheet("padding: 4px; color: #666;")
         layout.addWidget(self._scan_summary)
 
         return group
@@ -308,7 +322,7 @@ class MainWindow(QMainWindow):
         # Thumbnail preview
         thumb_row = QHBoxLayout()
         self._thumb_label = QLabel()
-        self._thumb_label.setFixedSize(120, 120)
+        self._thumb_label.setFixedSize(200, 200)
         self._thumb_label.setStyleSheet("background: #e8e8e8; border: 1px solid #ccc;")
         self._thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         thumb_row.addWidget(self._thumb_label)
@@ -458,6 +472,20 @@ class MainWindow(QMainWindow):
         self._result_details.append(result_dict)
         # Apply current filter
         self._apply_result_filter()
+        # Update stats card in real-time
+        self._update_stats_card()
+
+    def _update_stats_card(self):
+        """Update stats label from current result_details."""
+        total = len(self._result_details)
+        matched = sum(1 for d in self._result_details if d.get("success"))
+        failed = sum(1 for d in self._result_details if not d.get("success"))
+        skipped = sum(1 for d in self._result_details
+                      if d.get("has_gps") and not d.get("success"))
+        rate = matched / total if total > 0 else 0
+        self._stats_label.setText(
+            f"总数: {total} | 成功: {matched} | 跳过: {skipped} | 失败: {failed} | 成功率: {rate:.1%}"
+        )
 
     def _on_done(self, result_dict: dict):
         self._start_btn.setEnabled(True)
@@ -474,6 +502,12 @@ class MainWindow(QMainWindow):
         )
         self._progress_label.setText("完成")
         self.statusBar().showMessage(f"处理完成: {matched}/{total} 成功")
+
+        # Completion notification
+        QMessageBox.information(
+            self, "处理完成",
+            f"处理完成！\n\n总数: {total}\n成功: {matched}\n失败: {failed}\n跳过: {skipped}\n成功率: {rate:.1%}"
+        )
 
     def _apply_result_filter(self):
         filter_idx = self._result_filter.currentIndex()
@@ -497,16 +531,16 @@ class MainWindow(QMainWindow):
         self._cached_segments = segments
         gpx_count = len(segments)
         total_pts = sum(s.get("point_count", 0) for s in segments)
-        self._scan_summary.setText(f"GPS: {gpx_count} 段, {total_pts} 点 (点击查看)")
+        self._gpx_browser_label.setText(f"GPS: {gpx_count} 段, {total_pts} 点 (点击查看)")
+        self._scan_summary.setText(f"GPS: {gpx_count} 段, {total_pts} 点")
 
     def _on_photos_scanned(self, photos: list[dict]):
         self._cached_photos = photos
         total = len(photos)
         with_gps = sum(1 for p in photos if p.get("has_gps"))
+        self._photo_browser_label.setText(f"照片: {total}张 ({with_gps}有GPS) (点击查看)")
         self._scan_summary.setText(
-            self._scan_summary.text().replace("GPS:", f"照片: {total}张 ({with_gps}有GPS) | GPS:")
-            if "GPS:" in self._scan_summary.text()
-            else f"照片: {total}张 ({with_gps}有GPS)"
+            f"{self._scan_summary.text()} | 照片: {total}张 ({with_gps}有GPS)"
         )
 
     def _open_photo_browser(self):
@@ -534,7 +568,7 @@ class MainWindow(QMainWindow):
                 pixmap = QPixmap(photo_path)
                 if not pixmap.isNull():
                     scaled = pixmap.scaled(
-                        120, 120,
+                        200, 200,
                         Qt.AspectRatioMode.KeepAspectRatio,
                         Qt.TransformationMode.SmoothTransformation,
                     )
@@ -564,6 +598,13 @@ class MainWindow(QMainWindow):
         self._offset_spin.setValue(int(s.get("time_offset", 0)))
         self._match_tail_cb.setChecked(bool(s.get("match_tail", True)))
         self._overwrite_gps_cb.setChecked(bool(s.get("overwrite_gps", False)))
+
+        # Restore saved processing mode
+        mode_id = int(s.get("mode", 0))
+        for rb, mid in [(self._preview_rb, 0), (self._copy_rb, 1), (self._overwrite_rb, 2)]:
+            if mid == mode_id:
+                rb.setChecked(True)
+                break
 
         # Restore window geometry
         geo = QSettings("GPSPhotoTracker", "GPSPhotoTracker").value("window_geometry")

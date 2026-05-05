@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
     QCheckBox,
+    QRadioButton,
+    QButtonGroup,
 )
 
 SETTINGS_KEYS = {
@@ -93,6 +95,24 @@ class SettingsDialog(QDialog):
         self._keep_structure.setChecked(self._settings.get("keep_structure", True))
         proc_layout.addRow(self._keep_structure)
 
+        # Default processing mode radio buttons
+        self._mode_group = QButtonGroup(self)
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("默认处理模式:"))
+        self._mode_preview_rb = QRadioButton("预览")
+        self._mode_copy_rb = QRadioButton("拷贝")
+        self._mode_overwrite_rb = QRadioButton("覆盖")
+        self._mode_group.addButton(self._mode_preview_rb, 0)
+        self._mode_group.addButton(self._mode_copy_rb, 1)
+        self._mode_group.addButton(self._mode_overwrite_rb, 2)
+        mode_id = int(self._settings.get("mode", 0))
+        [self._mode_preview_rb, self._mode_copy_rb, self._mode_overwrite_rb][mode_id].setChecked(True)
+        mode_row.addWidget(self._mode_preview_rb)
+        mode_row.addWidget(self._mode_copy_rb)
+        mode_row.addWidget(self._mode_overwrite_rb)
+        mode_row.addStretch()
+        proc_layout.addRow(mode_row)
+
         layout.addWidget(proc_group)
 
         # Buttons
@@ -125,6 +145,7 @@ class SettingsDialog(QDialog):
         self._match_tail.setChecked(SETTINGS_KEYS["match_tail"])
         self._overwrite.setChecked(SETTINGS_KEYS["overwrite_gps"])
         self._keep_structure.setChecked(SETTINGS_KEYS["keep_structure"])
+        self._mode_preview_rb.setChecked(True)
 
     def _save(self):
         values = {
@@ -136,6 +157,7 @@ class SettingsDialog(QDialog):
             "match_tail": self._match_tail.isChecked(),
             "overwrite_gps": self._overwrite.isChecked(),
             "keep_structure": self._keep_structure.isChecked(),
+            "mode": self._mode_group.checkedId(),
         }
         save_settings(values)
         self.accept()
