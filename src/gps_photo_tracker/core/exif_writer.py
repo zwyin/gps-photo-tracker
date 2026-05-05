@@ -154,3 +154,16 @@ class EXIFWriter:
             import shutil
             shutil.copy2(src, dst)
             piexif.insert(exif_bytes, str(dst))
+
+        # Write verification: read back and check coordinates within 0.001°
+        verify_gps = EXIFWriter.read_gps(dst)
+        if verify_gps is None:
+            raise EXIFWriteError(f"Write verification failed: no GPS data in {dst}")
+        if abs(verify_gps.latitude - gps.latitude) > 0.001:
+            raise EXIFWriteError(
+                f"Latitude verification failed: expected {gps.latitude}, got {verify_gps.latitude}"
+            )
+        if abs(verify_gps.longitude - gps.longitude) > 0.001:
+            raise EXIFWriteError(
+                f"Longitude verification failed: expected {gps.longitude}, got {verify_gps.longitude}"
+            )

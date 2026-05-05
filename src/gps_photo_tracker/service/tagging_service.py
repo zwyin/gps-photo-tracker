@@ -155,7 +155,7 @@ class GPSTaggingService:
                 failed += 1
                 # COPY mode: copy even unmatched photos
                 if not is_preview and options and options.mode == ProcessMode.COPY and options.output_dir:
-                    dst = options.output_dir / result.photo.filename
+                    dst = self._copy_destination(result.photo.path, options)
                     self._file_provider.copy_file(result.photo.path, dst)
 
             if on_photo_processed:
@@ -183,9 +183,21 @@ class GPSTaggingService:
     def _write_photo(self, result: MatchResult, options: ProcessOptions) -> None:
         """Write GPS data to photo based on process mode."""
         if options.mode == ProcessMode.COPY and options.output_dir:
-            dst = options.output_dir / result.photo.filename
+            dst = self._copy_destination(result.photo.path, options)
             self._file_provider.copy_file(result.photo.path, dst)
             EXIFWriter.write_gps(dst, dst, result.gps)
         elif options.mode == ProcessMode.OVERWRITE:
             EXIFWriter.write_gps(result.photo.path, result.photo.path, result.gps)
-        # PREVIEW mode: no write
+
+    def _copy_destination(self, src_path: Path, options: ProcessOptions) -> Path:
+        """Compute destination path, preserving directory structure if keep_structure."""
+        if options.keep_structure and options.output_dir:
+            # Preserve relative path from CWD or use filename only
+            try:
+                rel = src_path.relative_to(Path.cwd())
+                    # Keep everything after the first directory component
+                parts = rel.parts[1:] if len(rel.parts) > 1 else rel.parts
+                return options.output_dir / Path(*parts) if parts else options.output_dir / src_path.name
+            except ValueError:
+                return options.output_dir / src_path.name
+        return options.output_dir / src_path.name

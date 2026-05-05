@@ -171,6 +171,16 @@ class MainWindow(QMainWindow):
         self._overwrite_gps_cb.setChecked(False)
         layout.addWidget(self._overwrite_gps_cb)
 
+        # Time offset
+        row5 = QHBoxLayout()
+        row5.addWidget(QLabel("时间偏移:"))
+        self._offset_spin = QSpinBox()
+        self._offset_spin.setRange(-3600, 3600)
+        self._offset_spin.setValue(0)
+        self._offset_spin.setSuffix(" 秒")
+        row5.addWidget(self._offset_spin)
+        layout.addLayout(row5)
+
         return group
 
     def _build_mode_group(self) -> QGroupBox:
@@ -266,6 +276,7 @@ class MainWindow(QMainWindow):
             context_window=self._context_spin.value(),
             max_gps_distance=self._distance_spin.value(),
             match_tail=self._match_tail_cb.isChecked(),
+            time_offset=self._offset_spin.value(),
         )
 
     def _get_process_options(self) -> ProcessOptions:
