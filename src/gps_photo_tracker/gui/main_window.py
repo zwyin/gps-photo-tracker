@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
@@ -243,9 +244,22 @@ class MainWindow(QMainWindow):
         group = QGroupBox("进度")
         layout = QVBoxLayout(group)
 
-        self._progress_bar = QProgressBar()
-        self._progress_bar.setValue(0)
-        layout.addWidget(self._progress_bar)
+        # 4 phase progress bars
+        phase_labels = ["扫描GPS", "扫描照片", "匹配", "写入"]
+        self._phase_bars: list[QProgressBar] = []
+        for label_text in phase_labels:
+            row = QHBoxLayout()
+            lbl = QLabel(f"{label_text}:")
+            lbl.setFixedWidth(60)
+            bar = QProgressBar()
+            bar.setValue(0)
+            bar.setMaximum(100)
+            bar.setFixedHeight(16)
+            bar.setTextVisible(False)
+            row.addWidget(lbl)
+            row.addWidget(bar)
+            layout.addLayout(row)
+            self._phase_bars.append(bar)
 
         self._progress_label = QLabel("就绪")
         layout.addWidget(self._progress_label)
@@ -274,7 +288,20 @@ class MainWindow(QMainWindow):
         self._results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._results_table.doubleClicked.connect(self._on_table_double_click)
-        layout.addWidget(self._results_table)
+        self._results_table.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        layout.addWidget(self._results_table, stretch=1)
+
+        # Thumbnail preview
+        thumb_row = QHBoxLayout()
+        self._thumb_label = QLabel()
+        self._thumb_label.setFixedSize(120, 120)
+        self._thumb_label.setStyleSheet("background: #e8e8e8; border: 1px solid #ccc;")
+        self._thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        thumb_row.addWidget(self._thumb_label)
+        self._thumb_info = QLabel("选中照片查看预览")
+        self._thumb_info.setWordWrap(True)
+        thumb_row.addWidget(self._thumb_info, stretch=1)
+        layout.addLayout(thumb_row)
 
         return widget
 
@@ -329,7 +356,9 @@ class MainWindow(QMainWindow):
 
         self._start_btn.setEnabled(False)
         self._cancel_btn.setEnabled(True)
-        self._progress_bar.setValue(0)
+        for bar in self._phase_bars:
+            bar.setValue(0)
+            bar.setMaximum(100)
         self._progress_label.setText("扫描中...")
         self._results_table.setRowCount(0)
         self._result_details.clear()
@@ -355,12 +384,24 @@ class MainWindow(QMainWindow):
             self._progress_label.setText("正在取消...")
 
     def _on_progress(self, phase: str, current: int, total: int, filename: str, elapsed: float):
-        if total > 0:
-            self._progress_bar.setMaximum(total)
-            self._progress_bar.setValue(current)
+        phase_map = {
+            "scanning_gpx": 0,
+            "scanning_photos": 1,
+            "matching": 2,
+            "writing": 3,
+        }
+        idx = phase_map.get(phase)
+        if idx is not None and idx < len(self._phase_bars):
+            bar = self._phase_bars[idx]
+            if total > 0:
+                bar.setMaximum(total)
+                bar.setValue(current)
         self._progress_label.setText(f"当前: {filename}")
         if elapsed > 0:
-            self._elapsed_label.setText(f"已用: {elapsed:.0f}s")
+            eta = (elapsed / current * (total - current)) if current > 0 and total > current else 0
+            mins, secs = divmod(int(eta), 60)
+            eta_str = f"{mins}m{secs:02d}s" if mins > 0 else f"{secs}s"
+            self._elapsed_label.setText(f"已用: {elapsed:.0f}s  剩余: ~{eta_str}")
 
     def _on_photo_processed(self, result_dict: dict):
         row = self._results_table.rowCount()
@@ -428,6 +469,36 @@ class MainWindow(QMainWindow):
         if 0 <= row < len(self._result_details):
             dialog = DetailDialog(self._result_details[row], self)
             dialog.exec()
+
+    def _on_selection_changed(self):
+        rows = self._results_table.selectionModel().selectedRows()
+        if not rows:
+            self._thumb_label.clear()
+            self._thumb_info.setText("选中照片查看预览")
+            return
+        row = rows[0].row()
+        if 0 <= row < len(self._result_details):
+            detail = self._result_details[row]
+            photo_path = detail.get("path", "")
+            if photo_path:
+                pixmap = QPixmap(photo_path)
+                if not pixmap.isNull():
+                    scaled = pixmap.scaled(
+                        120, 120,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                    self._thumb_label.setPixmap(scaled)
+                else:
+                    self._thumb_label.clear()
+            # Info text
+            lat = detail.get("latitude")
+            lon = detail.get("longitude")
+            method = detail.get("method", "")
+            method_text = {"interpolated": "插值", "nearest": "就近"}.get(method, "—")
+            gps_str = f"{lat:.4f}, {lon:.4f}" if lat and lon else "—"
+            info = f"文件: {detail.get('filename', '—')}\nGPS: {gps_str}\n方式: {method_text}"
+            self._thumb_info.setText(info)
 
     def _open_settings(self):
         dialog = SettingsDialog(self)

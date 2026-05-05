@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTableWidgetItem
 from PySide6.QtCore import Qt
 
 from gps_photo_tracker.gui.main_window import MainWindow
@@ -261,3 +261,87 @@ class TestMainWindowScanDone:
             options=ProcessOptions(mode=ProcessMode.PREVIEW),
         )
         assert hasattr(worker, 'scan_done_signal')
+
+
+# ── 4-phase progress bar tests ─────────────────────────────
+
+class TestPhaseProgress:
+
+    def test_has_four_phase_bars(self, main_window):
+        assert len(main_window._phase_bars) == 4
+
+    def test_all_bars_initially_zero(self, main_window):
+        for bar in main_window._phase_bars:
+            assert bar.value() == 0
+
+    def test_on_progress_updates_matching_bar(self, main_window):
+        main_window._on_progress("matching", 5, 10, "photo.jpg", 3.0)
+        bar = main_window._phase_bars[2]
+        assert bar.value() == 5
+        assert bar.maximum() == 10
+
+    def test_on_progress_updates_scanning_gpx(self, main_window):
+        main_window._on_progress("scanning_gpx", 2, 5, "track.gpx", 1.0)
+        bar = main_window._phase_bars[0]
+        assert bar.value() == 2
+        assert bar.maximum() == 5
+
+    def test_on_progress_shows_eta(self, main_window):
+        main_window._on_progress("matching", 5, 10, "photo.jpg", 10.0)
+        text = main_window._elapsed_label.text()
+        assert "已用" in text
+        assert "剩余" in text
+
+    def test_on_progress_unknown_phase_ignored(self, main_window):
+        main_window._on_progress("unknown", 1, 2, "x", 0)
+        for bar in main_window._phase_bars:
+            assert bar.value() == 0
+
+    def test_on_start_resets_all_bars(self, main_window, monkeypatch):
+        for bar in main_window._phase_bars:
+            bar.setValue(50)
+        main_window._gps_dir_edit.setText("/tmp")
+        main_window._photo_dir_edit.setText("/tmp")
+        monkeypatch.setattr(
+            "PySide6.QtWidgets.QMessageBox.warning",
+            lambda *a, **kw: None,
+        )
+        # Don't actually run worker
+        monkeypatch.setattr(Worker, "start", lambda self: None)
+        main_window._on_start()
+        for bar in main_window._phase_bars:
+            assert bar.value() == 0
+
+
+# ── Thumbnail preview tests ────────────────────────────────
+
+class TestThumbnailPreview:
+
+    def test_thumb_widgets_exist(self, main_window):
+        assert main_window._thumb_label is not None
+        assert main_window._thumb_info is not None
+        assert main_window._thumb_label.width() == 120
+        assert main_window._thumb_label.height() == 120
+
+    def test_thumb_info_default_text(self, main_window):
+        assert "选中" in main_window._thumb_info.text()
+
+    def test_on_selection_changed_no_selection(self, main_window):
+        main_window._on_selection_changed()
+        assert "选中" in main_window._thumb_info.text()
+
+    def test_on_selection_changed_with_data(self, main_window):
+        main_window._result_details.append({
+            "filename": "test.jpg",
+            "path": "/nonexistent/test.jpg",
+            "latitude": 25.0,
+            "longitude": 100.0,
+            "method": "interpolated",
+        })
+        main_window._results_table.insertRow(0)
+        main_window._results_table.setItem(0, 0, QTableWidgetItem("test.jpg"))
+        # Select the row
+        main_window._results_table.selectRow(0)
+        info = main_window._thumb_info.text()
+        assert "test.jpg" in info
+        assert "插值" in info
