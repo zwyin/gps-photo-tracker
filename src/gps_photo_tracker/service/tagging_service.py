@@ -20,6 +20,7 @@ from gps_photo_tracker.core.models import (
     ProgressPhase,
     ProgressUpdate,
 )
+from gps_photo_tracker.logging_.logger import OperationLogger
 from gps_photo_tracker.service.cancel_token import CancellationToken
 
 logger = logging.getLogger("gps_tracker")
@@ -31,9 +32,10 @@ class GPSTaggingService:
     Pure Python, no GUI dependency. All callbacks are optional.
     """
 
-    def __init__(self):
+    def __init__(self, log_dir: Path | None = None):
         self._gpx_parser = GPXParser()
         self._file_provider = FileProvider()
+        self._op_logger = OperationLogger(log_dir) if log_dir else None
 
     def scan_gpx(self, gpx_dir: Path) -> list[GPXSegment]:
         """Scan directory for GPX files and parse them."""
@@ -43,8 +45,10 @@ class GPSTaggingService:
             try:
                 segments = self._gpx_parser.parse_file(gpx_path)
                 all_segments.extend(segments)
-            except Exception:
+            except Exception as e:
                 logger.warning("跳过无法解析的 GPX 文件: %s", gpx_path)
+                if self._op_logger:
+                    self._op_logger.log_error(f"scan_gpx: {gpx_path}", e)
         return all_segments
 
     def scan_photos(self, photo_dir: Path) -> list[PhotoInfo]:
@@ -62,8 +66,10 @@ class GPSTaggingService:
                     has_gps=gps is not None,
                     existing_gps=gps,
                 ))
-            except Exception:
+            except Exception as e:
                 logger.warning("读取照片 EXIF 失败: %s", path)
+                if self._op_logger:
+                    self._op_logger.log_error(f"scan_photos: {path}", e)
                 photos.append(PhotoInfo(
                     path=path,
                     filename=path.name,
@@ -120,6 +126,13 @@ class GPSTaggingService:
         is_preview = options is None or options.mode == ProcessMode.PREVIEW
         is_copy = options and options.mode == ProcessMode.COPY
 
+        if self._op_logger:
+            self._op_logger.log_operation_start({
+                "mode": "preview" if is_preview else (options.mode.value if options else "unknown"),
+                "total_photos": len(photos),
+                "total_segments": len(segments),
+            })
+
         # Filter photos with valid timestamps
         valid_photos = [p for p in photos if p.timestamp is not None]
         match_results: list[MatchResult] = []
@@ -150,11 +163,20 @@ class GPSTaggingService:
 
             if result.success:
                 matched += 1
+                if self._op_logger:
+                    self._op_logger.log_match_success(result)
                 if not is_preview and options and result.gps:
                     if self._should_write(result, options):
                         if result.photo.has_gps:
                             overwritten += 1
+                            if self._op_logger and result.photo.existing_gps:
+                                self._op_logger.log_gps_overwrite(
+                                    result.photo, result.photo.existing_gps, result.gps,
+                                )
                         self._write_photo(result, options, photo_dir)
+                        if self._op_logger:
+                            dst = self._copy_destination(result.photo.path, options, photo_dir) if is_copy else None
+                            self._op_logger.log_write_success(result.photo, result.gps, dest=dst)
                     else:
                         # COPY mode: still copy even if not writing GPS
                         skipped += 1
@@ -163,6 +185,8 @@ class GPSTaggingService:
                             self._file_provider.copy_file(result.photo.path, dst)
             else:
                 failed += 1
+                if self._op_logger:
+                    self._op_logger.log_match_failed(result)
                 # Track reject reasons
                 reason = result.reject_reason or "unknown"
                 reject_groups.setdefault(reason, []).append(result.photo.filename)
@@ -181,6 +205,16 @@ class GPSTaggingService:
             "处理完成: %d/%d 成功, %d 跳过, %d 失败, %.1f%%, %.1fs",
             matched, len(valid_photos), skipped, failed, success_rate * 100, elapsed,
         )
+
+        if self._op_logger:
+            self._op_logger.log_operation_end({
+                "matched": matched,
+                "failed": failed,
+                "skipped": skipped,
+                "overwritten": overwritten,
+                "success_rate": f"{success_rate * 100:.1f}%",
+                "elapsed": f"{elapsed:.1f}s",
+            })
 
         return BatchResult(
             total=len(valid_photos),
