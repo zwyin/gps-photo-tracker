@@ -7,12 +7,15 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
     QCheckBox,
@@ -20,7 +23,6 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QProgressBar,
     QSplitter,
-    QStatusBar,
 )
 
 from gps_photo_tracker.core.models import MatcherConfig, ProcessMode, ProcessOptions
@@ -245,10 +247,14 @@ class MainWindow(QMainWindow):
         self._stats_label.setStyleSheet("padding: 8px; background: #f0f0f0; border-radius: 4px;")
         layout.addWidget(self._stats_label)
 
-        # Results placeholder
-        self._results_label = QLabel("点击「开始处理」查看匹配结果")
-        self._results_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._results_label)
+        # Results table
+        self._results_table = QTableWidget(0, 5)
+        self._results_table.setHorizontalHeaderLabels(["文件名", "GPS(前)", "GPS(后)", "方式", "状态"])
+        self._results_table.horizontalHeader().setStretchLastSection(True)
+        self._results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        layout.addWidget(self._results_table)
 
         return widget
 
@@ -305,6 +311,7 @@ class MainWindow(QMainWindow):
         self._cancel_btn.setEnabled(True)
         self._progress_bar.setValue(0)
         self._progress_label.setText("扫描中...")
+        self._results_table.setRowCount(0)
 
         config = self._get_matcher_config()
         options = self._get_process_options()
@@ -334,8 +341,42 @@ class MainWindow(QMainWindow):
             self._elapsed_label.setText(f"已用: {elapsed:.0f}s")
 
     def _on_photo_processed(self, result_dict: dict):
-        # Will be expanded in step 2 with table
-        pass
+        row = self._results_table.rowCount()
+        self._results_table.insertRow(row)
+
+        filename = result_dict.get("filename", "")
+        self._results_table.setItem(row, 0, QTableWidgetItem(filename))
+
+        # GPS before — check if photo had existing GPS
+        has_existing = result_dict.get("has_gps", False)
+        self._results_table.setItem(row, 1, QTableWidgetItem("有" if has_existing else "无"))
+
+        # GPS after
+        lat = result_dict.get("latitude")
+        lon = result_dict.get("longitude")
+        if lat is not None and lon is not None:
+            gps_text = f"{lat:.4f}, {lon:.4f}"
+        else:
+            gps_text = "—"
+        self._results_table.setItem(row, 2, QTableWidgetItem(gps_text))
+
+        # Method
+        method = result_dict.get("method", "")
+        method_text = {"interpolated": "插值", "nearest": "就近"}.get(method, "")
+        self._results_table.setItem(row, 3, QTableWidgetItem(method_text))
+
+        # Status
+        success = result_dict.get("success", False)
+        if success:
+            status = "成功"
+        else:
+            reason = result_dict.get("reject_reason", "失败")
+            status = {"no_gps_coverage": "无GPS覆盖", "time_diff": "时差过大",
+                      "gps_distance": "距离过大", "tail_isolated": "孤立",
+                      "no_track_points": "无轨迹点"}.get(reason, reason)
+        self._results_table.setItem(row, 4, QTableWidgetItem(status))
+
+        self._results_table.scrollToBottom()
 
     def _on_done(self, result_dict: dict):
         self._start_btn.setEnabled(True)
