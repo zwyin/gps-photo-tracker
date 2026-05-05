@@ -1,5 +1,6 @@
 """GPS tagging service: orchestrates scan → match → write pipeline."""
 
+import logging
 import time
 from pathlib import Path
 from typing import Callable
@@ -21,6 +22,8 @@ from gps_photo_tracker.core.models import (
 )
 from gps_photo_tracker.service.cancel_token import CancellationToken
 
+logger = logging.getLogger("gps_tracker")
+
 
 class GPSTaggingService:
     """Orchestrate GPS tagging: scan → match → write.
@@ -41,7 +44,7 @@ class GPSTaggingService:
                 segments = self._gpx_parser.parse_file(gpx_path)
                 all_segments.extend(segments)
             except Exception:
-                pass  # Skip unparseable files
+                logger.warning("跳过无法解析的 GPX 文件: %s", gpx_path)
         return all_segments
 
     def scan_photos(self, photo_dir: Path) -> list[PhotoInfo]:
@@ -60,6 +63,7 @@ class GPSTaggingService:
                     existing_gps=gps,
                 ))
             except Exception:
+                logger.warning("读取照片 EXIF 失败: %s", path)
                 photos.append(PhotoInfo(
                     path=path,
                     filename=path.name,
@@ -163,6 +167,11 @@ class GPSTaggingService:
 
         elapsed = time.time() - start
         success_rate = matched / len(valid_photos) if valid_photos else 0.0
+
+        logger.info(
+            "处理完成: %d/%d 成功, %d 跳过, %d 失败, %.1f%%, %.1fs",
+            matched, len(valid_photos), skipped, failed, success_rate * 100, elapsed,
+        )
 
         return BatchResult(
             total=len(valid_photos),
