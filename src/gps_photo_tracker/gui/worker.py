@@ -32,6 +32,7 @@ class Worker(QThread):
         config: MatcherConfig,
         options: ProcessOptions,
         log_dir: Path | None = None,
+        excluded_filenames: set[str] | None = None,
     ):
         super().__init__()
         self._gps_dir = gps_dir
@@ -39,6 +40,7 @@ class Worker(QThread):
         self._config = config
         self._options = options
         self._log_dir = log_dir
+        self._excluded_filenames = excluded_filenames or set()
         self._token = CancellationToken()
 
     def cancel(self):
@@ -61,6 +63,10 @@ class Worker(QThread):
         except Exception as e:
             self.done_signal.emit({"error": str(e), "total": 0, "matched": 0})
             return
+
+        # Filter out excluded filenames
+        if self._excluded_filenames:
+            segments = [s for s in segments if s.filename not in self._excluded_filenames]
 
         # Emit segment summaries for GPX browser
         seg_dicts = []

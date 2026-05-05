@@ -46,6 +46,7 @@ class MainWindow(QMainWindow):
         self._result_details: list[dict] = []
         self._cached_segments = []
         self._cached_photos = []
+        self._excluded_filenames: set[str] = set()
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -214,6 +215,10 @@ class MainWindow(QMainWindow):
         self._overwrite_gps_cb.setChecked(False)
         layout.addWidget(self._overwrite_gps_cb)
 
+        self._keep_struct_cb = QCheckBox("保持目录结构")
+        self._keep_struct_cb.setChecked(True)
+        layout.addWidget(self._keep_struct_cb)
+
         # Time offset
         row5 = QHBoxLayout()
         row5.addWidget(QLabel("时间偏移:"))
@@ -344,18 +349,50 @@ class MainWindow(QMainWindow):
         if path:
             self._gps_dir_edit.setCurrentText(path)
             self._add_path_history("gps_dir_history", path, self._gps_dir_edit)
+            self._auto_scan_gpx(Path(path))
 
     def _browse_photo_dir(self):
         path = QFileDialog.getExistingDirectory(self, "选择照片目录")
         if path:
             self._photo_dir_edit.setCurrentText(path)
             self._add_path_history("photo_dir_history", path, self._photo_dir_edit)
+            self._auto_scan_photos(Path(path))
 
     def _browse_output_dir(self):
         path = QFileDialog.getExistingDirectory(self, "选择输出目录")
         if path:
             self._output_dir_edit.setCurrentText(path)
             self._add_path_history("output_dir_history", path, self._output_dir_edit)
+
+    def _auto_scan_gpx(self, gps_dir: Path):
+        from gps_photo_tracker.core.file_provider import FileProvider
+        from gps_photo_tracker.core.gpx_parser import GPXParser
+        provider = FileProvider()
+        parser = GPXParser()
+        gpx_files = provider.list_gpx(gps_dir)
+        total_points = 0
+        for f in gpx_files:
+            try:
+                segs = parser.parse_file(f)
+                total_points += sum(len(s.points) for s in segs)
+            except Exception:
+                pass
+        self._gpx_browser_label.setText(f"GPS: {len(gpx_files)}文件 {total_points}点")
+
+    def _auto_scan_photos(self, photo_dir: Path):
+        from gps_photo_tracker.core.exif_writer import EXIFWriter
+        from gps_photo_tracker.core.file_provider import FileProvider
+        provider = FileProvider()
+        photo_paths = provider.list_photos(photo_dir)
+        has_gps = 0
+        for p in photo_paths:
+            try:
+                gps = EXIFWriter.read_gps(p)
+                if gps:
+                    has_gps += 1
+            except Exception:
+                pass
+        self._photo_browser_label.setText(f"照片: {len(photo_paths)}张 {has_gps}有GPS")
 
     def _add_path_history(self, key: str, path: str, combo: QComboBox):
         settings = QSettings()
@@ -402,6 +439,7 @@ class MainWindow(QMainWindow):
             mode=mode,
             output_dir=output_dir,
             overwrite_gps=self._overwrite_gps_cb.isChecked(),
+            keep_structure=self._keep_struct_cb.isChecked(),
         )
 
     def _on_start(self):
@@ -438,6 +476,7 @@ class MainWindow(QMainWindow):
             config=config,
             options=options,
             log_dir=log_dir,
+            excluded_filenames=self._excluded_filenames,
         )
         self._worker.progress_signal.connect(self._on_progress)
         self._worker.photo_signal.connect(self._on_photo_processed)
@@ -521,9 +560,10 @@ class MainWindow(QMainWindow):
         failed = sum(1 for d in self._result_details if not d.get("success"))
         skipped = sum(1 for d in self._result_details
                       if d.get("has_gps") and not d.get("success"))
+        overwritten = sum(1 for d in self._result_details if d.get("overwritten"))
         rate = matched / total if total > 0 else 0
         self._stats_label.setText(
-            f"总数: {total} | 成功: {matched} | 跳过: {skipped} | 失败: {failed} | 成功率: {rate:.1%}"
+            f"总数: {total} | 成功: {matched} | 跳过: {skipped} | 失败: {failed} | 覆盖: {overwritten} | 成功率: {rate:.1%}"
         )
 
     def _on_done(self, result_dict: dict):
@@ -654,6 +694,7 @@ class MainWindow(QMainWindow):
         if self._cached_segments:
             dialog = GPXBrowserDialog(self._cached_segments, self)
             dialog.exec()
+            self._excluded_filenames = dialog.get_excluded_filenames()
 
     def closeEvent(self, event):
         if self._worker and self._worker.isRunning():
