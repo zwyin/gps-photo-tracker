@@ -1,7 +1,7 @@
 # GPS Photo Tracker 重写设计规格
 
 **日期：** 2026-05-05
-**状态：** 待审阅（二轮审修）
+**状态：** v2（待审阅）
 **技术栈：** Python 3.11+ / PySide6 / piexif / gpxpy / Pillow
 **范围：** Core Features (CF-01~06) + Basic Features (BF-01~05) + EF-01（线性插值）。其他 EF 项后续迭代。
 
@@ -283,16 +283,63 @@ class FileProvider:
 
 ## 5. Service 层设计
 
+### 5.1 接口
+
 ```python
+# 进度回调类型
+class ProgressPhase(Enum):
+    SCANNING_GPX = "scanning_gpx"
+    SCANNING_PHOTOS = "scanning_photos"
+    MATCHING = "matching"
+    WRITING = "writing"
+
+@dataclass
+class ProgressUpdate:
+    phase: ProgressPhase
+    current: int
+    total: int
+    current_file: str      # 当前正在处理的文件名
+    elapsed_seconds: float
+
+# 逐条结果回调：每处理完一张照片就回调一次
+OnPhotoProcessed = Callable[[MatchResult], None]
+# 进度回调：每有进度变化就回调
+OnProgress = Callable[[ProgressUpdate], None]
+
 class GPSTaggingService:
     def scan_gpx(self, gpx_dir: Path) -> list[GPXSegment]
     def scan_photos(self, photo_dir: Path) -> list[PhotoInfo]
     def preview(self, segments: list[GPXSegment], photos: list[PhotoInfo],
-                config: MatcherConfig) -> BatchResult
+                config: MatcherConfig,
+                on_progress: OnProgress | None = None,
+                on_photo_processed: OnPhotoProcessed | None = None,
+                cancel: CancellationToken | None = None) -> BatchResult
     def process(self, segments: list[GPXSegment], photos: list[PhotoInfo],
                 config: MatcherConfig, options: ProcessOptions,
+                on_progress: OnProgress | None = None,
+                on_photo_processed: OnPhotoProcessed | None = None,
                 cancel: CancellationToken | None = None) -> BatchResult
 ```
+
+### 5.2 实时进度机制
+
+Service 层通过两个回调向 GUI 实时推送状态：
+
+**OnProgress（进度回调）：**
+- 在扫描 GPX 文件时：每解析完一个 GPX 文件回调一次
+- 在扫描照片时：每读取完一张照片的 EXIF 回调一次
+- 在匹配阶段：每匹配完一张照片回调一次
+- 在写入阶段：每写入完一张照片回调一次
+- 回调内容包含：当前阶段、进度 (current/total)、当前文件名、已用时间
+
+**OnPhotoProcessed（逐条结果回调）：**
+- 每张照片处理完成后立即回调
+- 回调内容是完整的 `MatchResult`（包含 GPS 坐标、匹配方式、拒绝原因）
+- GUI 可据此实时更新结果表格，无需等待全部完成
+
+**估算剩余时间：** GUI 根据 `elapsed_seconds / current * (total - current)` 计算，在 progress 回调中已有足够数据。
+
+### 5.3 处理逻辑
 
 **三种模式的处理逻辑：**
 
@@ -307,83 +354,134 @@ class GPSTaggingService:
 - **拷贝模式契约：输出数量 == 输入数量。** 每条路径都必须拷贝
 - `keep_structure=True` 时保持源目录的相对路径结构到输出目录
 
-**取消机制：**
+### 5.4 取消机制
+
 - `CancellationToken` 基于 `threading.Event`
 - Service 在每张照片处理后检查 `cancel.is_cancelled`
 - 取消时立即停止，已写入的文件保留（不回滚）
 - GUI 层调用 `worker.cancel()` 触发
 
-**错误策略：**
+### 5.5 错误策略
+
 - 单文件失败：记录 errors.log，跳过，继续处理下一张
 - 系统性失败（输出目录不可写、磁盘满）：抛异常，中止整批
 - GPX 解析失败：跳过该文件，记录 errors.log
 - 永远不在 GUI 层显示原始 Python traceback，Service 层包装为用户友好消息
 
-**可集成性：** `GPSTaggingService` 是纯 Python 类，不依赖 GUI 或 Qt，可被任何代码 import。
+### 5.6 可集成性
+
+`GPSTaggingService` 是纯 Python 类，不依赖 GUI 或 Qt，可被任何代码 import。回调是可选的（传 None 则不推送进度）。
 
 ---
 
 ## 6. GUI 层设计
 
-### 6.1 主窗口布局
+### 6.1 主窗口布局（三区域）
+
+主窗口分为左侧配置区 + 右侧预览/结果区。处理过程中右侧实时更新，用户无需等待全部完成即可看到逐条结果。
 
 ```
-┌──────────────────────────────────────────┐
-│  GPS Photo Tracker                       │
-├──────────────────────────────────────────┤
-│  📂 文件选择                              │
-│  ┌────────────────────────────┐          │
-│  │ GPS目录： [__________] [浏览]         │
-│  │ 照片目录： [__________] [浏览]         │
-│  │ 输出目录： [__________] [浏览]         │
-│  └────────────────────────────┘          │
-│                                          │
-│  ⚙️ 参数配置                              │
-│  ┌────────────────────────────┐          │
-│  │ 孤立窗口 [===●===] 5分     │          │
-│  │ 中间窗口 [====●==] 60分    │          │
-│  │ 上下文窗口 [===●===] 5分   │          │
-│  │ 距离阈值 [===●===] 200m   │          │
-│  │ ☑ 匹配首尾照片              │          │
-│  │ ☐ 覆盖已有GPS               │          │
-│  │ ☑ 保持目录结构              │          │
-│  └────────────────────────────┘          │
-│                                          │
-│  ◉ 预览  ○ 拷贝  ○ 覆盖                  │
-│                                          │
-│  [        🚀 开始处理        ]  [取消]   │
-│                                          │
-│  📊 结果                                  │
-│  ┌────────────────────────────┐          │
-│  │ 总数: 1832  成功: 1523     │          │
-│  │ 跳过: 189   失败: 120      │          │
-│  │ 覆盖: 5     成功率: 83.1%  │          │
-│  │                            │          │
-│  │ [QTableView - 虚拟滚动]     │          │
-│  └────────────────────────────┘          │
-└──────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  GPS Photo Tracker                                    [─][□][×] │
+├──────────────────────────────┬──────────────────────────────────┤
+│  📂 文件选择                 │  📊 匹配结果（实时更新）           │
+│  ┌────────────────────────┐ │  ┌──────────────────────────────┐│
+│  │ GPS: [/path/] [浏览]   │ │  │ 统计卡片                      ││
+│  │ 照片: [/path/] [浏览]  │ │  │ 总数:1832 成功:1523 跳过:189 ││
+│  │ 输出: [/path/] [浏览]  │ │  │ 失败:120 覆盖:5  成功率:83%  ││
+│  │ GPS: 36文件 12000点    │ │  └──────────────────────────────┘│
+│  │ 照片: 1832张 189有GPS  │ │                                  │
+│  └────────────────────────┘ │  📋 照片详情列表 (QTableView)     │
+│                             │  ┌──────────────────────────────┐│
+│  ⚙️ 参数配置                 │  │文件名    │GPS(前)│GPS(后)    ││
+│  ┌────────────────────────┐ │  │          │(匹配) │(结果)     ││
+│  │ 孤立窗口 [===●===] 5分 │ │  ├──────────┼───────┼───────────┤│
+│  │ 中间窗口 [====●==] 60分│ │  │DSC01.JPG │无     │25.05,    ││
+│  │ 上下文窗口 [===●===]5分│ │  │          │       │102.71    ││
+│  │ 距离阈值 [===●===]200m│ │  │方式:插值  │时差:12s│海拔:1811  ││
+│  │ ☑ 匹配首尾 ☐ 覆盖GPS  │ │  ├──────────┼───────┼───────────┤│
+│  │ ☑ 保持目录结构         │ │  │DSC02.JPG │有     │(跳过)     ││
+│  └────────────────────────┘ │  │原GPS: 25.03, 102.68          ││
+│                             │  ├──────────┼───────┼───────────┤│
+│  ◉ 预览 ○ 拷贝 ○ 覆盖      │  │DSC03.JPG │无     │❌ 未匹配  ││
+│                             │  │原因: GPS数据缺失              ││
+│  [🚀 开始处理]  [取消]      │  └──────────────────────────────┘│
+│                             │                                  │
+│  ┌────────────────────────┐ │  🔍 照片预览（选中行时显示）       │
+│  │ 扫描GPS  ██████░░ 80%  │ │  ┌──────────────────────────────┐│
+│  │ 扫描照片 ████░░░░ 45%  │ │  │ [缩略图 200x200]  DSC01.JPG ││
+│  │ 匹配    ██░░░░░░ 20%  │ │  │ 拍摄: 2026-02-17 14:32:15   ││
+│  │ 写入    ░░░░░░░░  0%   │ │  │ GPS(新): 25.052, 102.708    ││
+│  │ 当前: DSC0142.JPG      │ │  │ 海拔: 1811m                  ││
+│  │ 已用: 45s  剩余: ~3min │ │  │ 方式: 线性插值  时差: 12秒   ││
+│  └────────────────────────┘ │  └──────────────────────────────┘│
+└──────────────────────────────┴──────────────────────────────────┘
 ```
 
-**交互模式：** 预览/拷贝/覆盖是单选模式（RadioButton）。点击"开始处理"执行当前选中的模式。预览模式始终是 dry run。用户可先预览确认，再切换到拷贝模式正式处理。
+### 6.2 实时进度面板
 
-### 6.2 交互流程
+左侧下方的进度面板在处理期间显示：
 
-1. 用户选择 GPS 目录 → 立即扫描，显示 GPX 文件数和轨迹点数
-2. 用户选择照片目录 → 立即扫描，显示照片数和已有 GPS 数
+**4 阶段独立进度条：**
+- 扫描 GPS：已解析 GPX 文件数 / 总数
+- 扫描照片：已读取 EXIF 照片数 / 总数
+- 匹配：已匹配照片数 / 总数
+- 写入：已写入照片数 / 待写入数（预览模式跳过此阶段）
+
+**实时信息：**
+- 当前正在处理的文件名（如 `DSC0142.JPG`）
+- 已用时间（秒）
+- 预估剩余时间（根据已处理速度估算）
+- 处理速度（张/分钟）
+
+进度数据来源：Service 层的 `OnProgress` 回调 → Worker 的 Signal → 主线程 Slot。
+
+### 6.3 匹配结果面板（右侧，实时更新）
+
+**统计卡片（顶部）：**
+- 处理过程中实时更新计数（每处理完一张照片 +1）
+- 总数 / 成功 / 跳过 / 失败 / 覆盖 / 成功率
+
+**照片详情列表（QTableView，虚拟滚动）：**
+- 每处理完一张照片就新增一行（通过 `OnPhotoProcessed` 回调）
+- 列：文件名 | GPS(前) | GPS(后/结果) | 匹配方式 | 时间差
+- 成功的照片：显示 GPS 坐标 + 海拔 + 匹配方式（插值/就近）+ 时间差
+- 跳过的照片：显示原 GPS 坐标 + "跳过(已有GPS)"
+- 覆盖的照片：显示旧GPS → 新GPS + "已覆盖"
+- 失败的照片：显示拒绝原因（GPS缺失/时间差过大/距离过大/尾部孤立）
+- 可按任意列排序
+- 可按结果筛选（全部/成功/跳过/失败）
+- 双击行可弹出详情对话框
+
+**照片预览（底部）：**
+- 选中列表中的某一行时，底部显示该照片的缩略图（200x200）+ 详细信息
+- 包含：拍摄时间、GPS 前/后对比、匹配方式、时间差、海拔
+- 缩略图异步加载（不阻塞 UI），使用 QPixmapCache 缓存
+- 方向自动校正（EXIF Orientation）
+- 资源管理：缩略图使用后释放（防范 Bug-UI-03）
+
+### 6.4 交互流程
+
+1. 用户选择 GPS 目录 → 立即扫描，左侧显示 GPX 文件数和轨迹点数
+2. 用户选择照片目录 → 立即扫描，左侧显示照片数和已有 GPS 数
 3. 用户调整参数（有默认值，可选）
-4. 选中"预览"模式 → 点击"开始处理" → Dry run，显示匹配统计
-5. 确认后切换到"拷贝"模式 → 输出目录自动填入 → 点击"开始处理"
-6. 进度条实时更新（4 阶段：扫描GPS → 扫描照片 → 匹配 → 写入）
-7. 处理完成显示结果统计 + 失败照片表格（QTableView，虚拟滚动，无分页）
-8. 用户可随时点击"取消"中止处理
+4. 点击"开始处理"（默认预览模式）→ 右侧开始实时显示匹配结果
+5. 处理过程中：进度条更新、统计卡片更新、结果列表逐行填充
+6. 用户可随时调整筛选/排序查看已出结果，不用等全部完成
+7. 预览确认满意后 → 切换到"拷贝"模式 → 选择输出目录 → 再次"开始处理"
+8. 拷贝过程中同样实时更新（写入阶段进度条也动起来）
+9. 完成后弹窗通知，右侧保留完整结果可浏览
 
-### 6.3 线程模型
+### 6.5 线程模型
 
 ```python
 class ProcessingWorker(QThread):
-    progress = Signal(str, int, int)   # phase_name, current, total
+    progress = Signal(str, int, int, str, float)
+        # phase_name, current, total, current_file, elapsed_seconds
+    photo_processed = Signal(object)
+        # MatchResult — 每张照片处理完立即发射
     finished = Signal(object)          # BatchResult
-    error = Signal(str)                # 用户友好的错误消息
+    error = Signal(str)                # 用户友好错误消息
 
     def __init__(self, service: GPSTaggingService,
                  segments: list[GPXSegment],
@@ -392,19 +490,36 @@ class ProcessingWorker(QThread):
                  options: ProcessOptions):
         super().__init__()
         self._cancel = CancellationToken()
+        self._service = service
         # 所有参数在主线程打包，工作线程只读取这些纯 Python 数据
 
     def run(self):
         try:
-            if options.mode == ProcessMode.PREVIEW:
-                result = service.preview(...)
+            if self._options.mode == ProcessMode.PREVIEW:
+                result = self._service.preview(
+                    ..., on_progress=self._on_progress,
+                    on_photo_processed=self._on_photo,
+                    cancel=self._cancel)
             else:
-                result = service.process(..., cancel=self._cancel)
+                result = self._service.process(
+                    ..., on_progress=self._on_progress,
+                    on_photo_processed=self._on_photo,
+                    cancel=self._cancel)
             self.finished.emit(result)
+        except OperationCancelledError:
+            pass  # 用户主动取消，不弹错误
         except GPSTrackerError as e:
-            self.error.emit(str(e))  # 用户友好消息
+            self.error.emit(str(e))
         except Exception as e:
             self.error.emit(f"处理失败：{e}")
+
+    def _on_progress(self, update: ProgressUpdate):
+        self.progress.emit(
+            update.phase.value, update.current, update.total,
+            update.current_file, update.elapsed_seconds)
+
+    def _on_photo(self, result: MatchResult):
+        self.photo_processed.emit(result)
 
     def cancel(self):
         self._cancel.cancel()
@@ -412,16 +527,18 @@ class ProcessingWorker(QThread):
 
 **硬规则：**
 - 工作线程只接收纯 Python 数据（dataclass、float、str），不碰任何 Qt/UI 对象
-- 进度通过 Signal 发射，主线程 Slot 接收更新 UI
+- 进度和结果通过 Signal 发射，主线程 Slot 接收更新 UI
 - 取消通过 CancellationToken，不通过 Qt 信号反向传递
+- 缩略图加载在主线程用 QTimer 延迟执行，避免阻塞
 - QFileDialog 使用 `DontUseNativeDialog` 作为网络路径的回退方案
 
-### 6.4 配置持久化
+### 6.6 配置持久化
 
 - 参数通过 QSettings 持久化（macOS: plist, Windows: registry, Linux: ini）
 - 首次启动使用 MatcherConfig 默认值
 - 用户修改参数后自动保存
 - 路径历史记录（最近使用的 GPS/照片/输出目录）
+- 窗口位置和大小保存恢复
 
 ---
 
@@ -517,9 +634,12 @@ gps-photo-tracker-claude/
 │   │   └── cancel_token.py      # CancellationToken
 │   ├── gui/                     # GUI 层
 │   │   ├── __init__.py
-│   │   ├── main_window.py       # 主窗口
-│   │   ├── workers.py           # QThread 工作线程
-│   │   └── result_panel.py      # QTableView 结果面板
+│   │   ├── main_window.py       # 主窗口（左右布局）
+│   │   ├── config_panel.py      # 左侧配置面板
+│   │   ├── progress_panel.py    # 实时进度面板（4阶段进度条+ETA）
+│   │   ├── result_table.py      # QTableView 匹配结果表格
+│   │   ├── photo_preview.py     # 照片缩略图预览组件
+│   │   └── workers.py           # QThread 工作线程（含回调适配）
 │   ├── logging_/                # 日志
 │   │   ├── __init__.py
 │   │   └── logger.py
