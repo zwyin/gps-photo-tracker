@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QCheckBox,
+    QComboBox,
     QRadioButton,
     QButtonGroup,
     QProgressBar,
@@ -282,6 +283,16 @@ class MainWindow(QMainWindow):
         self._stats_label.setStyleSheet("padding: 8px; background: #f0f0f0; border-radius: 4px;")
         layout.addWidget(self._stats_label)
 
+        # Result filter
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("筛选:"))
+        self._result_filter = QComboBox()
+        self._result_filter.addItems(["全部", "成功", "失败", "跳过"])
+        self._result_filter.currentIndexChanged.connect(self._apply_result_filter)
+        filter_row.addWidget(self._result_filter)
+        filter_row.addStretch()
+        layout.addLayout(filter_row)
+
         # Results table
         self._results_table = QTableWidget(0, 5)
         self._results_table.setHorizontalHeaderLabels(["文件名", "GPS(前)", "GPS(后)", "方式", "状态"])
@@ -289,6 +300,7 @@ class MainWindow(QMainWindow):
         self._results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._results_table.setSortingEnabled(True)
         self._results_table.doubleClicked.connect(self._on_table_double_click)
         self._results_table.selectionModel().selectionChanged.connect(self._on_selection_changed)
         layout.addWidget(self._results_table, stretch=1)
@@ -444,6 +456,8 @@ class MainWindow(QMainWindow):
 
         self._results_table.scrollToBottom()
         self._result_details.append(result_dict)
+        # Apply current filter
+        self._apply_result_filter()
 
     def _on_done(self, result_dict: dict):
         self._start_btn.setEnabled(True)
@@ -460,6 +474,24 @@ class MainWindow(QMainWindow):
         )
         self._progress_label.setText("完成")
         self.statusBar().showMessage(f"处理完成: {matched}/{total} 成功")
+
+    def _apply_result_filter(self):
+        filter_idx = self._result_filter.currentIndex()
+        for row in range(self._results_table.rowCount()):
+            if row >= len(self._result_details):
+                self._results_table.setRowHidden(row, False)
+                continue
+            detail = self._result_details[row]
+            success = detail.get("success", False)
+            has_gps = detail.get("has_gps", False)
+            if filter_idx == 0:
+                self._results_table.setRowHidden(row, False)
+            elif filter_idx == 1:
+                self._results_table.setRowHidden(row, not success)
+            elif filter_idx == 2:
+                self._results_table.setRowHidden(row, success)
+            elif filter_idx == 3:
+                self._results_table.setRowHidden(row, not (has_gps and not success))
 
     def _on_scan_done(self, segments: list[dict]):
         self._cached_segments = segments
@@ -533,6 +565,11 @@ class MainWindow(QMainWindow):
         self._match_tail_cb.setChecked(bool(s.get("match_tail", True)))
         self._overwrite_gps_cb.setChecked(bool(s.get("overwrite_gps", False)))
 
+        # Restore window geometry
+        geo = QSettings("GPSPhotoTracker", "GPSPhotoTracker").value("window_geometry")
+        if geo:
+            self.restoreGeometry(geo)
+
     def _open_gpx_browser(self):
         if self._cached_segments:
             dialog = GPXBrowserDialog(self._cached_segments, self)
@@ -542,4 +579,5 @@ class MainWindow(QMainWindow):
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(3000)
+        QSettings("GPSPhotoTracker", "GPSPhotoTracker").setValue("window_geometry", self.saveGeometry())
         event.accept()

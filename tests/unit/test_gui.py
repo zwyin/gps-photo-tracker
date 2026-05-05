@@ -443,3 +443,68 @@ class TestMainWindowPhotosScanned:
         )
         assert hasattr(worker, 'photos_scanned_signal')
 
+
+# ── Result filter tests ───────────────────────────────────
+
+class TestResultFilter:
+
+    def test_result_filter_exists(self, main_window):
+        assert main_window._result_filter is not None
+        assert main_window._result_filter.count() == 4
+
+    def test_apply_result_filter_shows_all(self, main_window):
+        main_window._result_details = [
+            {"success": True, "has_gps": False},
+            {"success": False, "has_gps": False},
+            {"success": True, "has_gps": True},
+        ]
+        for _ in range(3):
+            main_window._results_table.insertRow(main_window._results_table.rowCount())
+        main_window._result_filter.setCurrentIndex(0)
+        main_window._apply_result_filter()
+        for row in range(3):
+            assert not main_window._results_table.isRowHidden(row)
+
+    def test_apply_result_filter_success_only(self, main_window):
+        main_window._result_details = [
+            {"success": True, "has_gps": False},
+            {"success": False, "has_gps": False},
+        ]
+        for _ in range(2):
+            main_window._results_table.insertRow(main_window._results_table.rowCount())
+        main_window._result_filter.setCurrentIndex(1)
+        main_window._apply_result_filter()
+        assert not main_window._results_table.isRowHidden(0)
+        assert main_window._results_table.isRowHidden(1)
+
+    def test_apply_result_filter_failed_only(self, main_window):
+        main_window._result_details = [
+            {"success": True, "has_gps": False},
+            {"success": False, "has_gps": False},
+        ]
+        for _ in range(2):
+            main_window._results_table.insertRow(main_window._results_table.rowCount())
+        main_window._result_filter.setCurrentIndex(2)
+        main_window._apply_result_filter()
+        assert main_window._results_table.isRowHidden(0)
+        assert not main_window._results_table.isRowHidden(1)
+
+
+# ── Window geometry persistence tests ─────────────────────
+
+class TestWindowGeometry:
+
+    def test_close_saves_geometry(self, main_window):
+        from PySide6.QtCore import QSettings
+        QSettings("GPSPhotoTracker", "GPSPhotoTracker").remove("window_geometry")
+        main_window.resize(1100, 700)
+        from PySide6.QtGui import QCloseEvent
+        event = QCloseEvent()
+        main_window.closeEvent(event)
+        geo = QSettings("GPSPhotoTracker", "GPSPhotoTracker").value("window_geometry")
+        assert geo is not None
+
+    def test_table_sorting_enabled(self, main_window):
+        assert main_window._results_table.isSortingEnabled()
+
+
