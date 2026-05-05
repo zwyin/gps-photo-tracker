@@ -149,8 +149,8 @@ class PhotoBrowserDialog(QDialog):
             lat = p.get("latitude")
             lon = p.get("longitude")
             alt = p.get("altitude")
-            coord = f"{lat:.4f}, {lon:.4f}" if lat and lon else "—"
-            alt_str = f"{alt:.1f}m" if alt else "—"
+            coord = f"{lat:.4f}, {lon:.4f}" if lat is not None and lon is not None else "—"
+            alt_str = f"{alt:.1f}m" if alt is not None else "—"
             info = (
                 f"文件: {p.get('filename', '—')}\n"
                 f"路径: {photo_path}\n"

@@ -200,6 +200,14 @@ class GPSTaggingService:
                             matched -= 1
                             if self._op_logger:
                                 self._op_logger.log_error(f"write: {result.photo.filename}", e)
+                            # COPY mode: copy even if GPS write fails (output == input)
+                            if is_copy and options.output_dir:
+                                try:
+                                    dst = self._copy_destination(result.photo.path, options, photo_dir)
+                                    self._file_provider.copy_file(result.photo.path, dst)
+                                except Exception as copy_err:
+                                    if self._op_logger:
+                                        self._op_logger.log_error(f"copy_after_write_fail: {result.photo.filename}", copy_err)
                     else:
                         # COPY mode: still copy even if not writing GPS
                         skipped += 1

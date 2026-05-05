@@ -35,7 +35,7 @@ class GPXParser:
 
                     utc_time = pt.time.replace(tzinfo=timezone.utc)
                     timestamp = utc_time.timestamp()
-                    altitude = pt.elevation if pt.elevation is not None else None
+                    altitude = pt.elevation  # None when <ele> tag is missing
 
                     points.append(TrackPoint(
                         timestamp=timestamp,

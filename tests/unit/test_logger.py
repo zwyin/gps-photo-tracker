@@ -72,6 +72,22 @@ class TestOperationLogger:
         assert "OK test.jpg" in content
         assert "interpolated" in content
 
+    def test_log_match_success_nearest_no_interpolation_distance(self, logger, log_dir):
+        """log_match_success should handle nearest match (interpolation_distance=None)."""
+        result = MatchResult(
+            photo=_make_photo(),
+            success=True,
+            gps=GPSInfo(25.953, 102.758, 1810.6),
+            method="nearest",
+            time_diff=5.0,
+            interpolation_distance=None,  # No interpolation distance for nearest
+        )
+        logger.log_match_success(result)
+        content = (log_dir / "matches.log").read_text()
+        assert "OK test.jpg" in content
+        assert "nearest" in content
+        assert "—" in content  # Distance shows as —
+
     def test_log_match_failed(self, logger, log_dir):
         result = _make_result(success=False, reject_reason="no_gps_coverage")
         logger.log_match_failed(result)
@@ -118,3 +134,21 @@ class TestOperationLogger:
         content = (log_dir / "operations.log").read_text()
         assert "END" in content
         assert "95" in content
+
+    def test_cleanup_old_logs(self, logger, log_dir):
+        """cleanup_old_logs should remove log files older than retention_days."""
+        import time
+        logger.log_operation_start({})
+        assert (log_dir / "operations.log").exists()
+        # Set mtime to 60 days ago
+        old_time = time.time() - 60 * 86400
+        import os
+        os.utime(log_dir / "operations.log", (old_time, old_time))
+        logger.cleanup_old_logs(retention_days=30)
+        assert not (log_dir / "operations.log").exists()
+
+    def test_cleanup_keeps_recent_logs(self, logger, log_dir):
+        """cleanup_old_logs should keep recent log files."""
+        logger.log_operation_start({})
+        logger.cleanup_old_logs(retention_days=30)
+        assert (log_dir / "operations.log").exists()

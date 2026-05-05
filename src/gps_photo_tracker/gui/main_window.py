@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSettings
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt, QSettings, QTimer
+from PySide6.QtGui import QPixmap, QPixmapCache
 from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
@@ -47,6 +47,8 @@ class MainWindow(QMainWindow):
         self._cached_segments = []
         self._cached_photos = []
         self._excluded_filenames: set[str] = set()
+        self._pending_thumb_path: str = ""
+        QPixmapCache.setCacheLimit(51200)  # 50 MB cache for thumbnails
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -166,41 +168,41 @@ class MainWindow(QMainWindow):
         group = QGroupBox("参数配置")
         layout = QVBoxLayout(group)
 
-        # Isolated window
+        # Isolated window (spec: 60-3600)
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("孤立窗口:"))
         self._isolated_spin = QSpinBox()
-        self._isolated_spin.setRange(30, 7200)
+        self._isolated_spin.setRange(60, 3600)
         self._isolated_spin.setValue(300)
         self._isolated_spin.setSuffix(" 秒")
         row1.addWidget(self._isolated_spin)
         layout.addLayout(row1)
 
-        # Middle time window
+        # Middle time window (spec: 600-7200)
         row2 = QHBoxLayout()
         row2.addWidget(QLabel("中间窗口:"))
         self._middle_spin = QSpinBox()
-        self._middle_spin.setRange(60, 14400)
+        self._middle_spin.setRange(600, 7200)
         self._middle_spin.setValue(3600)
         self._middle_spin.setSuffix(" 秒")
         row2.addWidget(self._middle_spin)
         layout.addLayout(row2)
 
-        # Context window
+        # Context window (spec: 60-1800)
         row3 = QHBoxLayout()
         row3.addWidget(QLabel("上下文窗口:"))
         self._context_spin = QSpinBox()
-        self._context_spin.setRange(30, 3600)
+        self._context_spin.setRange(60, 1800)
         self._context_spin.setValue(300)
         self._context_spin.setSuffix(" 秒")
         row3.addWidget(self._context_spin)
         layout.addLayout(row3)
 
-        # Max distance
+        # Max distance (spec: 50-1000)
         row4 = QHBoxLayout()
         row4.addWidget(QLabel("距离阈值:"))
         self._distance_spin = QSpinBox()
-        self._distance_spin.setRange(50, 5000)
+        self._distance_spin.setRange(50, 1000)
         self._distance_spin.setValue(200)
         self._distance_spin.setSuffix(" 米")
         row4.addWidget(self._distance_spin)
@@ -558,8 +560,9 @@ class MainWindow(QMainWindow):
         total = len(self._result_details)
         matched = sum(1 for d in self._result_details if d.get("success"))
         failed = sum(1 for d in self._result_details if not d.get("success"))
+        # Skipped: matched but already had GPS (service decided not to write)
         skipped = sum(1 for d in self._result_details
-                      if d.get("has_gps") and not d.get("success"))
+                      if d.get("has_gps") and d.get("success"))
         overwritten = sum(1 for d in self._result_details if d.get("overwritten"))
         rate = matched / total if total > 0 else 0
         self._stats_label.setText(
@@ -604,7 +607,8 @@ class MainWindow(QMainWindow):
             elif filter_idx == 2:
                 self._results_table.setRowHidden(row, success)
             elif filter_idx == 3:
-                self._results_table.setRowHidden(row, not (has_gps and not success))
+                # Skipped: photo had GPS and was matched but not written
+                self._results_table.setRowHidden(row, not (has_gps and success))
 
     def _on_scan_done(self, segments: list[dict]):
         self._cached_segments = segments
@@ -643,25 +647,46 @@ class MainWindow(QMainWindow):
         if 0 <= row < len(self._result_details):
             detail = self._result_details[row]
             photo_path = detail.get("path", "")
+            # Async thumbnail loading with QPixmapCache (spec 6.7)
             if photo_path:
-                pixmap = QPixmap(photo_path)
-                if not pixmap.isNull():
-                    scaled = pixmap.scaled(
-                        200, 200,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
-                    self._thumb_label.setPixmap(scaled)
+                cache_key = f"thumb:{photo_path}"
+                cached = QPixmapCache.find(cache_key)
+                if cached:
+                    self._thumb_label.setPixmap(cached)
                 else:
-                    self._thumb_label.clear()
+                    self._thumb_label.setText("加载中...")
+                    self._pending_thumb_path = photo_path
+                    QTimer.singleShot(10, self._load_thumb_preview)
+            else:
+                self._thumb_label.clear()
             # Info text
             lat = detail.get("latitude")
             lon = detail.get("longitude")
             method = detail.get("method", "")
             method_text = {"interpolated": "插值", "nearest": "就近"}.get(method, "—")
-            gps_str = f"{lat:.4f}, {lon:.4f}" if lat and lon else "—"
+            # Use is not None check to avoid altitude=0 bug (Bug-EXIF-01 pattern)
+            gps_str = f"{lat:.4f}, {lon:.4f}" if lat is not None and lon is not None else "—"
             info = f"文件: {detail.get('filename', '—')}\nGPS: {gps_str}\n方式: {method_text}"
             self._thumb_info.setText(info)
+
+    def _load_thumb_preview(self):
+        """Load thumbnail asynchronously with QPixmapCache."""
+        path = self._pending_thumb_path
+        if not path:
+            return
+        cache_key = f"thumb:{path}"
+        pixmap = QPixmap(path)
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(
+                200, 200,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            QPixmapCache.insert(cache_key, scaled)
+            if path == self._pending_thumb_path:
+                self._thumb_label.setPixmap(scaled)
+        else:
+            self._thumb_label.clear()
 
     def _open_settings(self):
         dialog = SettingsDialog(self)

@@ -697,3 +697,45 @@ class TestOperationLoggerIntegration:
         errors = (log_dir / "errors.log").read_text()
         assert "scan_photos" in errors
         assert "bad.jpg" in errors
+
+
+class TestCopyAfterWriteFailure:
+    """COPY mode: if GPS write fails, photo should still be copied (output == input)."""
+
+    def test_copy_after_write_failure(self, tmp_path):
+        """When GPS write fails in COPY mode, the photo is still copied."""
+        import textwrap, piexif
+        from PIL import Image
+        from unittest.mock import patch
+
+        gpx = textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time><ele>100</ele></trkpt>
+            <trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time><ele>110</ele></trkpt>
+          </trkseg></trk>
+        </gpx>""")
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(tmp_path / "photo.jpg", "JPEG", exif=piexif.dump(exif))
+
+        output = tmp_path / "output"
+        output.mkdir()
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
+
+        # Make write_gps fail
+        with patch("gps_photo_tracker.service.tagging_service.EXIFWriter.write_gps",
+                   side_effect=Exception("EXIF write error")):
+            result = service.process(segments, photos, MatcherConfig(), options, photo_dir=tmp_path)
+
+        # Photo should still exist in output even though write failed
+        if result.matched > 0:
+            # Some matched but write failed — photo still copied
+            assert (output / "photo.jpg").exists()

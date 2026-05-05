@@ -29,7 +29,7 @@ class FileProvider:
     def list_photos(self, directory: Path) -> list[Path]:
         """Recursively find all JPEG files in directory."""
         if not directory.exists():
-            raise FileNotFoundError(f"Directory not found: {directory}")
+            raise FileAccessError(f"Directory not found: {directory}")
         return sorted(
             p for p in directory.rglob("*")
             if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg")
@@ -38,7 +38,7 @@ class FileProvider:
     def list_gpx(self, directory: Path) -> list[Path]:
         """Find all GPX files in directory (non-recursive)."""
         if not directory.exists():
-            raise FileNotFoundError(f"Directory not found: {directory}")
+            raise FileAccessError(f"Directory not found: {directory}")
         return sorted(
             p for p in directory.iterdir()
             if p.is_file() and p.suffix.lower() == ".gpx"
@@ -48,7 +48,7 @@ class FileProvider:
     def copy_file(self, src: Path, dst: Path) -> None:
         """Copy file with 30s timeout, creating destination directory if needed."""
         if not src.exists():
-            raise FileNotFoundError(f"Source file not found: {src}")
+            raise FileAccessError(f"Source file not found: {src}")
         dst.parent.mkdir(parents=True, exist_ok=True)
 
         exc_holder = [None]

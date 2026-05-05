@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gps_photo_tracker.core.file_provider import FileProvider, _COPY_TIMEOUT
-from gps_photo_tracker.core.models import NetworkTimeoutError, PermissionDeniedError
+from gps_photo_tracker.core.models import FileAccessError, NetworkTimeoutError, PermissionDeniedError
 
 
 class TestListPhotos:
@@ -47,7 +47,7 @@ class TestListPhotos:
 
     def test_skips_nonexistent_directory(self):
         provider = FileProvider()
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(FileAccessError):
             provider.list_photos(Path("/nonexistent/dir"))
 
 
@@ -108,7 +108,7 @@ class TestCopyFile:
         dst = tmp_path / "dst.jpg"
 
         provider = FileProvider()
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(FileAccessError):
             provider.copy_file(Path("/nonexistent.jpg"), dst)
 
     def test_preserves_content(self, tmp_path):

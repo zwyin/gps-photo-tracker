@@ -66,16 +66,16 @@ class SettingsDialog(QDialog):
         match_group = QGroupBox("匹配参数")
         match_layout = QFormLayout(match_group)
 
-        self._isolated = self._spin("孤立窗口:", 30, 7200, "isolated_window", " 秒")
+        self._isolated = self._spin("孤立窗口:", 60, 3600, "isolated_window", " 秒")
         match_layout.addRow(self._isolated[0], self._isolated[1])
 
-        self._middle = self._spin("中间窗口:", 60, 14400, "middle_time_window", " 秒")
+        self._middle = self._spin("中间窗口:", 600, 7200, "middle_time_window", " 秒")
         match_layout.addRow(self._middle[0], self._middle[1])
 
-        self._context = self._spin("上下文窗口:", 30, 3600, "context_window", " 秒")
+        self._context = self._spin("上下文窗口:", 60, 1800, "context_window", " 秒")
         match_layout.addRow(self._context[0], self._context[1])
 
-        self._distance = self._spin("距离阈值:", 50, 5000, "max_gps_distance", " 米")
+        self._distance = self._spin("距离阈值:", 50, 1000, "max_gps_distance", " 米")
         match_layout.addRow(self._distance[0], self._distance[1])
 
         self._offset = self._spin("时间偏移:", -3600, 3600, "time_offset", " 秒")
