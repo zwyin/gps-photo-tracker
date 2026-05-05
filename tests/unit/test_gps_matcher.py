@@ -414,3 +414,19 @@ class TestOutputContract:
         assert results[1].success
         assert not results[2].success
         assert results[2].reject_reason == RejectReason.NO_GPS_COVERAGE
+
+
+class TestDivisionByZeroProtection:
+    """Photo between two GPS points with same timestamp should not crash."""
+
+    def test_same_timestamp_points(self, default_matcher):
+        pts = [
+            make_point(25.0, 100.0, utc(8, 0, 0)),
+            make_point(25.001, 100.001, utc(8, 10, 0)),
+        ]
+        seg = make_segment(pts)
+        photo = make_photo("p.jpg", utc(8, 5, 0))
+
+        results = default_matcher.match([photo], [seg])
+        assert len(results) == 1
+        assert results[0].success
