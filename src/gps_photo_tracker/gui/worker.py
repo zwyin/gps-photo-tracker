@@ -66,6 +66,7 @@ class Worker(QThread):
                 "success": result.success,
                 "method": result.method,
                 "reject_reason": result.reject_reason,
+                "has_gps": result.photo.has_gps,
                 "latitude": result.gps.latitude if result.gps else None,
                 "longitude": result.gps.longitude if result.gps else None,
                 "altitude": result.gps.altitude if result.gps else None,
