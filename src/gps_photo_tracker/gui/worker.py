@@ -31,24 +31,33 @@ class Worker(QThread):
         photo_dir: Path,
         config: MatcherConfig,
         options: ProcessOptions,
+        log_dir: Path | None = None,
     ):
         super().__init__()
         self._gps_dir = gps_dir
         self._photo_dir = photo_dir
         self._config = config
         self._options = options
+        self._log_dir = log_dir
         self._token = CancellationToken()
 
     def cancel(self):
         self._token.cancel()
 
     def run(self):
-        service = GPSTaggingService()
+        import time as _time
+        service = GPSTaggingService(log_dir=self._log_dir)
 
-        # Scan
+        # Scan with progress
+        def on_scan_progress(update):
+            self.progress_signal.emit(
+                update.phase.value, update.current, update.total,
+                update.current_file, update.elapsed_seconds,
+            )
+
         try:
-            segments = service.scan_gpx(self._gps_dir)
-            photos = service.scan_photos(self._photo_dir)
+            segments = service.scan_gpx(self._gps_dir, on_progress=on_scan_progress)
+            photos = service.scan_photos(self._photo_dir, on_progress=on_scan_progress)
         except Exception as e:
             self.done_signal.emit({"error": str(e), "total": 0, "matched": 0})
             return
@@ -108,6 +117,13 @@ class Worker(QThread):
             if result.photo.has_gps and result.success and result.gps:
                 gps_old = f"{result.photo.existing_gps.latitude:.4f}, {result.photo.existing_gps.longitude:.4f}" if result.photo.existing_gps else None
                 gps_new = f"{result.gps.latitude:.4f}, {result.gps.longitude:.4f}" if result.gps else None
+            source_gpx = ""
+            if result.success and result.photo.timestamp is not None:
+                ts = result.photo.timestamp + self._config.time_offset
+                for seg in segments:
+                    if seg.start <= ts <= seg.end:
+                        source_gpx = seg.filename
+                        break
             detail = {
                 "filename": result.photo.filename,
                 "path": str(result.photo.path),
@@ -125,6 +141,7 @@ class Worker(QThread):
                 "gps_before": gps_before,
                 "gps_old": gps_old,
                 "gps_new": gps_new,
+                "source_gpx": source_gpx,
             }
             if result.interpolation_prev:
                 detail["interpolation_prev"] = {

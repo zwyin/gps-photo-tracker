@@ -428,11 +428,16 @@ class MainWindow(QMainWindow):
         config = self._get_matcher_config()
         options = self._get_process_options()
 
+        settings = QSettings()
+        log_dir_str = settings.value("log_dir", "")
+        log_dir = Path(log_dir_str) if log_dir_str else None
+
         self._worker = Worker(
             gps_dir=Path(gps_dir),
             photo_dir=Path(photo_dir),
             config=config,
             options=options,
+            log_dir=log_dir,
         )
         self._worker.progress_signal.connect(self._on_progress)
         self._worker.photo_signal.connect(self._on_photo_processed)

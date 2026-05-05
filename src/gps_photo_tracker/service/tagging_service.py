@@ -37,11 +37,12 @@ class GPSTaggingService:
         self._file_provider = FileProvider()
         self._op_logger = OperationLogger(log_dir) if log_dir else None
 
-    def scan_gpx(self, gpx_dir: Path) -> list[GPXSegment]:
+    def scan_gpx(self, gpx_dir: Path, on_progress: Callable | None = None) -> list[GPXSegment]:
         """Scan directory for GPX files and parse them."""
+        start = time.time()
         gpx_files = self._file_provider.list_gpx(gpx_dir)
         all_segments: list[GPXSegment] = []
-        for gpx_path in gpx_files:
+        for i, gpx_path in enumerate(gpx_files):
             try:
                 segments = self._gpx_parser.parse_file(gpx_path)
                 all_segments.extend(segments)
@@ -49,13 +50,22 @@ class GPSTaggingService:
                 logger.warning("跳过无法解析的 GPX 文件: %s", gpx_path)
                 if self._op_logger:
                     self._op_logger.log_error(f"scan_gpx: {gpx_path}", e)
+            if on_progress:
+                on_progress(ProgressUpdate(
+                    phase=ProgressPhase.SCANNING_GPX,
+                    current=i + 1,
+                    total=len(gpx_files),
+                    current_file=gpx_path.name,
+                    elapsed_seconds=time.time() - start,
+                ))
         return all_segments
 
-    def scan_photos(self, photo_dir: Path) -> list[PhotoInfo]:
+    def scan_photos(self, photo_dir: Path, on_progress: Callable | None = None) -> list[PhotoInfo]:
         """Scan directory for JPEG files and read their timestamps."""
+        start = time.time()
         photo_paths = self._file_provider.list_photos(photo_dir)
         photos: list[PhotoInfo] = []
-        for path in photo_paths:
+        for i, path in enumerate(photo_paths):
             try:
                 ts = EXIFWriter.read_datetime(path)
                 gps = EXIFWriter.read_gps(path)
@@ -75,6 +85,14 @@ class GPSTaggingService:
                     filename=path.name,
                     timestamp=None,
                     has_gps=False,
+                ))
+            if on_progress:
+                on_progress(ProgressUpdate(
+                    phase=ProgressPhase.SCANNING_PHOTOS,
+                    current=i + 1,
+                    total=len(photo_paths),
+                    current_file=path.name,
+                    elapsed_seconds=time.time() - start,
                 ))
         return photos
 
@@ -173,10 +191,15 @@ class GPSTaggingService:
                                 self._op_logger.log_gps_overwrite(
                                     result.photo, result.photo.existing_gps, result.gps,
                                 )
-                        self._write_photo(result, options, photo_dir)
-                        if self._op_logger:
-                            dst = self._copy_destination(result.photo.path, options, photo_dir) if is_copy else None
-                            self._op_logger.log_write_success(result.photo, result.gps, dest=dst)
+                        try:
+                            dst = self._write_photo(result, options, photo_dir)
+                            if self._op_logger:
+                                self._op_logger.log_write_success(result.photo, result.gps, dest=dst)
+                        except Exception as e:
+                            failed += 1
+                            matched -= 1
+                            if self._op_logger:
+                                self._op_logger.log_error(f"write: {result.photo.filename}", e)
                     else:
                         # COPY mode: still copy even if not writing GPS
                         skipped += 1
@@ -233,14 +256,16 @@ class GPSTaggingService:
             return False
         return True
 
-    def _write_photo(self, result: MatchResult, options: ProcessOptions, photo_dir: Path | None = None) -> None:
-        """Write GPS data to photo based on process mode."""
+    def _write_photo(self, result: MatchResult, options: ProcessOptions, photo_dir: Path | None = None) -> Path | None:
+        """Write GPS data to photo based on process mode. Returns destination path for COPY, None otherwise."""
         if options.mode == ProcessMode.COPY and options.output_dir:
             dst = self._copy_destination(result.photo.path, options, photo_dir)
             self._file_provider.copy_file(result.photo.path, dst)
             EXIFWriter.write_gps(dst, dst, result.gps)
+            return dst
         elif options.mode == ProcessMode.OVERWRITE:
             EXIFWriter.write_gps(result.photo.path, result.photo.path, result.gps)
+        return None
 
     def _copy_destination(self, src_path: Path, options: ProcessOptions, photo_dir: Path | None = None) -> Path:
         """Compute destination path, preserving directory structure if keep_structure."""
