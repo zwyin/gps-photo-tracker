@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QTableWidgetItem, QGroupBox
+from PySide6.QtWidgets import QApplication, QTableWidgetItem, QGroupBox, QTableWidget
 from PySide6.QtCore import Qt, QSettings
 
 from gps_photo_tracker.gui.main_window import MainWindow
@@ -1001,3 +1001,47 @@ class TestSettingsDialogEnhanced:
         dlg._save()
         assert saved.get("log_dir") == "/test/logs"
         assert saved.get("log_retention_days") == 60
+
+
+class TestGPXBrowserEnhanced:
+    """GPX browser: file grouping, time coverage overview."""
+
+    def test_file_grouping(self, qapp):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+        segments = [
+            {"filename": "a.gpx", "point_count": 100, "start": 1700000000.0, "end": 1700003600.0},
+            {"filename": "a.gpx", "point_count": 50, "start": 1700007200.0, "end": 1700010000.0},
+            {"filename": "b.gpx", "point_count": 200, "start": 1700100000.0, "end": 1700105000.0},
+        ]
+        dlg = GPXBrowserDialog(segments)
+        assert dlg is not None
+        # Should have 3 rows in the table
+        table = dlg.findChild(QTableWidget)
+        assert table is not None
+        assert table.rowCount() == 3
+
+    def test_file_summary_group(self, qapp):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+        segments = [
+            {"filename": "track.gpx", "point_count": 300, "start": 1700000000.0, "end": 1700010000.0},
+        ]
+        dlg = GPXBrowserDialog(segments)
+        groups = dlg.findChildren(QGroupBox)
+        titles = [g.title() for g in groups]
+        assert "文件统计" in titles
+
+    def test_time_coverage_overview(self, qapp):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+        segments = [
+            {"filename": "a.gpx", "point_count": 100, "start": 1700000000.0, "end": 1700003600.0},
+            {"filename": "b.gpx", "point_count": 50, "start": 1700100000.0, "end": 1700105000.0},
+        ]
+        dlg = GPXBrowserDialog(segments)
+        groups = dlg.findChildren(QGroupBox)
+        titles = [g.title() for g in groups]
+        assert "时间覆盖总览" in titles
+
+    def test_empty_segments(self, qapp):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+        dlg = GPXBrowserDialog([])
+        assert dlg is not None
