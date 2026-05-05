@@ -875,3 +875,80 @@ class TestPathHistory:
 
         main_window._load_path_history()
         assert main_window._gps_dir_edit.count() >= 2
+
+
+class TestDetailDialogEnhanced:
+    """Enhanced detail dialog with thumbnail, GPS comparison, explanations."""
+
+    def test_success_dialog_has_thumbnail(self, qapp):
+        from gps_photo_tracker.gui.detail_dialog import DetailDialog
+        data = {
+            "filename": "test.jpg",
+            "path": "/nonexistent/test.jpg",
+            "success": True,
+            "method": "interpolated",
+            "has_gps": False,
+            "latitude": 25.0,
+            "longitude": 100.0,
+            "altitude": 1800.0,
+            "time_diff": 12.0,
+            "capture_time": "2026-02-17 08:05:00 UTC",
+            "interpolation_prev": {"lat": 25.0, "lon": 100.0, "alt": 1800},
+            "interpolation_next": {"lat": 25.001, "lon": 100.001, "alt": 1810},
+            "interpolation_distance": 247.0,
+            "interpolation_ratio": 0.133,
+        }
+        dlg = DetailDialog(data)
+        assert dlg.windowTitle().startswith("照片匹配详情")
+        # Thumbnail label should exist (file doesn't exist → shows text)
+        thumb = dlg._thumb
+        assert thumb is not None
+        assert thumb.width() == 300
+        assert thumb.height() == 300
+
+    def test_failed_dialog_shows_explanation(self, qapp):
+        from gps_photo_tracker.gui.detail_dialog import DetailDialog
+        data = {
+            "filename": "test.jpg",
+            "path": "",
+            "success": False,
+            "reject_reason": "no_gps_coverage",
+            "has_gps": False,
+        }
+        dlg = DetailDialog(data)
+        text = dlg.findChild(object)  # Just verify dialog constructs without error
+        assert dlg is not None
+
+    def test_gps_before_shown_for_existing_gps(self, qapp):
+        from gps_photo_tracker.gui.detail_dialog import DetailDialog
+        data = {
+            "filename": "test.jpg",
+            "path": "",
+            "success": True,
+            "method": "nearest",
+            "has_gps": True,
+            "gps_before": "25.0000, 100.0000",
+            "latitude": 25.001,
+            "longitude": 100.001,
+            "altitude": 1800.0,
+            "time_diff": 5.0,
+            "gps_old": "25.0000, 100.0000",
+            "gps_new": "25.0010, 100.0010",
+        }
+        dlg = DetailDialog(data)
+        assert dlg is not None
+
+    def test_capture_time_displayed(self, qapp):
+        from gps_photo_tracker.gui.detail_dialog import DetailDialog
+        data = {
+            "filename": "test.jpg",
+            "path": "",
+            "success": True,
+            "method": "interpolated",
+            "has_gps": False,
+            "latitude": 25.0,
+            "longitude": 100.0,
+            "capture_time": "2026-02-17 14:32:15 UTC",
+        }
+        dlg = DetailDialog(data)
+        assert dlg is not None

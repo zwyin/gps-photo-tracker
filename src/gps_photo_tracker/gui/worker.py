@@ -91,6 +91,23 @@ class Worker(QThread):
             )
 
         def on_photo(result):
+            from datetime import datetime, timezone
+            capture_time = ""
+            if result.photo.timestamp is not None:
+                try:
+                    dt = datetime.fromtimestamp(result.photo.timestamp, tz=timezone.utc)
+                    capture_time = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                except (OSError, ValueError):
+                    pass
+            gps_before = ""
+            if result.photo.existing_gps:
+                g = result.photo.existing_gps
+                gps_before = f"{g.latitude:.4f}, {g.longitude:.4f}"
+            gps_old = None
+            gps_new = None
+            if result.photo.has_gps and result.success and result.gps:
+                gps_old = f"{result.photo.existing_gps.latitude:.4f}, {result.photo.existing_gps.longitude:.4f}" if result.photo.existing_gps else None
+                gps_new = f"{result.gps.latitude:.4f}, {result.gps.longitude:.4f}" if result.gps else None
             detail = {
                 "filename": result.photo.filename,
                 "path": str(result.photo.path),
@@ -104,6 +121,10 @@ class Worker(QThread):
                 "time_diff": result.time_diff,
                 "interpolation_distance": result.interpolation_distance,
                 "interpolation_ratio": result.interpolation_ratio,
+                "capture_time": capture_time,
+                "gps_before": gps_before,
+                "gps_old": gps_old,
+                "gps_new": gps_new,
             }
             if result.interpolation_prev:
                 detail["interpolation_prev"] = {
