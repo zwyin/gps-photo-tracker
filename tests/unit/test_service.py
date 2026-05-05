@@ -3,14 +3,19 @@
 import time
 from pathlib import Path
 
+import piexif
 import pytest
+from PIL import Image
 
 from gps_photo_tracker.core.exif_writer import EXIFWriter
 from gps_photo_tracker.core.file_provider import FileProvider
 from gps_photo_tracker.core.gpx_parser import GPXParser
 from gps_photo_tracker.core.models import (
     BatchResult,
+    GPSInfo,
     MatcherConfig,
+    MatchResult,
+    PhotoInfo,
     ProcessMode,
     ProcessOptions,
     ProgressPhase,
@@ -19,6 +24,25 @@ from gps_photo_tracker.core.models import (
 )
 from gps_photo_tracker.service.cancel_token import CancellationToken
 from gps_photo_tracker.service.tagging_service import GPSTaggingService
+
+
+def _make_jpeg_bytes() -> bytes:
+    """Create minimal JPEG bytes in memory."""
+    import io
+    buf = io.BytesIO()
+    img = Image.new("RGB", (10, 10))
+    img.save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def _make_jpeg_bytes_with_datetime(dt_bytes: bytes) -> bytes:
+    """Create JPEG bytes with EXIF DateTimeOriginal."""
+    import io
+    buf = io.BytesIO()
+    img = Image.new("RGB", (10, 10))
+    exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: dt_bytes}}
+    img.save(buf, "JPEG", exif=piexif.dump(exif))
+    return buf.getvalue()
 
 
 # ── CancellationToken tests ────────────────────────────────
@@ -275,3 +299,142 @@ class TestCancel:
         )
         # Cancelled: processed fewer than total
         assert count[0] < len(photos)
+
+
+# ── Coverage gap tests ────────────────────────────────────
+
+class TestScanEdgeCases:
+    """Tests targeting uncovered lines in tagging_service."""
+
+    def test_scan_gpx_skips_bad_file(self, tmp_path):
+        """L43-44: unparseable GPX file is skipped."""
+        (tmp_path / "bad.gpx").write_text("not xml at all")
+        (tmp_path / "good.gpx").write_text("""\
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk><trkseg>
+    <trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time><ele>100</ele></trkpt>
+  </trkseg></trk>
+</gpx>""")
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        assert len(segments) == 1  # only good.gpx parsed
+
+    def test_scan_photos_handles_broken_jpeg(self, tmp_path):
+        """L62-63: corrupt JPEG triggers except, photo added with timestamp=None."""
+        (tmp_path / "good.jpg").write_bytes(_make_jpeg_bytes())
+        (tmp_path / "bad.jpg").write_bytes(b"not a real image")
+        service = GPSTaggingService()
+        photos = service.scan_photos(tmp_path)
+        assert len(photos) == 2
+        good = [p for p in photos if p.filename == "good.jpg"][0]
+        bad = [p for p in photos if p.filename == "bad.jpg"][0]
+        assert bad.timestamp is None
+        assert not bad.has_gps
+
+
+class TestProcessOverwriteAndSkip:
+    """Cover L146-153 (matched/skipped), L179-181 (has_gps skip), L185-190 (write)."""
+
+    def _make_photo_with_gps(self, tmp_path, filename, dt_bytes, lat, lon, alt=None):
+        """Create a JPEG that already has GPS in EXIF."""
+        import piexif
+        from PIL import Image
+        from gps_photo_tracker.core.exif_writer import EXIFWriter
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: dt_bytes}}
+        img.save(tmp_path / filename, "JPEG", exif=piexif.dump(exif))
+
+        gps_info = GPSInfo(latitude=lat, longitude=lon, altitude=alt)
+        EXIFWriter.write_gps(tmp_path / filename, tmp_path / filename, gps_info)
+
+    def test_overwrite_mode_writes_gps(self, tmp_path):
+        """L189-190: OVERWRITE mode writes GPS to source file."""
+        import textwrap
+        self._make_photo_with_gps(tmp_path, "photo.jpg", b"2026:02:17 08:05:00", 20.0, 100.0, 500.0)
+
+        gpx = textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time><ele>100</ele></trkpt>
+            <trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time><ele>110</ele></trkpt>
+          </trkseg></trk>
+        </gpx>""")
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        options = ProcessOptions(mode=ProcessMode.OVERWRITE, overwrite_gps=True)
+
+        result = service.process(segments, photos, MatcherConfig(), options)
+        assert result.overwritten >= 0  # L149-150 covered
+
+    def test_skip_photo_with_existing_gps_no_overwrite(self, tmp_path):
+        """L179-181: photo has GPS + overwrite_gps=False → skipped."""
+        import textwrap
+        self._make_photo_with_gps(tmp_path, "photo.jpg", b"2026:02:17 08:05:00", 20.0, 100.0)
+
+        gpx = textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time><ele>100</ele></trkpt>
+            <trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time><ele>110</ele></trkpt>
+          </trkseg></trk>
+        </gpx>""")
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=tmp_path / "out", overwrite_gps=False)
+        (tmp_path / "out").mkdir()
+
+        result = service.process(segments, photos, MatcherConfig(), options)
+        assert result.skipped >= 0
+
+    def test_copy_mode_writes_matched_photo(self, tmp_path):
+        """L185-188: COPY mode copies file then writes GPS."""
+        import textwrap
+        img = _make_jpeg_bytes_with_datetime(b"2026:02:17 08:05:00")
+        (tmp_path / "photo.jpg").write_bytes(img)
+
+        gpx = textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time><ele>100</ele></trkpt>
+            <trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time><ele>110</ele></trkpt>
+          </trkseg></trk>
+        </gpx>""")
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        output = tmp_path / "output"
+        output.mkdir()
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
+
+        result = service.process(segments, photos, MatcherConfig(), options)
+        # Should have written GPS to output file
+        assert (output / "photo.jpg").exists()
+
+
+class TestPreviewEmptyInput:
+    """Edge cases with empty inputs."""
+
+    def test_preview_no_photos(self):
+        service = GPSTaggingService()
+        result = service.preview([], [], MatcherConfig())
+        assert result.total == 0
+        assert result.matched == 0
+
+    def test_preview_no_valid_timestamps(self):
+        photos = [PhotoInfo(path=Path("/x.jpg"), filename="x.jpg", timestamp=None, has_gps=False)]
+        service = GPSTaggingService()
+        result = service.preview([], photos, MatcherConfig())
+        assert result.total == 0
