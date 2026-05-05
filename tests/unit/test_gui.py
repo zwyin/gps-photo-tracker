@@ -74,8 +74,8 @@ class TestMainWindow:
 
     def test_start_without_dirs_shows_warning(self, main_window, monkeypatch):
         """Starting without GPS/photo dirs should show warning."""
-        main_window._gps_dir_edit.setText("")
-        main_window._photo_dir_edit.setText("")
+        main_window._gps_dir_edit.setCurrentText("")
+        main_window._photo_dir_edit.setCurrentText("")
 
         warned = []
         monkeypatch.setattr(
@@ -366,8 +366,8 @@ class TestPhaseProgress:
     def test_on_start_resets_all_bars(self, main_window, monkeypatch):
         for bar in main_window._phase_bars:
             bar.setValue(50)
-        main_window._gps_dir_edit.setText("/tmp")
-        main_window._photo_dir_edit.setText("/tmp")
+        main_window._gps_dir_edit.setCurrentText("/tmp")
+        main_window._photo_dir_edit.setCurrentText("/tmp")
         monkeypatch.setattr(
             "PySide6.QtWidgets.QMessageBox.warning",
             lambda *a, **kw: None,
@@ -813,3 +813,65 @@ class TestSettingsModePersistence:
         monkeypatch.setattr(mw_module, "load_settings", mock_load)
         main_window._apply_saved_settings()
         assert main_window._preview_rb.isChecked()
+
+
+class TestPathHistory:
+    """Path history for GPS/photo/output directories (spec 6.10)."""
+
+    def test_dir_widgets_are_combobox(self, main_window):
+        """Directory inputs are QComboBox (not QLineEdit)."""
+        from PySide6.QtWidgets import QComboBox
+        assert isinstance(main_window._gps_dir_edit, QComboBox)
+        assert isinstance(main_window._photo_dir_edit, QComboBox)
+        assert isinstance(main_window._output_dir_edit, QComboBox)
+
+    def test_dir_combos_are_editable(self, main_window):
+        """ComboBoxes are editable (user can type path)."""
+        assert main_window._gps_dir_edit.isEditable()
+        assert main_window._photo_dir_edit.isEditable()
+        assert main_window._output_dir_edit.isEditable()
+
+    def test_add_path_history(self, main_window):
+        """_add_path_history adds path to combo and QSettings."""
+        from PySide6.QtCore import QSettings
+        settings = QSettings()
+        settings.remove("gps_dir_history")
+
+        main_window._add_path_history("gps_dir_history", "/test/path1", main_window._gps_dir_edit)
+        assert main_window._gps_dir_edit.currentText() == "/test/path1"
+        assert main_window._gps_dir_edit.count() == 1
+
+        main_window._add_path_history("gps_dir_history", "/test/path2", main_window._gps_dir_edit)
+        assert main_window._gps_dir_edit.count() == 2
+        assert main_window._gps_dir_edit.currentText() == "/test/path2"
+
+    def test_add_path_history_dedupes(self, main_window):
+        """Duplicate path is moved to top, not added again."""
+        from PySide6.QtCore import QSettings
+        settings = QSettings()
+        settings.remove("photo_dir_history")
+
+        main_window._add_path_history("photo_dir_history", "/a", main_window._photo_dir_edit)
+        main_window._add_path_history("photo_dir_history", "/b", main_window._photo_dir_edit)
+        main_window._add_path_history("photo_dir_history", "/a", main_window._photo_dir_edit)
+        assert main_window._photo_dir_edit.count() == 2
+        assert main_window._photo_dir_edit.currentText() == "/a"
+
+    def test_add_path_history_limits_10(self, main_window):
+        """History is limited to 10 entries."""
+        from PySide6.QtCore import QSettings
+        settings = QSettings()
+        settings.remove("output_dir_history")
+
+        for i in range(15):
+            main_window._add_path_history("output_dir_history", f"/path/{i}", main_window._output_dir_edit)
+        assert main_window._output_dir_edit.count() == 10
+
+    def test_load_path_history(self, main_window):
+        """_load_path_history populates combo from QSettings."""
+        from PySide6.QtCore import QSettings
+        settings = QSettings()
+        settings.setValue("gps_dir_history", ["/saved1", "/saved2"])
+
+        main_window._load_path_history()
+        assert main_window._gps_dir_edit.count() >= 2
