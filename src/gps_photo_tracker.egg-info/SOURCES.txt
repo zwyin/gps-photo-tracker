@@ -1,0 +1,15 @@
+pyproject.toml
+src/gps_photo_tracker/__init__.py
+src/gps_photo_tracker/__main__.py
+src/gps_photo_tracker.egg-info/PKG-INFO
+src/gps_photo_tracker.egg-info/SOURCES.txt
+src/gps_photo_tracker.egg-info/dependency_links.txt
+src/gps_photo_tracker.egg-info/entry_points.txt
+src/gps_photo_tracker.egg-info/requires.txt
+src/gps_photo_tracker.egg-info/top_level.txt
+src/gps_photo_tracker/core/__init__.py
+src/gps_photo_tracker/core/gpx_parser.py
+src/gps_photo_tracker/core/models.py
+src/gps_photo_tracker/gui/__init__.py
+src/gps_photo_tracker/logging_/__init__.py
+src/gps_photo_tracker/service/__init__.py
