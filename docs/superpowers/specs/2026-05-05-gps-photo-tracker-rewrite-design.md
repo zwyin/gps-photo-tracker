@@ -1,7 +1,7 @@
 # GPS Photo Tracker 重写设计规格
 
 **日期：** 2026-05-05
-**状态：** v2（待审阅）
+**状态：** v3（待审阅）
 **技术栈：** Python 3.11+ / PySide6 / piexif / gpxpy / Pillow
 **范围：** Core Features (CF-01~06) + Basic Features (BF-01~05) + EF-01（线性插值）。其他 EF 项后续迭代。
 
@@ -240,15 +240,66 @@ class EXIFWriter:
     def write_gps(src: Path, dst: Path, gps: GPSInfo) -> None  # 失败抛 EXIFWriteError
 ```
 
-**写入 GPS：**
-- GPS Version ID: (2, 3, 0, 0) — EXIF 2.3 标准
-- 经纬度：十进制 → DMS 格式
-- 海拔：(int(abs(altitude) * 100), 100) — 0.01m 精度
-- 负海拔：GPSAltitudeRef = 1
-- altitude = 0 正确写入（用 `is not None` 判断，不用 truthy）
-- altitude = None 时跳过海拔 tag（不写入）
-- 保留原始 EXIF 其他字段
+**写入 GPS（精确字段规格，基于 DSC02258.JPG 实测数据验证）：**
+
+GPS IFD 包含 7 个 tag，写入后通过 `piexif.load()` 验证或 macOS `mdls` 验证：
+
+| Tag | IFD 字段名 | 值格式 | 示例（DSC02258.JPG, 25.953°N 102.758°E, 1810.6m） |
+|-----|-----------|--------|-----|
+| 0 | GPSVersionID | `(2, 3, 0, 0)` — EXIF 2.3 标准 | `(2, 3, 0, 0)` |
+| 1 | GPSLatitudeRef | `b'N'` 或 `b'S'` | `b'N'` |
+| 2 | GPSLatitude | `((度, 1), (分, 1), (秒×10000, 10000))` — 有理数 DMS | `((24, 1), (57, 1), (11601, 2500))` |
+| 3 | GPSLongitudeRef | `b'E'` 或 `b'W'` | `b'E'` |
+| 4 | GPSLongitude | 同 GPSLatitude 格式 | `((102, 1), (45, 1), (27603, 2500))` |
+| 5 | GPSAltitudeRef | `0`（海平面以上）或 `1`（海平面以下） | `0` |
+| 6 | GPSAltitude | `(int(abs(alt) * 100), 100)` — 0.01m 精度有理数 | `(181060, 100)` = 1810.6m |
+
+**经纬度转换公式（十进制 → DMS 有理数）：**
+```python
+def _to_dms_rational(decimal: float) -> tuple:
+    """十进制度 → EXIF GPS DMS 有理数格式"""
+    degrees = int(decimal)
+    minutes_decimal = (decimal - degrees) * 60
+    minutes = int(minutes_decimal)
+    seconds = (minutes_decimal - minutes) * 60
+    return ((degrees, 1), (minutes, 1), (int(seconds * 10000), 10000))
+
+# 示例: 25.953° → ((24, 1), (57, 1), (46800, 10000))
+# 验证: 24 + 57/60 + 46800/(10000*3600) = 24 + 0.95 + 0.0013 ≈ 25.9513°
+```
+
+**海拔转换：**
+```python
+def _to_altitude_rational(altitude: float) -> tuple:
+    """海拔 → EXIF GPS 有理数格式，0.01m 精度"""
+    return (int(abs(altitude) * 100), 100)
+
+# 示例: 1810.6m → (181060, 100)
+# altitude = 0 → (0, 100)  ← 必须写入，不能用 truthy 跳过
+# altitude = -50.3 → GPSAltitudeRef = 1, (5030, 100)
+```
+
+**写入规则：**
+- GPS Version ID 固定 `(2, 3, 0, 0)`，不依赖记忆，参考 EXIF 2.3 规范
+- altitude = 0 时正确写入 `(0, 100)`（用 `is not None` 判断，防范 Bug-EXIF-01）
+- altitude = None 时跳过 Tag 5 和 Tag 6（不写入海拔相关 tag）
+- 负海拔：GPSAltitudeRef = 1，GPSAltitude 取绝对值
+- 保留原始 EXIF 其他所有字段（相机信息、拍摄时间等）
 - src == dst 时原地写入（覆盖模式）
+- 写入后验证：立即用 `piexif.load()` 读回，比对经纬度误差 < 0.001 度
+
+**验证方法：**
+```python
+# macOS 命令行验证
+mdls -name kMDItemGPSStatus DSC02258.JPG
+# 期望: kMDItemGPSStatus = "GPS Present"
+
+# Python 验证
+exif_dict = piexif.load(dst_path)
+gps_ifd = exif_dict.get("GPS", {})
+assert gps_ifd.get(piexif.GPSIFD.GPSVersionID) == (2, 3, 0, 0)
+assert gps_ifd.get(piexif.GPSIFD.GPSAltitude) == expected_rational
+```
 
 **读取：**
 - 拍摄时间：DateTimeOriginal → DateTimeDigitized → DateTime，优先级递减
@@ -436,7 +487,172 @@ Service 层通过两个回调向 GUI 实时推送状态：
 
 进度数据来源：Service 层的 `OnProgress` 回调 → Worker 的 Signal → 主线程 Slot。
 
-### 6.3 匹配结果面板（右侧，实时更新）
+### 6.3 GPX 轨迹浏览对话框
+
+从主窗口左侧"GPS: 36文件 12000点"处可点击展开，查看 GPX 轨迹详情。
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  GPX 轨迹详情                                     [×]   │
+├──────────────────────────────────────────────────────────┤
+│  📁 GPX 文件列表                                         │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │ ☑ 20260207登山.gpx    2026-02-07  328点  08:00-17:30│  │
+│  │ ☑ 20260208徒步.gpx    2026-02-08  156点  09:00-14:20│  │
+│  │ ☑ 20260209骑行.gpx    2026-02-09  412点  07:30-18:00│  │
+│  │ ☐ 20260210休息.gpx    2026-02-10  12点   10:00-10:30│  │
+│  │ ... (36 个文件)                                    │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│  选中文件: 20260207登山.gpx                               │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │ Track 1                                            │  │
+│  │   Segment 1: 08:00-12:30 (202点)                   │  │
+│  │   Segment 2: 13:00-17:30 (126点)                   │  │
+│  │ 起止坐标: 25.123°N 102.456°E → 25.987°N 102.789°E │  │
+│  │ 海拔范围: 1850m - 3950m                            │  │
+│  │ 时间覆盖: 2026-02-07 08:00 ~ 17:30 (UTC+8)        │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│  时间覆盖总览（所有勾选文件）                               │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │ 02/07 ████████████████████████░░░░ 08:00-17:30     │  │
+│  │ 02/08 ██████████████░░░░░░░░░░░░░ 09:00-14:20     │  │
+│  │ 02/09 ████████████████████████████ 07:30-18:00     │  │
+│  │ 02/10 ██░░░░░░░░░░░░░░░░░░░░░░░░░ 10:00-10:30     │  │
+│  │ ...                                                │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│  [取消选择] [全部选择]                        [确定]      │
+└──────────────────────────────────────────────────────────┘
+```
+
+**功能：**
+- 文件列表可多选/取消选择（勾选框控制哪些 GPX 参与匹配）
+- 选中文件后显示 track/segment 层级、起止坐标、海拔范围、时间覆盖
+- 时间覆盖总览帮助用户判断哪些日期有 GPS 数据，哪些日期缺失
+- 取消勾选的 GPX 文件不参与匹配
+
+### 6.4 照片浏览对话框
+
+从主窗口左侧"照片: 1832张 189有GPS"处可点击展开，查看照片详情列表。
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  照片列表                                              [×]  │
+├──────────────────────────────────────────────────────────────┤
+│  筛选: [全部▾] [排序: 文件名↑▾]  搜索: [____________]       │
+├──────────────────────────────────────────────────────────────┤
+│  文件名       │拍摄时间          │GPS状态│GPS坐标           │
+│  ────────────┼─────────────────┼───────┼────────────────── │
+│  DSC02258.JPG│2026-02-17 14:32 │无     │—                  │
+│  DSC02259.JPG│2026-02-17 14:33 │无     │—                  │
+│  DSC02264.JPG│2026-02-17 14:45 │有     │25.053°N 102.758°E│
+│  DSC02270.JPG│2026-02-17 15:01 │有     │25.058°N 102.762°E│
+│  ... (1832 张)                                               │
+├──────────────────────────────────────────────────────────────┤
+│  [缩略图 150x150]  DSC02264.JPG                             │
+│  路径: /Volumes/photos/202602/DSC02264.JPG                  │
+│  拍摄: 2026-02-17 14:45:23 (UTC+8)                          │
+│  GPS: 25.053°N, 102.758°E  海拔: 1815m                      │
+│  相机: SONY ILCE-7M4  镜头: FE 24-70mm                      │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**功能：**
+- 显示所有扫描到的照片，含文件名、拍摄时间、GPS 状态（有/无）
+- 筛选：全部 / 有GPS / 无GPS
+- 排序：按文件名、拍摄时间
+- 搜索：按文件名模糊搜索
+- 选中行显示缩略图 + 完整 EXIF 摘要（相机型号、镜头等）
+- 已有 GPS 的照片显示坐标，无 GPS 的显示"—"
+- 缩略图异步加载，QPixmapCache 缓存，资源用后释放
+
+### 6.5 匹配结果详情对话框
+
+从主窗口结果列表双击某行弹出，展示该照片匹配前后的完整信息。
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  照片匹配详情                                      [×]   │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  ┌──────────────┐  DSC02258.JPG                          │
+│  │              │  拍摄时间: 2026-02-17 14:32:15 (UTC+8) │
+│  │  [缩略图     │  文件路径: /photos/202602/DSC02258.JPG │
+│  │   300x300]   │  相机: SONY ILCE-7M4                   │
+│  │              │                                        │
+│  └──────────────┘                                        │
+│                                                          │
+│  ── GPS 匹配结果 ──────────────────────────────────────  │
+│                                                          │
+│  匹配前:  无 GPS 信息                                    │
+│  匹配后:  25.953°N, 102.758°E                            │
+│  海拔:    1810.6m                                        │
+│  方式:    线性插值                                        │
+│  时间差:  12秒                                            │
+│  来源:    20260217户外步行.gpx (Segment 1)                │
+│                                                          │
+│  ── 插值参考点 ────────────────────────────────────────  │
+│                                                          │
+│  前一点:  14:31:58  25.952°N, 102.757°E  1808m  (2s前)   │
+│  后一点:  14:32:30  25.954°N, 102.759°E  1813m  (15s后)  │
+│  前后距离: 247m  插值比例: 13.3%                          │
+│                                                          │
+│  [在地图中查看]                              [关闭]       │
+└──────────────────────────────────────────────────────────┘
+```
+
+**功能：**
+- 显示照片缩略图（300x300）和完整 EXIF 摘要
+- GPS 匹配前后对比（无→有，或旧GPS→新GPS）
+- 匹配方式：线性插值 / 就近匹配 / 跳过（已有GPS）/ 失败
+- 插值参考点：显示前后的 GPS 点坐标、时间、距离
+- 失败的照片显示拒绝原因和详细解释
+- 覆盖模式显示旧GPS → 新GPS 坐标和距离差
+
+### 6.6 设置对话框
+
+从主窗口菜单或工具栏打开，配置持久化参数。
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  设置                                                [×] │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  ── 匹配参数 ──────────────────────────────────────────  │
+│  孤立照片时间窗口  [=====●=====] 300秒  (60-3600)       │
+│  中间照片时间窗口  [==========●] 3600秒 (600-7200)      │
+│  上下文窗口        [=====●=====] 300秒  (60-1800)       │
+│  GPS 距离阈值      [=====●=====] 200米  (50-1000)       │
+│  ☑ 匹配首尾孤立照片                                     │
+│  时间偏移          [___0___] 秒 (-3600~3600)             │
+│                                                          │
+│  ── 处理选项 ──────────────────────────────────────────  │
+│  默认处理模式  ◉ 预览  ○ 拷贝  ○ 覆盖                  │
+│  ☑ 保持目录结构                                          │
+│  ☐ 覆盖已有 GPS 坐标                                    │
+│                                                          │
+│  ── 日志 ──────────────────────────────────────────────  │
+│  日志目录: [/path/to/logs] [浏览]                        │
+│  日志保留天数: [30] 天                                   │
+│                                                          │
+│  ── 关于 ──────────────────────────────────────────────  │
+│  GPS Photo Tracker v1.0.0                                │
+│  Python 3.11+ / PySide6 / piexif                         │
+│                                                          │
+│  [恢复默认值]                                [保存]      │
+└──────────────────────────────────────────────────────────┘
+```
+
+**功能：**
+- 所有 MatcherConfig 字段可视化配置（滑块 + 数值输入双控）
+- 处理选项持久化（QSettings）
+- 日志目录可自定义，保留天数可配置
+- 恢复默认值一键重置为 MatcherConfig 的默认值
+- 保存时自动写入 QSettings，下次启动自动加载
+
+### 6.7 匹配结果面板（右侧，实时更新）
 
 **统计卡片（顶部）：**
 - 处理过程中实时更新计数（每处理完一张照片 +1）
@@ -460,7 +676,7 @@ Service 层通过两个回调向 GUI 实时推送状态：
 - 方向自动校正（EXIF Orientation）
 - 资源管理：缩略图使用后释放（防范 Bug-UI-03）
 
-### 6.4 交互流程
+### 6.8 交互流程
 
 1. 用户选择 GPS 目录 → 立即扫描，左侧显示 GPX 文件数和轨迹点数
 2. 用户选择照片目录 → 立即扫描，左侧显示照片数和已有 GPS 数
@@ -472,7 +688,7 @@ Service 层通过两个回调向 GUI 实时推送状态：
 8. 拷贝过程中同样实时更新（写入阶段进度条也动起来）
 9. 完成后弹窗通知，右侧保留完整结果可浏览
 
-### 6.5 线程模型
+### 6.9 线程模型
 
 ```python
 class ProcessingWorker(QThread):
@@ -532,7 +748,7 @@ class ProcessingWorker(QThread):
 - 缩略图加载在主线程用 QTimer 延迟执行，避免阻塞
 - QFileDialog 使用 `DontUseNativeDialog` 作为网络路径的回退方案
 
-### 6.6 配置持久化
+### 6.10 配置持久化
 
 - 参数通过 QSettings 持久化（macOS: plist, Windows: registry, Linux: ini）
 - 首次启动使用 MatcherConfig 默认值
@@ -618,45 +834,87 @@ class FileAccessError(GPSTrackerError):
 
 ## 10. 项目结构
 
+采用 Python src layout（`src/` 包目录），是现代 Python 项目惯例，配合 `pyproject.toml` 实现 pip installable。参考 [scientific-python/cookiecutter](https://github.com/scientific-python/cookiecutter) 的目录规范。
+
 ```
 gps-photo-tracker-claude/
 ├── src/
-│   ├── core/                    # 核心算法层（无 IO 依赖）
-│   │   ├── __init__.py
-│   │   ├── models.py            # 所有 dataclass + 异常 + 常量
-│   │   ├── gpx_parser.py        # GPX 解析
-│   │   ├── gps_matcher.py       # GPS 匹配算法（含插值）
-│   │   └── exif_writer.py       # EXIF 读写
-│   ├── service/                 # Service 层（业务编排）
-│   │   ├── __init__.py
-│   │   ├── tagging_service.py   # 主服务
-│   │   ├── file_provider.py     # 文件系统抽象（含重试）
-│   │   └── cancel_token.py      # CancellationToken
-│   ├── gui/                     # GUI 层
-│   │   ├── __init__.py
-│   │   ├── main_window.py       # 主窗口（左右布局）
-│   │   ├── config_panel.py      # 左侧配置面板
-│   │   ├── progress_panel.py    # 实时进度面板（4阶段进度条+ETA）
-│   │   ├── result_table.py      # QTableView 匹配结果表格
-│   │   ├── photo_preview.py     # 照片缩略图预览组件
-│   │   └── workers.py           # QThread 工作线程（含回调适配）
-│   ├── logging_/                # 日志
-│   │   ├── __init__.py
-│   │   └── logger.py
-│   └── __main__.py              # 入口
-├── tests/                       # 测试
-│   ├── conftest.py              # mock 数据工厂 + TrackPoint/PhotoInfo 构造器
-│   ├── unit/                    # 单元测试（mock，不依赖文件）
+│   └── gps_photo_tracker/         # 可 install 的包名（下划线，PEP 8）
+│       ├── __init__.py             # 版本号 __version__
+│       ├── __main__.py             # python -m gps_photo_tracker 入口
+│       ├── core/                   # 核心算法层（无 IO 依赖，可独立测试）
+│       │   ├── __init__.py
+│       │   ├── models.py           # 所有 dataclass + 异常 + 常量
+│       │   ├── gpx_parser.py       # GPX 解析
+│       │   ├── gps_matcher.py      # GPS 匹配算法（含插值）
+│       │   └── exif_writer.py      # EXIF 读写
+│       ├── service/                # Service 层（业务编排，纯 Python）
+│       │   ├── __init__.py
+│       │   ├── tagging_service.py  # 主服务
+│       │   ├── file_provider.py    # 文件系统抽象（含重试）
+│       │   └── cancel_token.py     # CancellationToken
+│       ├── gui/                    # GUI 层（PySide6）
+│       │   ├── __init__.py
+│       │   ├── main_window.py      # 主窗口（左右布局）
+│       │   ├── config_panel.py     # 左侧配置面板
+│       │   ├── progress_panel.py   # 实时进度面板（4阶段进度条+ETA）
+│       │   ├── result_table.py     # QTableView 匹配结果表格
+│       │   ├── photo_preview.py    # 照片缩略图预览组件
+│       │   ├── gpx_browser.py      # GPX 轨迹浏览对话框（6.3）
+│       │   ├── photo_browser.py    # 照片浏览对话框（6.4）
+│       │   ├── detail_dialog.py    # 匹配结果详情对话框（6.5）
+│       │   ├── settings_dialog.py  # 设置对话框（6.6）
+│       │   └── workers.py          # QThread 工作线程（含回调适配）
+│       └── logging_/               # 日志
+│           ├── __init__.py
+│           └── logger.py
+├── tests/                          # 测试
+│   ├── conftest.py                 # mock 数据工厂
+│   ├── unit/                       # 单元测试（mock，不依赖文件）
 │   │   ├── test_matcher.py
 │   │   ├── test_parser.py
 │   │   └── test_exif.py
-│   ├── integration/             # 集成测试（safe_test_data，3 张）
-│   └── batch/                   # 批量测试（179 张 + 1832 张）
-├── test-data/                   # 测试数据（从原项目复制，只读）
-├── test-work/                   # 测试工作区（可写入）
-├── docs/                        # 文档
-├── pyproject.toml
+│   ├── integration/                # 集成测试（safe_test_data，3 张）
+│   └── batch/                      # 批量测试（179 张 + 1832 张）
+├── test-data/                      # 测试数据（从原项目复制，只读）
+├── test-work/                      # 测试工作区（可写入）
+├── docs/                           # 文档
+│   ├── requirements-analysis.md
+│   ├── bug-history-and-lessons.md
+│   ├── test-data-strategy.md
+│   └── superpowers/specs/          # 设计规格
+├── pyproject.toml                  # 项目配置
+├── LICENSE                         # MIT
 └── README.md
+```
+
+**pyproject.toml 关键配置：**
+```toml
+[project]
+name = "gps-photo-tracker"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6>=6.6",
+    "piexif>=1.1.3",
+    "gpxpy>=1.6.0",
+    "Pillow>=10.0.0",
+    "geopy>=2.4.0",
+    "tenacity>=8.0.0",
+]
+
+[project.scripts]
+gps-photo-tracker = "gps_photo_tracker.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: marks tests as slow"]
+
+[tool.coverage.run]
+source = ["src/gps_photo_tracker"]
+
+[tool.coverage.report]
+fail_under = 75
 ```
 
 ---
@@ -676,11 +934,47 @@ tenacity >= 8.0.0           # 重试机制
 
 ## 12. 打包分发
 
-- **工具**：PyInstaller（`--onefile` 或 `--onedir`）
-- **macOS**：生成 .app bundle，考虑 codesign
-- **Windows**：生成 .exe，可选 NSIS 安装器
-- **Linux**：生成 AppImage
-- 目标包体积 < 100MB（PySide6 是主要体积来源）
+### 12.1 工具选型：Nuitka + pyside6-deploy
+
+**不使用 PyInstaller**（依赖宿主机 Python 运行环境，不满足"傻瓜式安装"需求）。
+
+**使用 Nuitka**：将 Python 编译为原生 C 代码，生成独立可执行文件，无需宿主 Python。
+- Qt 官方推荐打包方式：`pyside6-deploy` 底层使用 Nuitka
+- 编译产物为原生二进制，启动速度快，无需 Python 运行时
+- 跨平台支持好，macOS/Windows/Linux 均可生成独立安装包
+
+### 12.2 各平台打包方案
+
+| 平台 | 打包命令 | 产物 | 分发方式 |
+|------|---------|------|---------|
+| macOS | `pyside6-deploy` | `.app` bundle | .dmg 安装镜像，考虑 codesign |
+| Windows | `pyside6-deploy` | `.exe` | .msi 或 NSIS 安装器 |
+| Linux | `pyside6-deploy` | 可执行文件 | AppImage 或 .deb/.rpm |
+
+### 12.3 打包配置
+
+在项目根目录创建 `pysidedeploy.spec`（pyside6-deploy 配置文件）：
+
+```yaml
+app: src/gps_photo_tracker/__main__.py
+target: GPS Photo Tracker
+packages:
+  - gps_photo_tracker
+excluded_modules:
+  - tkinter
+  - unittest
+  - test
+  - tests
+qml: false
+uib: false
+```
+
+### 12.4 目标指标
+
+- 包体积 < 150MB（PySide6 是主要体积来源，Nuitka 编译后可减小部分体积）
+- 首次启动时间 < 3 秒
+- 无需安装 Python 或任何运行时
+- 双击即用，无需命令行操作
 
 ---
 
