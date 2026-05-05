@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QTableWidgetItem
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
 
 from gps_photo_tracker.gui.main_window import MainWindow
 from gps_photo_tracker.gui.worker import Worker
@@ -192,6 +192,55 @@ class TestSettingsDialog:
         assert dialog._match_tail is not None
         assert dialog._overwrite is not None
 
+    def test_settings_dialog_has_mode_radio_buttons(self, qapp):
+        """Fix #5: Settings dialog should have default processing mode radio buttons."""
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+        dialog = SettingsDialog()
+        assert dialog._mode_preview_rb is not None
+        assert dialog._mode_copy_rb is not None
+        assert dialog._mode_overwrite_rb is not None
+        assert dialog._mode_group is not None
+
+    def test_settings_dialog_default_mode_preview(self, qapp):
+        """Fix #5: Default mode should be preview (index 0)."""
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+        dialog = SettingsDialog()
+        assert dialog._mode_preview_rb.isChecked()
+        assert not dialog._mode_copy_rb.isChecked()
+        assert not dialog._mode_overwrite_rb.isChecked()
+
+    def test_settings_dialog_save_includes_mode(self, qapp):
+        """Fix #5: Saving settings should include mode value."""
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog, save_settings, SETTINGS_KEYS
+        dialog = SettingsDialog()
+        dialog._mode_copy_rb.setChecked(True)
+        saved = {}
+        original_save = save_settings
+
+        def capture_save(values):
+            saved.update(values)
+
+        import gps_photo_tracker.gui.settings_dialog as sd_module
+        sd_module.save_settings = capture_save
+        dialog._save()
+        sd_module.save_settings = original_save
+        assert "mode" in saved
+        assert saved["mode"] == 1  # copy mode
+
+    def test_settings_dialog_reset_defaults_mode(self, qapp):
+        """Fix #5: Reset defaults should set mode to preview."""
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+        dialog = SettingsDialog()
+        dialog._mode_copy_rb.setChecked(True)
+        dialog._reset_defaults()
+        assert dialog._mode_preview_rb.isChecked()
+
+    def test_load_settings_includes_mode(self, qapp):
+        """Fix #5: load_settings should include mode key."""
+        from gps_photo_tracker.gui.settings_dialog import load_settings
+        s = load_settings()
+        assert "mode" in s
+
 
 # ── GPXBrowserDialog tests ─────────────────────────────────
 
@@ -236,6 +285,23 @@ class TestMainWindowScanDone:
         ]
         main_window._on_scan_done(segments)
         assert main_window._cached_segments == segments
+
+    def test_on_scan_done_updates_gpx_label(self, main_window):
+        """Fix #1: scan_done should update the GPX browser label."""
+        segments = [
+            {"filename": "a.gpx", "start": 1000.0, "end": 2000.0, "point_count": 50},
+        ]
+        main_window._on_scan_done(segments)
+        assert "1 段" in main_window._gpx_browser_label.text()
+        assert "50 点" in main_window._gpx_browser_label.text()
+        assert "点击查看" in main_window._gpx_browser_label.text()
+
+    def test_on_scan_done_updates_scan_summary(self, main_window):
+        """Fix #1: scan_done should update the read-only scan summary."""
+        segments = [
+            {"filename": "a.gpx", "start": 1000.0, "end": 2000.0, "point_count": 50},
+        ]
+        main_window._on_scan_done(segments)
         assert "1 段" in main_window._scan_summary.text()
         assert "50 点" in main_window._scan_summary.text()
 
@@ -246,8 +312,8 @@ class TestMainWindowScanDone:
         ]
         main_window._on_scan_done(segments)
         assert len(main_window._cached_segments) == 2
-        assert "2 段" in main_window._scan_summary.text()
-        assert "300 点" in main_window._scan_summary.text()
+        assert "2 段" in main_window._gpx_browser_label.text()
+        assert "300 点" in main_window._gpx_browser_label.text()
 
     def test_on_scan_done_empty(self, main_window):
         main_window._on_scan_done([])
@@ -320,8 +386,11 @@ class TestThumbnailPreview:
     def test_thumb_widgets_exist(self, main_window):
         assert main_window._thumb_label is not None
         assert main_window._thumb_info is not None
-        assert main_window._thumb_label.width() == 120
-        assert main_window._thumb_label.height() == 120
+
+    def test_thumb_size_200x200(self, main_window):
+        """Fix #4: Thumbnail preview should be 200x200 per spec."""
+        assert main_window._thumb_label.width() == 200
+        assert main_window._thumb_label.height() == 200
 
     def test_thumb_info_default_text(self, main_window):
         assert "选中" in main_window._thumb_info.text()
@@ -423,16 +492,31 @@ class TestMainWindowPhotosScanned:
         main_window._on_photos_scanned(photos)
         assert main_window._cached_photos == photos
 
-    def test_on_photos_scanned_updates_summary(self, main_window):
+    def test_on_photos_scanned_updates_photo_label(self, main_window):
+        """Fix #1: photos_scanned should update the photo browser label."""
         photos = [
             {"filename": "a.jpg", "has_gps": True},
             {"filename": "b.jpg", "has_gps": False},
             {"filename": "c.jpg", "has_gps": True},
         ]
         main_window._on_photos_scanned(photos)
-        text = main_window._scan_summary.text()
+        text = main_window._photo_browser_label.text()
         assert "3" in text
         assert "2" in text
+        assert "点击查看" in text
+
+    def test_on_photos_scanned_updates_scan_summary(self, main_window):
+        """Fix #1: photos_scanned should update the read-only scan summary."""
+        photos = [
+            {"filename": "a.jpg", "has_gps": True},
+            {"filename": "b.jpg", "has_gps": False},
+        ]
+        # Set initial scan summary so we can verify the append
+        main_window._scan_summary.setText("GPS: 1 段, 50 点")
+        main_window._on_photos_scanned(photos)
+        text = main_window._scan_summary.text()
+        assert "GPS: 1 段, 50 点" in text
+        assert "照片: 2张" in text
 
     def test_worker_has_photos_scanned_signal(self, qapp):
         worker = Worker(
@@ -495,7 +579,6 @@ class TestResultFilter:
 class TestWindowGeometry:
 
     def test_close_saves_geometry(self, main_window):
-        from PySide6.QtCore import QSettings
         QSettings("GPSPhotoTracker", "GPSPhotoTracker").remove("window_geometry")
         main_window.resize(1100, 700)
         from PySide6.QtGui import QCloseEvent
@@ -508,3 +591,225 @@ class TestWindowGeometry:
         assert main_window._results_table.isSortingEnabled()
 
 
+# ── Fix #1: Browser entry point tests ─────────────────────
+
+class TestBrowserEntryPoints:
+
+    def test_gpx_browser_label_exists(self, main_window):
+        """Fix #1: GPX browser clickable label should exist."""
+        assert main_window._gpx_browser_label is not None
+        assert "GPS" in main_window._gpx_browser_label.text()
+
+    def test_photo_browser_label_exists(self, main_window):
+        """Fix #1: Photo browser clickable label should exist."""
+        assert main_window._photo_browser_label is not None
+        assert "照片" in main_window._photo_browser_label.text()
+
+    def test_gpx_browser_label_clickable(self, main_window):
+        """Fix #1: GPX browser label should have mousePressEvent handler."""
+        assert main_window._gpx_browser_label.mousePressEvent is not None
+
+    def test_photo_browser_label_clickable(self, main_window):
+        """Fix #1: Photo browser label should have mousePressEvent handler."""
+        assert main_window._photo_browser_label.mousePressEvent is not None
+
+    def test_open_photo_browser_with_data(self, main_window, monkeypatch):
+        """Fix #1: Clicking photo label with cached data opens browser dialog."""
+        main_window._cached_photos = [
+            {"filename": "a.jpg", "has_gps": False},
+        ]
+        opened = []
+        monkeypatch.setattr(
+            "gps_photo_tracker.gui.photo_browser_dialog.PhotoBrowserDialog.exec",
+            lambda self: opened.append(True),
+        )
+        main_window._open_photo_browser()
+        assert opened
+
+    def test_open_photo_browser_without_data(self, main_window):
+        """Fix #1: Opening photo browser with no data does nothing."""
+        main_window._cached_photos = []
+        # Should not raise
+        main_window._open_photo_browser()
+
+    def test_open_gpx_browser_with_data(self, main_window, monkeypatch):
+        """Fix #1: Clicking GPX label with cached data opens browser dialog."""
+        main_window._cached_segments = [
+            {"filename": "a.gpx", "start": 1000.0, "end": 2000.0, "point_count": 50},
+        ]
+        opened = []
+        monkeypatch.setattr(
+            "gps_photo_tracker.gui.gpx_browser_dialog.GPXBrowserDialog.exec",
+            lambda self: opened.append(True),
+        )
+        main_window._open_gpx_browser()
+        assert opened
+
+
+# ── Fix #2: Real-time stats card update tests ──────────────
+
+class TestRealtimeStatsCard:
+
+    def test_update_stats_card_empty(self, main_window):
+        """Fix #2: _update_stats_card with no results shows zero."""
+        main_window._result_details = []
+        main_window._update_stats_card()
+        assert "总数: 0" in main_window._stats_label.text()
+        assert "成功: 0" in main_window._stats_label.text()
+
+    def test_update_stats_card_with_results(self, main_window):
+        """Fix #2: _update_stats_card updates stats label."""
+        main_window._result_details = [
+            {"success": True, "has_gps": False},
+            {"success": True, "has_gps": False},
+            {"success": False, "has_gps": False},
+        ]
+        main_window._update_stats_card()
+        text = main_window._stats_label.text()
+        assert "总数: 3" in text
+        assert "成功: 2" in text
+        assert "失败: 1" in text
+
+    def test_on_photo_processed_updates_stats(self, main_window):
+        """Fix #2: _on_photo_processed should update stats card in real-time."""
+        result = {
+            "filename": "test.jpg",
+            "success": True,
+            "method": "interpolated",
+            "has_gps": False,
+            "latitude": 25.0,
+            "longitude": 100.0,
+        }
+        main_window._on_photo_processed(result)
+        assert "总数: 1" in main_window._stats_label.text()
+        assert "成功: 1" in main_window._stats_label.text()
+
+    def test_on_photo_processed_multiple(self, main_window):
+        """Fix #2: Multiple _on_photo_processed calls update stats progressively."""
+        for i in range(3):
+            main_window._on_photo_processed({
+                "filename": f"photo{i}.jpg",
+                "success": i < 2,
+                "method": "interpolated" if i < 2 else "",
+                "has_gps": False,
+                "reject_reason": "no_gps_coverage" if i >= 2 else None,
+            })
+        text = main_window._stats_label.text()
+        assert "总数: 3" in text
+        assert "成功: 2" in text
+        assert "失败: 1" in text
+
+
+# ── Fix #3: Completion notification tests ──────────────────
+
+class TestCompletionNotification:
+
+    def test_on_done_shows_message_box(self, main_window, monkeypatch):
+        """Fix #3: _on_done should show QMessageBox.information."""
+        informed = []
+        monkeypatch.setattr(
+            "PySide6.QtWidgets.QMessageBox.information",
+            lambda *a, **kw: informed.append(True),
+        )
+        main_window._on_done({
+            "total": 5, "matched": 3, "failed": 1, "skipped": 1, "success_rate": 0.6,
+        })
+        assert informed
+
+    def test_on_done_message_contains_stats(self, main_window, monkeypatch):
+        """Fix #3: The notification message should contain processing stats."""
+        messages = []
+        monkeypatch.setattr(
+            "PySide6.QtWidgets.QMessageBox.information",
+            lambda self_w, title, msg: messages.append((title, msg)),
+        )
+        main_window._on_done({
+            "total": 10, "matched": 8, "failed": 1, "skipped": 1, "success_rate": 0.8,
+        })
+        assert messages
+        title, msg = messages[0]
+        assert "处理完成" in title
+        assert "总数: 10" in msg
+        assert "成功: 8" in msg
+        assert "失败: 1" in msg
+
+    def test_on_done_reenables_buttons(self, main_window, monkeypatch):
+        """Fix #3: _on_done should re-enable start button, disable cancel."""
+        monkeypatch.setattr(
+            "PySide6.QtWidgets.QMessageBox.information",
+            lambda *a, **kw: None,
+        )
+        main_window._start_btn.setEnabled(False)
+        main_window._cancel_btn.setEnabled(True)
+        main_window._on_done({
+            "total": 1, "matched": 1, "failed": 0, "skipped": 0, "success_rate": 1.0,
+        })
+        assert main_window._start_btn.isEnabled()
+        assert not main_window._cancel_btn.isEnabled()
+
+
+# ── Fix #4: Thumbnail size tests ───────────────────────────
+
+class TestThumbnailSize:
+
+    def test_thumb_label_is_200x200(self, main_window):
+        """Fix #4: Thumbnail preview area should be 200x200 per spec."""
+        assert main_window._thumb_label.width() == 200
+        assert main_window._thumb_label.height() == 200
+
+    def test_thumb_label_not_120(self, main_window):
+        """Fix #4: Ensure the old 120x120 size is no longer used."""
+        assert main_window._thumb_label.width() != 120
+        assert main_window._thumb_label.height() != 120
+
+
+# ── Fix #5: Settings mode persistence tests ────────────────
+
+class TestSettingsModePersistence:
+
+    def test_apply_saved_settings_restores_mode(self, main_window, monkeypatch):
+        """Fix #5: _apply_saved_settings should restore saved processing mode."""
+        from gps_photo_tracker.gui import settings_dialog as sd
+        original_load = sd.load_settings
+
+        def mock_load():
+            s = original_load()
+            s["mode"] = 1  # copy mode
+            return s
+
+        # Patch in the main_window module namespace where load_settings is used
+        import gps_photo_tracker.gui.main_window as mw_module
+        monkeypatch.setattr(mw_module, "load_settings", mock_load)
+        main_window._apply_saved_settings()
+        assert main_window._copy_rb.isChecked()
+        assert not main_window._preview_rb.isChecked()
+
+    def test_apply_saved_settings_overwrite_mode(self, main_window, monkeypatch):
+        """Fix #5: _apply_saved_settings should restore overwrite mode."""
+        from gps_photo_tracker.gui import settings_dialog as sd
+        original_load = sd.load_settings
+
+        def mock_load():
+            s = original_load()
+            s["mode"] = 2  # overwrite mode
+            return s
+
+        import gps_photo_tracker.gui.main_window as mw_module
+        monkeypatch.setattr(mw_module, "load_settings", mock_load)
+        main_window._apply_saved_settings()
+        assert main_window._overwrite_rb.isChecked()
+
+    def test_apply_saved_settings_preview_mode(self, main_window, monkeypatch):
+        """Fix #5: _apply_saved_settings should restore preview mode (default)."""
+        from gps_photo_tracker.gui import settings_dialog as sd
+        original_load = sd.load_settings
+
+        def mock_load():
+            s = original_load()
+            s["mode"] = 0  # preview mode
+            return s
+
+        import gps_photo_tracker.gui.main_window as mw_module
+        monkeypatch.setattr(mw_module, "load_settings", mock_load)
+        main_window._apply_saved_settings()
+        assert main_window._preview_rb.isChecked()
