@@ -2,11 +2,13 @@
 
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
+    QFileDialog,
     QDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -25,6 +27,8 @@ SETTINGS_KEYS = {
     "overwrite_gps": False,
     "keep_structure": True,
     "mode": 0,  # 0=preview, 1=copy, 2=overwrite
+    "log_dir": "",
+    "log_retention_days": 30,
 }
 
 
@@ -115,6 +119,39 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(proc_group)
 
+        # Log settings
+        log_group = QGroupBox("日志")
+        log_layout = QFormLayout(log_group)
+
+        log_dir_row = QHBoxLayout()
+        self._log_dir_edit = QLineEdit()
+        self._log_dir_edit.setText(str(self._settings.get("log_dir", "")))
+        self._log_dir_edit.setPlaceholderText("默认: 应用目录/logs")
+        log_dir_btn = QPushButton("浏览")
+        log_dir_btn.clicked.connect(self._browse_log_dir)
+        log_dir_row.addWidget(self._log_dir_edit)
+        log_dir_row.addWidget(log_dir_btn)
+        log_layout.addRow("日志目录:", log_dir_row)
+
+        self._retention_spin = QSpinBox()
+        self._retention_spin.setRange(1, 365)
+        self._retention_spin.setValue(int(self._settings.get("log_retention_days", 30)))
+        self._retention_spin.setSuffix(" 天")
+        log_layout.addRow("保留天数:", self._retention_spin)
+
+        layout.addWidget(log_group)
+
+        # About
+        about_group = QGroupBox("关于")
+        about_layout = QVBoxLayout(about_group)
+        about_text = QLabel(
+            "GPS Photo Tracker\n"
+            "Python 3.11+ / PySide6 / piexif"
+        )
+        about_text.setStyleSheet("color: #666; padding: 4px;")
+        about_layout.addWidget(about_text)
+        layout.addWidget(about_group)
+
         # Buttons
         btn_layout = QHBoxLayout()
         reset_btn = QPushButton("恢复默认值")
@@ -146,6 +183,13 @@ class SettingsDialog(QDialog):
         self._overwrite.setChecked(SETTINGS_KEYS["overwrite_gps"])
         self._keep_structure.setChecked(SETTINGS_KEYS["keep_structure"])
         self._mode_preview_rb.setChecked(True)
+        self._log_dir_edit.setText("")
+        self._retention_spin.setValue(30)
+
+    def _browse_log_dir(self):
+        path = QFileDialog.getExistingDirectory(self, "选择日志目录")
+        if path:
+            self._log_dir_edit.setText(path)
 
     def _save(self):
         values = {
@@ -158,6 +202,8 @@ class SettingsDialog(QDialog):
             "overwrite_gps": self._overwrite.isChecked(),
             "keep_structure": self._keep_structure.isChecked(),
             "mode": self._mode_group.checkedId(),
+            "log_dir": self._log_dir_edit.text(),
+            "log_retention_days": self._retention_spin.value(),
         }
         save_settings(values)
         self.accept()
