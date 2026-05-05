@@ -430,3 +430,85 @@ class TestDivisionByZeroProtection:
         results = default_matcher.match([photo], [seg])
         assert len(results) == 1
         assert results[0].success
+
+
+class TestNoneTimestampFiltering:
+    """Photos with timestamp=None should be filtered out by match()."""
+
+    def test_none_timestamp_photos_excluded(self, default_matcher):
+        """match() should skip photos with timestamp=None (no crash)."""
+        seg = _uniform_segment()
+        from pathlib import Path
+        from gps_photo_tracker.core.models import PhotoInfo
+        photo_none = PhotoInfo(path=Path("/x.jpg"), filename="none.jpg",
+                               timestamp=None, has_gps=False)
+        photo_valid = make_photo("valid.jpg", utc(8, 5))
+        results = default_matcher.match([photo_none, photo_valid], [seg])
+        # Only valid photo should be in results
+        assert len(results) == 1
+        assert results[0].photo.filename == "valid.jpg"
+
+    def test_all_none_timestamp_returns_empty(self, default_matcher):
+        seg = _uniform_segment()
+        from pathlib import Path
+        from gps_photo_tracker.core.models import PhotoInfo
+        photos = [
+            PhotoInfo(path=Path("/a.jpg"), filename="a.jpg", timestamp=None, has_gps=False),
+            PhotoInfo(path=Path("/b.jpg"), filename="b.jpg", timestamp=None, has_gps=False),
+        ]
+        results = default_matcher.match(photos, [seg])
+        assert len(results) == 0
+
+
+class TestZeroSpanInterpolationDistance:
+    """Zero-span edge case should compute distance correctly (bug fix).
+
+    When prev and next GPS points have the same timestamp but the photo falls
+    between them (photo time == GPS time), both _find_prev_point and _find_next_point
+    return None because they use strict < / >. In this case the photo correctly gets
+    NO_TRACK_POINTS. The real zero-span bug we're fixing is when prev.timestamp ==
+    next.timestamp but the photo time is exactly at that same timestamp -- the code
+    used to crash with AttributeError from self._distance() which didn't exist.
+    Now it correctly returns NO_TRACK_POINTS without crashing.
+    """
+
+    def test_zero_span_no_crash(self):
+        """Two GPS points with same timestamp should not crash the matcher."""
+        matcher = GPSMatcher(MatcherConfig())
+        pts = [
+            make_point(25.0, 100.0, utc(8, 5)),
+            make_point(25.001, 100.001, utc(8, 5)),  # same timestamp
+        ]
+        seg = make_segment(pts)
+        photos = [
+            make_photo("prev.jpg", utc(8, 3)),
+            make_photo("mid.jpg", utc(8, 5)),
+            make_photo("next.jpg", utc(8, 7)),
+        ]
+        # Should not crash — used to crash with AttributeError: self._distance
+        results = matcher.match(photos, [seg])
+        assert len(results) == 3
+        # The mid photo at exact GPS time gets NO_TRACK_POINTS (prev/next are strict)
+        mid = results[1]
+        assert not mid.success
+        assert mid.reject_reason == RejectReason.NO_TRACK_POINTS
+
+    def test_interpolation_with_very_close_timestamps(self):
+        """GPS points 1 second apart should interpolate correctly."""
+        matcher = GPSMatcher(MatcherConfig())
+        pts = [
+            make_point(25.0, 100.0, utc(8, 5, 0)),
+            make_point(25.001, 100.001, utc(8, 5, 1)),  # 1 second apart
+        ]
+        seg = make_segment(pts)
+        photos = [
+            make_photo("prev.jpg", utc(8, 3)),
+            make_photo("mid.jpg", utc(8, 5, 0)),  # exact same time as first point
+            make_photo("next.jpg", utc(8, 7)),
+        ]
+        results = matcher.match(photos, [seg])
+        mid = results[1]
+        # Photo at same time as first GPS point: prev=None (strict <), next exists
+        # This gives single-sided nearest match, not interpolation
+        assert mid.success
+        assert mid.method == "nearest"

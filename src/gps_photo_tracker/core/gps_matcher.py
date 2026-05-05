@@ -28,7 +28,9 @@ class GPSMatcher:
         photos: list[PhotoInfo],
         segments: list[GPXSegment],
     ) -> list[MatchResult]:
-        sorted_photos = sorted(photos, key=lambda p: p.timestamp)
+        # Filter out photos with no timestamp (spec: PhotoInfo.timestamp can be None)
+        valid_photos = [p for p in photos if p.timestamp is not None]
+        sorted_photos = sorted(valid_photos, key=lambda p: p.timestamp)
         results: list[MatchResult] = []
         for i, photo in enumerate(sorted_photos):
             results.append(self._match_one(photo, sorted_photos, i, segments))
@@ -101,6 +103,11 @@ class GPSMatcher:
                 prev_alt = prev_point.altitude if prev_point.altitude is not None else 0.0
                 next_alt = next_point.altitude if next_point.altitude is not None else 0.0
                 alt = None if (prev_point.altitude is None and next_point.altitude is None) else (prev_alt + next_alt) / 2
+                # Recompute distance for the zero-span edge case
+                seg_distance = geodesic(
+                    (prev_point.latitude, prev_point.longitude),
+                    (next_point.latitude, next_point.longitude),
+                ).meters
                 return MatchResult(
                     photo=photo, success=True,
                     gps=GPSInfo(latitude=lat, longitude=lon, altitude=alt),
@@ -108,7 +115,7 @@ class GPSMatcher:
                     time_diff=time_diff,
                     interpolation_prev=prev_point,
                     interpolation_next=next_point,
-                    interpolation_distance=self._distance(prev_point, next_point),
+                    interpolation_distance=seg_distance,
                     interpolation_ratio=0.5,
                 )
             ratio = (adjusted_time - prev_point.timestamp) / span

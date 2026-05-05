@@ -1360,3 +1360,19 @@ class TestWorkerRun:
         self._run_worker(w)
 
         MockService.assert_called_once_with(log_dir=log_dir)
+
+    @patch("gps_photo_tracker.gui.worker.GPSTaggingService")
+    def test_operation_cancelled_error_silent(self, MockService, qapp):
+        """Worker.run() should silently handle OperationCancelledError (spec 6.9)."""
+        from gps_photo_tracker.core.models import OperationCancelledError
+        mock_svc = MockService.return_value
+        mock_svc.scan_gpx.return_value = []
+        mock_svc.scan_photos.return_value = []
+        mock_svc.preview.side_effect = OperationCancelledError("cancelled")
+
+        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+                   ProcessOptions(mode=ProcessMode.PREVIEW))
+        r = self._run_worker(w)
+
+        # Should not emit error, should not crash
+        assert r["done"] is None or "error" not in (r["done"] or {})

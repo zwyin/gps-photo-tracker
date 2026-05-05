@@ -8,6 +8,7 @@ from PySide6.QtCore import QThread, Signal
 from gps_photo_tracker.core.models import (
     BatchResult,
     MatcherConfig,
+    OperationCancelledError,
     ProcessMode,
     ProcessOptions,
     ProgressPhase,
@@ -163,27 +164,30 @@ class Worker(QThread):
                 }
             self.photo_signal.emit(detail)
 
-        if self._options.mode == ProcessMode.PREVIEW:
-            result = service.preview(
-                segments, photos, self._config,
-                on_progress=on_progress,
-                on_photo_processed=on_photo,
-                cancel=self._token,
-            )
-        else:
-            result = service.process(
-                segments, photos, self._config, self._options,
-                photo_dir=self._photo_dir,
-                on_progress=on_progress,
-                on_photo_processed=on_photo,
-                cancel=self._token,
-            )
+        try:
+            if self._options.mode == ProcessMode.PREVIEW:
+                result = service.preview(
+                    segments, photos, self._config,
+                    on_progress=on_progress,
+                    on_photo_processed=on_photo,
+                    cancel=self._token,
+                )
+            else:
+                result = service.process(
+                    segments, photos, self._config, self._options,
+                    photo_dir=self._photo_dir,
+                    on_progress=on_progress,
+                    on_photo_processed=on_photo,
+                    cancel=self._token,
+                )
 
-        self.done_signal.emit({
-            "total": result.total,
-            "matched": result.matched,
-            "failed": result.failed,
-            "skipped": result.skipped,
-            "overwritten": result.overwritten,
-            "success_rate": result.success_rate,
-        })
+            self.done_signal.emit({
+                "total": result.total,
+                "matched": result.matched,
+                "failed": result.failed,
+                "skipped": result.skipped,
+                "overwritten": result.overwritten,
+                "success_rate": result.success_rate,
+            })
+        except OperationCancelledError:
+            pass  # User cancelled — do not emit error

@@ -30,10 +30,11 @@ class OperationLogger:
         return logger
 
     def log_match_success(self, result: MatchResult):
+        dist_str = f"{result.interpolation_distance:.0f}m" if result.interpolation_distance is not None else "—"
         self._matches.info(
             f"OK {result.photo.filename} | {result.method} | "
             f"GPS({result.gps.latitude:.4f},{result.gps.longitude:.4f}) | "
-            f"时差:{result.time_diff:.1f}s | 距离:{result.interpolation_distance:.0f}m"
+            f"时差:{result.time_diff:.1f}s | 距离:{dist_str}"
         )
 
     def log_match_failed(self, result: MatchResult):
@@ -57,6 +58,17 @@ class OperationLogger:
 
     def log_error(self, context: str, error: Exception):
         self._errors.error(f"{context}: {type(error).__name__}: {error}")
+
+    def cleanup_old_logs(self, retention_days: int = 30) -> None:
+        """Delete log files older than retention_days."""
+        import time
+        if not self._errors.handlers:
+            return
+        log_dir = Path(self._errors.handlers[0].baseFilename).parent
+        cutoff = time.time() - retention_days * 86400
+        for log_file in log_dir.glob("*.log"):
+            if log_file.stat().st_mtime < cutoff:
+                log_file.unlink()
 
     def log_operation_start(self, params: dict):
         self._ops.info(f"START | params={params}")
