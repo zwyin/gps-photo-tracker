@@ -345,3 +345,101 @@ class TestThumbnailPreview:
         info = main_window._thumb_info.text()
         assert "test.jpg" in info
         assert "插值" in info
+
+
+# ── PhotoBrowserDialog tests ──────────────────────────────
+
+class TestPhotoBrowserDialog:
+
+    def test_photo_browser_with_photos(self, qapp):
+        from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
+        photos = [
+            {"filename": "a.jpg", "path": "/tmp/a.jpg", "timestamp": 1700000000.0,
+             "has_gps": True, "latitude": 25.0, "longitude": 100.0},
+            {"filename": "b.jpg", "path": "/tmp/b.jpg", "timestamp": 1700003600.0,
+             "has_gps": False},
+        ]
+        dialog = PhotoBrowserDialog(photos)
+        assert dialog.windowTitle() == "照片列表"
+        assert dialog._table.rowCount() == 2
+
+    def test_photo_browser_empty(self, qapp):
+        from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
+        dialog = PhotoBrowserDialog([])
+        assert dialog._table.rowCount() == 0
+
+    def test_photo_browser_filter_gps(self, qapp):
+        from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
+        photos = [
+            {"filename": "gps.jpg", "timestamp": 1000.0, "has_gps": True,
+             "latitude": 25.0, "longitude": 100.0},
+            {"filename": "nogps.jpg", "timestamp": 2000.0, "has_gps": False},
+        ]
+        dialog = PhotoBrowserDialog(photos)
+        dialog._filter_cb.setCurrentIndex(1)  # 有GPS
+        assert dialog._table.rowCount() == 1
+
+    def test_photo_browser_filter_no_gps(self, qapp):
+        from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
+        photos = [
+            {"filename": "gps.jpg", "timestamp": 1000.0, "has_gps": True},
+            {"filename": "nogps.jpg", "timestamp": 2000.0, "has_gps": False},
+        ]
+        dialog = PhotoBrowserDialog(photos)
+        dialog._filter_cb.setCurrentIndex(2)  # 无GPS
+        assert dialog._table.rowCount() == 1
+
+    def test_photo_browser_search(self, qapp):
+        from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
+        photos = [
+            {"filename": "DSC001.jpg", "timestamp": 1000.0, "has_gps": False},
+            {"filename": "DSC002.jpg", "timestamp": 2000.0, "has_gps": False},
+            {"filename": "IMG003.jpg", "timestamp": 3000.0, "has_gps": False},
+        ]
+        dialog = PhotoBrowserDialog(photos)
+        dialog._search_edit.setText("DSC")
+        assert dialog._table.rowCount() == 2
+
+    def test_photo_browser_sort_by_time(self, qapp):
+        from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
+        photos = [
+            {"filename": "b.jpg", "timestamp": 2000.0, "has_gps": False},
+            {"filename": "a.jpg", "timestamp": 1000.0, "has_gps": False},
+        ]
+        dialog = PhotoBrowserDialog(photos)
+        dialog._sort_cb.setCurrentIndex(1)  # 按时间排序
+        assert dialog._table.item(0, 0).text() == "a.jpg"
+
+
+# ── MainWindow photos scanned tests ───────────────────────
+
+class TestMainWindowPhotosScanned:
+
+    def test_on_photos_scanned_caches(self, main_window):
+        photos = [
+            {"filename": "a.jpg", "has_gps": True},
+            {"filename": "b.jpg", "has_gps": False},
+        ]
+        main_window._on_photos_scanned(photos)
+        assert main_window._cached_photos == photos
+
+    def test_on_photos_scanned_updates_summary(self, main_window):
+        photos = [
+            {"filename": "a.jpg", "has_gps": True},
+            {"filename": "b.jpg", "has_gps": False},
+            {"filename": "c.jpg", "has_gps": True},
+        ]
+        main_window._on_photos_scanned(photos)
+        text = main_window._scan_summary.text()
+        assert "3" in text
+        assert "2" in text
+
+    def test_worker_has_photos_scanned_signal(self, qapp):
+        worker = Worker(
+            gps_dir=Path("/tmp"),
+            photo_dir=Path("/tmp"),
+            config=MatcherConfig(),
+            options=ProcessOptions(mode=ProcessMode.PREVIEW),
+        )
+        assert hasattr(worker, 'photos_scanned_signal')
+

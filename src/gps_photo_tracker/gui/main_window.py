@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from gps_photo_tracker.core.models import MatcherConfig, ProcessMode, ProcessOptions
 from gps_photo_tracker.gui.detail_dialog import DetailDialog
 from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
 from gps_photo_tracker.gui.settings_dialog import SettingsDialog, load_settings
 from gps_photo_tracker.gui.worker import Worker
 
@@ -43,6 +44,7 @@ class MainWindow(QMainWindow):
         self._worker: Worker | None = None
         self._result_details: list[dict] = []
         self._cached_segments = []
+        self._cached_photos = []
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -376,6 +378,7 @@ class MainWindow(QMainWindow):
         self._worker.photo_signal.connect(self._on_photo_processed)
         self._worker.done_signal.connect(self._on_done)
         self._worker.scan_done_signal.connect(self._on_scan_done)
+        self._worker.photos_scanned_signal.connect(self._on_photos_scanned)
         self._worker.start()
 
     def _on_cancel(self):
@@ -463,6 +466,21 @@ class MainWindow(QMainWindow):
         gpx_count = len(segments)
         total_pts = sum(s.get("point_count", 0) for s in segments)
         self._scan_summary.setText(f"GPS: {gpx_count} 段, {total_pts} 点 (点击查看)")
+
+    def _on_photos_scanned(self, photos: list[dict]):
+        self._cached_photos = photos
+        total = len(photos)
+        with_gps = sum(1 for p in photos if p.get("has_gps"))
+        self._scan_summary.setText(
+            self._scan_summary.text().replace("GPS:", f"照片: {total}张 ({with_gps}有GPS) | GPS:")
+            if "GPS:" in self._scan_summary.text()
+            else f"照片: {total}张 ({with_gps}有GPS)"
+        )
+
+    def _open_photo_browser(self):
+        if self._cached_photos:
+            dialog = PhotoBrowserDialog(self._cached_photos, self)
+            dialog.exec()
 
     def _on_table_double_click(self, index):
         row = index.row()
