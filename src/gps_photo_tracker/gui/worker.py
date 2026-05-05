@@ -22,6 +22,7 @@ class Worker(QThread):
     photo_signal = Signal(dict)  # MatchResult as dict
     done_signal = Signal(dict)  # BatchResult as dict
     scan_done_signal = Signal(list)  # list of GPX segment dicts for browser
+    photos_scanned_signal = Signal(list)  # list of photo info dicts for browser
 
     def __init__(
         self,
@@ -61,6 +62,22 @@ class Worker(QThread):
                 "point_count": len(seg.points),
             })
         self.scan_done_signal.emit(seg_dicts)
+
+        # Emit photo summaries for photo browser
+        photo_dicts = []
+        for p in photos:
+            d = {
+                "filename": p.filename,
+                "path": str(p.path),
+                "timestamp": p.timestamp,
+                "has_gps": p.has_gps,
+            }
+            if p.existing_gps:
+                d["latitude"] = p.existing_gps.latitude
+                d["longitude"] = p.existing_gps.longitude
+                d["altitude"] = p.existing_gps.altitude
+            photo_dicts.append(d)
+        self.photos_scanned_signal.emit(photo_dicts)
 
         # Process
         def on_progress(update):
