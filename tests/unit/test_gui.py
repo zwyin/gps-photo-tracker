@@ -2,6 +2,7 @@
 
 import pytest
 from pathlib import Path
+from unittest.mock import patch
 
 from PySide6.QtWidgets import QApplication, QCheckBox, QTableWidgetItem, QGroupBox, QTableWidget
 from PySide6.QtCore import Qt, QSettings
@@ -1100,3 +1101,262 @@ class TestGPXBrowserCheckbox:
         dlg._set_all_checked(False)
         excluded = dlg.get_excluded_filenames()
         assert excluded == {"a.gpx", "b.gpx"}
+
+
+class TestWorkerRun:
+    """Worker.run() integration tests with mocked service."""
+
+    def _make_segments(self):
+        from gps_photo_tracker.core.models import GPXSegment, TrackPoint
+        return [
+            GPXSegment(
+                filename="track.gpx",
+                start=1700000000.0,
+                end=1700003600.0,
+                points=[
+                    TrackPoint(1700000000.0, 25.0, 102.0, 1800.0),
+                    TrackPoint(1700001800.0, 25.01, 102.01, 1810.0),
+                    TrackPoint(1700003600.0, 25.02, 102.02, 1820.0),
+                ],
+            ),
+            GPXSegment(
+                filename="excluded.gpx",
+                start=1700100000.0,
+                end=1700105000.0,
+                points=[
+                    TrackPoint(1700100000.0, 26.0, 103.0, 500.0),
+                ],
+            ),
+        ]
+
+    def _make_photos(self):
+        from gps_photo_tracker.core.models import PhotoInfo, GPSInfo
+        return [
+            PhotoInfo(Path("/tmp/a.jpg"), "a.jpg", 1700001800.0, False),
+            PhotoInfo(Path("/tmp/b.jpg"), "b.jpg", 1700002000.0, True,
+                      existing_gps=GPSInfo(25.0, 102.0, 100.0)),
+        ]
+
+    def _make_result(self, photo, success=True, gps=None, method=None):
+        from gps_photo_tracker.core.models import MatchResult, GPSInfo
+        return MatchResult(
+            photo=photo,
+            success=success,
+            gps=gps or (GPSInfo(25.01, 102.01, 1810.0) if success else None),
+            method=method or ("interpolated" if success else None),
+            time_diff=12.0 if success else None,
+            reject_reason=None if success else "no_gps_coverage",
+        )
+
+    def _run_worker(self, worker):
+        """Call worker.run() directly (same thread) to collect signals synchronously."""
+        results = {"done": None, "photos": [], "scan": None, "photos_scanned": None, "progress": []}
+        worker.done_signal.connect(lambda d: results.update({"done": d}))
+        worker.photo_signal.connect(lambda d: results["photos"].append(d))
+        worker.scan_done_signal.connect(lambda l: results.update({"scan": l}))
+        worker.photos_scanned_signal.connect(lambda l: results.update({"photos_scanned": l}))
+        worker.progress_signal.connect(lambda *a: results["progress"].append(a))
+        worker.run()  # Call directly — signals use DirectConnection in same thread
+        return results
+
+    @patch("gps_photo_tracker.gui.worker.GPSTaggingService")
+    def test_preview_run(self, MockService, qapp):
+        from gps_photo_tracker.core.models import BatchResult
+        segments = self._make_segments()
+        photos = self._make_photos()
+        mock_svc = MockService.return_value
+        mock_svc.scan_gpx.return_value = segments
+        mock_svc.scan_photos.return_value = photos
+        mock_svc.preview.return_value = BatchResult(
+            total=2, matched=1, skipped=1, failed=0, overwritten=0,
+            success_rate=0.5, results=[], reject_groups={},
+        )
+
+        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+                   ProcessOptions(mode=ProcessMode.PREVIEW))
+        r = self._run_worker(w)
+
+        assert r["done"] is not None
+        assert r["done"]["matched"] == 1
+        assert r["scan"] is not None
+        assert len(r["scan"]) == 2
+        assert r["photos_scanned"] is not None
+        assert len(r["photos_scanned"]) == 2
+        mock_svc.preview.assert_called_once()
+        mock_svc.process.assert_not_called()
+
+    @patch("gps_photo_tracker.gui.worker.GPSTaggingService")
+    def test_copy_run(self, MockService, qapp):
+        from gps_photo_tracker.core.models import BatchResult
+        segments = self._make_segments()
+        photos = self._make_photos()
+        mock_svc = MockService.return_value
+        mock_svc.scan_gpx.return_value = segments
+        mock_svc.scan_photos.return_value = photos
+        mock_svc.process.return_value = BatchResult(
+            total=2, matched=2, skipped=0, failed=0, overwritten=0,
+            success_rate=1.0, results=[], reject_groups={},
+        )
+
+        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+                   ProcessOptions(mode=ProcessMode.COPY, output_dir=Path("/out")))
+        r = self._run_worker(w)
+
+        assert r["done"]["matched"] == 2
+        mock_svc.process.assert_called_once()
+        mock_svc.preview.assert_not_called()
+
+    @patch("gps_photo_tracker.gui.worker.GPSTaggingService")
+    def test_scan_error(self, MockService, qapp):
+        mock_svc = MockService.return_value
+        mock_svc.scan_gpx.side_effect = FileNotFoundError("dir not found")
+
+        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+                   ProcessOptions(mode=ProcessMode.PREVIEW))
+        r = self._run_worker(w)
+
+        assert r["done"] is not None
+        assert "error" in r["done"]
+        assert "not found" in r["done"]["error"]
+
+    @patch("gps_photo_tracker.gui.worker.GPSTaggingService")
+    def test_excluded_filenames(self, MockService, qapp):
+        from gps_photo_tracker.core.models import BatchResult
+        segments = self._make_segments()
+        photos = self._make_photos()
+        mock_svc = MockService.return_value
+        mock_svc.scan_gpx.return_value = segments
+        mock_svc.scan_photos.return_value = photos
+        mock_svc.preview.return_value = BatchResult(
+            total=1, matched=1, skipped=0, failed=0, overwritten=0,
+            success_rate=1.0, results=[], reject_groups={},
+        )
+
+        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+                   ProcessOptions(mode=ProcessMode.PREVIEW),
+                   excluded_filenames={"excluded.gpx"})
+        r = self._run_worker(w)
+
+        # scan_done should only have track.gpx (excluded.gpx filtered out)
+        assert r["scan"] is not None
+        assert len(r["scan"]) == 1
+        assert r["scan"][0]["filename"] == "track.gpx"
+
+    @patch("gps_photo_tracker.gui.worker.GPSTaggingService")
+    def test_photo_signal_detail(self, MockService, qapp):
+        from gps_photo_tracker.core.models import BatchResult
+        photo = self._make_photos()[0]
+        segments = self._make_segments()
+        match_result = self._make_result(photo, success=True)
+
+        mock_svc = MockService.return_value
+        mock_svc.scan_gpx.return_value = segments
+        mock_svc.scan_photos.return_value = [photo]
+        mock_svc.preview.return_value = BatchResult(
+            total=1, matched=1, skipped=0, failed=0, overwritten=0,
+            success_rate=1.0, results=[match_result], reject_groups={},
+        )
+
+        # Wire on_photo_processed callback
+        def fake_preview(segs, phos, config, on_progress=None, on_photo_processed=None, cancel=None):
+            if on_photo_processed:
+                on_photo_processed(match_result)
+            return BatchResult(total=1, matched=1, skipped=0, failed=0, overwritten=0,
+                              success_rate=1.0, results=[match_result], reject_groups={})
+        mock_svc.preview.side_effect = fake_preview
+
+        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+                   ProcessOptions(mode=ProcessMode.PREVIEW))
+        r = self._run_worker(w)
+
+        assert len(r["photos"]) == 1
+        detail = r["photos"][0]
+        assert detail["success"] is True
+        assert detail["method"] == "interpolated"
+        assert detail["latitude"] == 25.01
+        assert detail["source_gpx"] == "track.gpx"
+
+    @patch("gps_photo_tracker.gui.worker.GPSTaggingService")
+    def test_photos_scanned_with_gps(self, MockService, qapp):
+        from gps_photo_tracker.core.models import BatchResult
+        segments = self._make_segments()
+        photos = self._make_photos()
+
+        mock_svc = MockService.return_value
+        mock_svc.scan_gpx.return_value = segments
+        mock_svc.scan_photos.return_value = photos
+        mock_svc.preview.return_value = BatchResult(
+            total=2, matched=0, skipped=0, failed=2, overwritten=0,
+            success_rate=0.0, results=[], reject_groups={},
+        )
+
+        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+                   ProcessOptions(mode=ProcessMode.PREVIEW))
+        r = self._run_worker(w)
+
+        assert r["photos_scanned"] is not None
+        # Photo with GPS should include latitude/longitude/altitude
+        with_gps = [p for p in r["photos_scanned"] if p.get("has_gps")]
+        assert len(with_gps) == 1
+        assert "latitude" in with_gps[0]
+
+    @patch("gps_photo_tracker.gui.worker.GPSTaggingService")
+    def test_progress_emitted(self, MockService, qapp):
+        from gps_photo_tracker.core.models import BatchResult, ProgressUpdate, ProgressPhase
+        segments = self._make_segments()
+        photos = self._make_photos()
+
+        mock_svc = MockService.return_value
+        mock_svc.scan_gpx.return_value = segments
+        mock_svc.scan_photos.return_value = photos
+
+        def fake_preview(segs, phos, config, on_progress=None, on_photo_processed=None, cancel=None):
+            if on_progress:
+                on_progress(ProgressUpdate(
+                    phase=ProgressPhase.MATCHING, current=1, total=2,
+                    current_file="a.jpg", elapsed_seconds=0.5,
+                ))
+            return BatchResult(total=2, matched=2, skipped=0, failed=0, overwritten=0,
+                              success_rate=1.0, results=[], reject_groups={})
+        mock_svc.preview.side_effect = fake_preview
+
+        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+                   ProcessOptions(mode=ProcessMode.PREVIEW))
+        r = self._run_worker(w)
+
+        assert len(r["progress"]) > 0
+
+    @patch("gps_photo_tracker.gui.worker.GPSTaggingService")
+    def test_cancel_token_propagation(self, MockService, qapp):
+        from gps_photo_tracker.core.models import BatchResult
+        mock_svc = MockService.return_value
+        mock_svc.scan_gpx.return_value = self._make_segments()
+        mock_svc.scan_photos.return_value = self._make_photos()
+        mock_svc.preview.return_value = BatchResult(
+            total=0, matched=0, skipped=0, failed=0, overwritten=0,
+            success_rate=0.0, results=[], reject_groups={},
+        )
+
+        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+                   ProcessOptions(mode=ProcessMode.PREVIEW))
+        assert not w._token.is_cancelled
+        w.cancel()
+        assert w._token.is_cancelled
+
+    @patch("gps_photo_tracker.gui.worker.GPSTaggingService")
+    def test_log_dir_passed_to_service(self, MockService, qapp):
+        from gps_photo_tracker.core.models import BatchResult
+        mock_svc = MockService.return_value
+        mock_svc.scan_gpx.return_value = []
+        mock_svc.scan_photos.return_value = []
+        mock_svc.preview.return_value = BatchResult(
+            total=0, matched=0, skipped=0, failed=0, overwritten=0,
+            success_rate=0.0, results=[], reject_groups={},
+        )
+
+        log_dir = Path("/tmp/logs")
+        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+                   ProcessOptions(mode=ProcessMode.PREVIEW), log_dir=log_dir)
+        self._run_worker(w)
+
+        MockService.assert_called_once_with(log_dir=log_dir)
