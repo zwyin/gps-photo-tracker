@@ -177,6 +177,11 @@ class PhotoBrowserDialog(QDialog):
         cache_key = f"thumb:{path}"
         pixmap = QPixmap(path)
         if not pixmap.isNull():
+            from pathlib import Path
+            from gps_photo_tracker.core.orientation import OrientationReader
+            orientation = OrientationReader.get_orientation(Path(path))
+            if orientation and orientation != 1:
+                pixmap = OrientationReader.apply_orientation(pixmap, orientation)
             scaled = pixmap.scaled(
                 150, 150,
                 Qt.AspectRatioMode.KeepAspectRatio,

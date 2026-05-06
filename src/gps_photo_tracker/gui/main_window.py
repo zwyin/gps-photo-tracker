@@ -127,7 +127,7 @@ class MainWindow(QMainWindow):
         row1 = QHBoxLayout()
         self._gps_dir_edit = QComboBox()
         self._gps_dir_edit.setEditable(True)
-        self._gps_dir_edit.lineEdit().setPlaceholderText("GPS 轨迹目录...")
+        self._gps_dir_edit.lineEdit().setPlaceholderText("GPS 轨迹目录 (GPX/KML/TCX)...")
         btn_gps = QPushButton("浏览")
         btn_gps.clicked.connect(self._browse_gps_dir)
         row1.addWidget(QLabel("GPS:"))
