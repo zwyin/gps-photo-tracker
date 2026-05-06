@@ -191,13 +191,14 @@ class GPSTaggingService:
         overwritten = 0
         reject_groups: dict[str, list[str]] = {}
 
+        # Parallel writes: only COPY/OVERWRITE modes (PREVIEW never writes)
         use_parallel = (
             not is_preview and options
             and options.workers > 1
             and options.mode in (ProcessMode.COPY, ProcessMode.OVERWRITE)
         )
         write_tasks: list[WriteTask] = []
-        write_task_indices: list[int] = []  # index into match_results for each task
+        filename_to_overwritten: dict[str, bool] = {}  # track which parallel tasks overwrite
 
         for i, result in enumerate(match_results):
             if cancel and cancel.is_cancelled:
@@ -233,7 +234,7 @@ class GPSTaggingService:
                             write_tasks.append(WriteTask(
                                 match_result=result, options=options, photo_dir=photo_dir,
                             ))
-                            write_task_indices.append(i)
+                            filename_to_overwritten[result.photo.filename] = result.photo.has_gps
                         else:
                             try:
                                 dst = self._write_photo(result, options, photo_dir)
@@ -290,25 +291,34 @@ class GPSTaggingService:
                     ))
 
             def _on_write_result(wr):
+                nonlocal overwritten
                 if wr.success:
                     completed_filenames.append(wr.filename)
                     if self._op_logger:
-                        idx = write_task_indices[len(completed_filenames) - 1]
-                        r = match_results[idx]
-                        self._op_logger.log_write_success(r.photo, r.gps, dest=wr.dest_path)
+                        task = next((t for t in write_tasks if t.match_result.photo.filename == wr.filename), None)
+                        if task:
+                            r = task.match_result
+                            self._op_logger.log_write_success(r.photo, r.gps, dest=wr.dest_path)
                 else:
                     nonlocal failed, matched
                     failed += 1
                     matched -= 1
+                    if filename_to_overwritten.get(wr.filename, False):
+                        overwritten -= 1
                     if self._op_logger:
                         self._op_logger.log_error(f"parallel_write: {wr.filename}", wr.error)
 
-            write_results = processor.submit_all(
-                write_tasks,
-                on_progress=_on_write_progress,
-                on_result=_on_write_result,
-                cancel=cancel,
-            )
+            try:
+                write_results = processor.submit_all(
+                    write_tasks,
+                    on_progress=_on_write_progress,
+                    on_result=_on_write_result,
+                    cancel=cancel,
+                )
+            except Exception as e:
+                logger.error("并行写入基础设施失败: %s", e)
+                if self._op_logger:
+                    self._op_logger.log_error("parallel_submit_all", e)
 
             # Checkpoint: batch-mark all completed writes (no race — single-threaded)
             if use_checkpoint and options.output_dir:

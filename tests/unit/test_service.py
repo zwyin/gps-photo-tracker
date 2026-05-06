@@ -1153,14 +1153,12 @@ class TestParallelWrite:
     def test_parallel_uses_batch_processor(self, tmp_path):
         """When workers>1, BatchProcessor.submit_all is called instead of inline write."""
         from unittest.mock import patch, MagicMock
-        import gps_photo_tracker.service.tagging_service as ts_mod
+        from gps_photo_tracker.core.concurrency import WriteResult
 
-        # Create a real JPEG file
         img = Image.new("RGB", (10, 10))
         exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
         img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
 
-        # Construct matched results directly (bypass matching to avoid timezone issues)
         photo = PhotoInfo(
             path=tmp_path / "photo.jpg", filename="photo.jpg",
             timestamp=1000.0, has_gps=False,
@@ -1174,26 +1172,78 @@ class TestParallelWrite:
         output.mkdir()
         options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, workers=2)
 
-        MockBP = MagicMock()
+        def fake_submit_all(tasks, on_progress=None, on_result=None, cancel=None):
+            """Simulate BatchProcessor.submit_all invoking callbacks."""
+            if on_progress:
+                on_progress(0, len(tasks))
+            if on_result:
+                for t in tasks:
+                    on_result(WriteResult(
+                        success=True, filename=t.match_result.photo.filename,
+                        dest_path=output / t.match_result.photo.filename,
+                    ))
+                on_progress(len(tasks), len(tasks))
+            return []
+
         mock_instance = MagicMock()
-        mock_instance.submit_all.return_value = []
-        MockBP.return_value = mock_instance
+        mock_instance.submit_all.side_effect = fake_submit_all
 
-        # Swap BatchProcessor in the module namespace
-        original_bp = ts_mod.BatchProcessor
-        ts_mod.BatchProcessor = MockBP
+        with patch("gps_photo_tracker.service.tagging_service.BatchProcessor", return_value=mock_instance), \
+             patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher:
+            MockMatcher.return_value.match.return_value = [match_result]
 
-        try:
-            with patch.object(ts_mod.GPSMatcher, "match", return_value=[match_result]):
-                service = GPSTaggingService()
-                result = service.process(
-                    [], [photo], MatcherConfig(), options, photo_dir=tmp_path,
-                )
+            service = GPSTaggingService()
+            result = service.process(
+                [], [photo], MatcherConfig(), options, photo_dir=tmp_path,
+            )
 
-                MockBP.assert_called_once_with(workers=2)
-                assert mock_instance.submit_all.called
-        finally:
-            ts_mod.BatchProcessor = original_bp
+            assert result.matched == 1
+            assert result.failed == 0
+            assert result.concurrent_workers == 2
+
+    def test_parallel_write_failure_decrements_counters(self, tmp_path):
+        """Parallel write failure decrements matched and increments failed."""
+        from unittest.mock import patch, MagicMock
+        from gps_photo_tracker.core.concurrency import WriteResult
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        match_result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0, 50),
+            method="interpolated", time_diff=10.0,
+        )
+
+        output = tmp_path / "output"
+        output.mkdir()
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, workers=2)
+
+        def fake_submit_all_with_failure(tasks, on_progress=None, on_result=None, cancel=None):
+            if on_result:
+                on_result(WriteResult(
+                    success=False, filename="photo.jpg", error="write failed",
+                ))
+            return []
+
+        mock_instance = MagicMock()
+        mock_instance.submit_all.side_effect = fake_submit_all_with_failure
+
+        with patch("gps_photo_tracker.service.tagging_service.BatchProcessor", return_value=mock_instance), \
+             patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher:
+            MockMatcher.return_value.match.return_value = [match_result]
+
+            service = GPSTaggingService()
+            result = service.process(
+                [], [photo], MatcherConfig(), options, photo_dir=tmp_path,
+            )
+
+            assert result.matched == 0
+            assert result.failed == 1
 
     def test_workers_1_does_not_use_batch_processor(self, tmp_path):
         """workers=1 uses inline sequential write, not BatchProcessor."""
