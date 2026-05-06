@@ -385,20 +385,20 @@ class TestPhaseProgress:
 class TestThumbnailPreview:
 
     def test_thumb_widgets_exist(self, main_window):
-        assert main_window._thumb_label is not None
-        assert main_window._thumb_info is not None
+        assert main_window._photo_preview._thumb_label is not None
+        assert main_window._photo_preview._info_label is not None
 
     def test_thumb_size_200x200(self, main_window):
         """Fix #4: Thumbnail preview should be 200x200 per spec."""
-        assert main_window._thumb_label.width() == 200
-        assert main_window._thumb_label.height() == 200
+        assert main_window._photo_preview._thumb_label.width() == 200
+        assert main_window._photo_preview._thumb_label.height() == 200
 
     def test_thumb_info_default_text(self, main_window):
-        assert "选中" in main_window._thumb_info.text()
+        assert "选中" in main_window._photo_preview._info_label.text()
 
     def test_on_selection_changed_no_selection(self, main_window):
         main_window._on_selection_changed()
-        assert "选中" in main_window._thumb_info.text()
+        assert "选中" in main_window._photo_preview._info_label.text()
 
     def test_on_selection_changed_with_data(self, main_window):
         main_window._result_details.append({
@@ -412,7 +412,7 @@ class TestThumbnailPreview:
         main_window._results_table.setItem(0, 0, QTableWidgetItem("test.jpg"))
         # Select the row
         main_window._results_table.selectRow(0)
-        info = main_window._thumb_info.text()
+        info = main_window._photo_preview._info_label.text()
         assert "test.jpg" in info
         assert "插值" in info
 
@@ -755,13 +755,13 @@ class TestThumbnailSize:
 
     def test_thumb_label_is_200x200(self, main_window):
         """Fix #4: Thumbnail preview area should be 200x200 per spec."""
-        assert main_window._thumb_label.width() == 200
-        assert main_window._thumb_label.height() == 200
+        assert main_window._photo_preview._thumb_label.width() == 200
+        assert main_window._photo_preview._thumb_label.height() == 200
 
     def test_thumb_label_not_120(self, main_window):
         """Fix #4: Ensure the old 120x120 size is no longer used."""
-        assert main_window._thumb_label.width() != 120
-        assert main_window._thumb_label.height() != 120
+        assert main_window._photo_preview._thumb_label.width() != 120
+        assert main_window._photo_preview._thumb_label.height() != 120
 
 
 # ── Fix #5: Settings mode persistence tests ────────────────

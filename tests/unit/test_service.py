@@ -739,3 +739,261 @@ class TestCopyAfterWriteFailure:
         if result.matched > 0:
             # Some matched but write failed — photo still copied
             assert (output / "photo.jpg").exists()
+
+
+class TestScanProgressCallbacks:
+    """Verify scan_gpx and scan_photos call on_progress correctly."""
+
+    def test_scan_gpx_progress_callback(self, tmp_path):
+        gpx = ('<?xml version="1.0"?><gpx><trk><trkseg>'
+               '<trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>'
+               '</trkseg></trk></gpx>')
+        (tmp_path / "a.gpx").write_text(gpx)
+        (tmp_path / "b.gpx").write_text(gpx)
+
+        service = GPSTaggingService()
+        updates = []
+        segments = service.scan_gpx(tmp_path, on_progress=lambda u: updates.append(u))
+
+        assert len(segments) == 2
+        assert len(updates) == 2
+        assert updates[0].phase == ProgressPhase.SCANNING_GPX
+        assert updates[0].current == 1
+        assert updates[0].total == 2
+        assert updates[0].current_file == "a.gpx"
+
+    def test_scan_photos_progress_callback(self, tmp_path):
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:00:00"}}
+        img.save(str(tmp_path / "a.jpg"), "JPEG", exif=piexif.dump(exif))
+        img.save(str(tmp_path / "b.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        service = GPSTaggingService()
+        updates = []
+        photos = service.scan_photos(tmp_path, on_progress=lambda u: updates.append(u))
+
+        assert len(photos) == 2
+        assert len(updates) == 2
+        assert updates[0].phase == ProgressPhase.SCANNING_PHOTOS
+        assert updates[0].current == 1
+
+    def test_scan_gpx_skips_bad_file(self, tmp_path):
+        (tmp_path / "bad.gpx").write_text("NOT VALID GPX")
+        gpx = ('<?xml version="1.0"?><gpx><trk><trkseg>'
+               '<trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>'
+               '</trkseg></trk></gpx>')
+        (tmp_path / "good.gpx").write_text(gpx)
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        assert len(segments) == 1
+        assert segments[0].filename == "good.gpx"
+
+
+class TestCopyModeEdgeCases:
+    """COPY mode: output == input, keep_structure, copy-only paths."""
+
+    def test_copy_preserves_directory_structure(self, tmp_path):
+        gpx = ('<?xml version="1.0"?><gpx><trk><trkseg>'
+               '<trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time><ele>100</ele></trkpt>'
+               '<trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time><ele>110</ele></trkpt>'
+               '</trkseg></trk></gpx>')
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        subdir = tmp_path / "subdir"
+        subdir.mkdir()
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(subdir / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        output = tmp_path / "output"
+        output.mkdir()
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        options = ProcessOptions(
+            mode=ProcessMode.COPY, output_dir=output, keep_structure=True,
+        )
+        result = service.process(segments, photos, MatcherConfig(), options, photo_dir=tmp_path)
+
+        # Should preserve subdir structure
+        assert (output / "subdir" / "photo.jpg").exists()
+
+    def test_copy_all_photos_output_equals_input(self, tmp_path):
+        """Spec 5.3: output count == input count."""
+        gpx = ('<?xml version="1.0"?><gpx><trk><trkseg>'
+               '<trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time><ele>100</ele></trkpt>'
+               '</trkseg></trk></gpx>')
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        img = Image.new("RGB", (10, 10))
+        # Matched photo
+        exif1 = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:00:00"}}
+        img.save(str(tmp_path / "matched.jpg"), "JPEG", exif=piexif.dump(exif1))
+        # Unmatched photo (no GPS coverage)
+        exif2 = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:18 08:00:00"}}
+        img.save(str(tmp_path / "unmatched.jpg"), "JPEG", exif=piexif.dump(exif2))
+
+        output = tmp_path / "output"
+        output.mkdir()
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
+        result = service.process(segments, photos, MatcherConfig(), options, photo_dir=tmp_path)
+
+        assert (output / "matched.jpg").exists()
+        assert (output / "unmatched.jpg").exists()
+        output_count = len(list(output.glob("*.jpg")))
+        assert output_count == 2
+
+    def test_copy_skip_existing_gps(self, tmp_path):
+        """Photo with GPS + overwrite_gps=False: copy only, no GPS write."""
+        # Use a known timestamp that matches GPS segment range
+        import datetime as _dt
+        ts = _dt.datetime(2026, 2, 17, 8, 5, 0, tzinfo=_dt.timezone.utc).timestamp()
+        # GPX times in UTC
+        start = _dt.datetime(2026, 2, 17, 8, 0, 0, tzinfo=_dt.timezone.utc).timestamp()
+        end = _dt.datetime(2026, 2, 17, 8, 10, 0, tzinfo=_dt.timezone.utc).timestamp()
+
+        from gps_photo_tracker.core.models import GPXSegment, TrackPoint
+        segments = [GPXSegment(
+            filename="track.gpx", start=start, end=end,
+            points=[
+                TrackPoint(start, 25.0, 100.0, 100),
+                TrackPoint(end, 25.001, 100.001, 110),
+            ],
+        )]
+
+        # Create a photo with existing GPS
+        img = Image.new("RGB", (10, 10))
+        exif_bytes = {
+            "Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"},
+            "GPS": {
+                piexif.GPSIFD.GPSVersionID: (2, 3, 0, 0),
+                piexif.GPSIFD.GPSLatitudeRef: b'N',
+                piexif.GPSIFD.GPSLatitude: ((25, 1), (0, 1), (0, 1)),
+                piexif.GPSIFD.GPSLongitudeRef: b'E',
+                piexif.GPSIFD.GPSLongitude: ((100, 1), (0, 1), (0, 1)),
+            },
+        }
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif_bytes))
+
+        # Manually construct PhotoInfo with correct UTC timestamp
+        photos = [PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=ts, has_gps=True,
+            existing_gps=GPSInfo(25.0, 100.0, None),
+        )]
+
+        output = tmp_path / "output"
+        output.mkdir()
+
+        service = GPSTaggingService()
+        options = ProcessOptions(
+            mode=ProcessMode.COPY, output_dir=output, overwrite_gps=False,
+        )
+        result = service.process(segments, photos, MatcherConfig(), options, photo_dir=tmp_path)
+
+        assert result.skipped >= 1
+        assert (output / "photo.jpg").exists()
+
+
+class TestPipelineProgressCallback:
+    """Verify progress callbacks fire during preview and process."""
+
+    def test_preview_progress_fires(self, tmp_path):
+        gpx = ('<?xml version="1.0"?><gpx><trk><trkseg>'
+               '<trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time><ele>100</ele></trkpt>'
+               '<trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time><ele>110</ele></trkpt>'
+               '</trkseg></trk></gpx>')
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+
+        updates = []
+        result = service.preview(
+            segments, photos, MatcherConfig(),
+            on_progress=lambda u: updates.append(u),
+        )
+
+        assert result.total == 1
+        assert len(updates) >= 1
+        assert updates[0].phase == ProgressPhase.MATCHING
+
+    def test_process_progress_fires_writing_phase(self, tmp_path):
+        gpx = ('<?xml version="1.0"?><gpx><trk><trkseg>'
+               '<trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time><ele>100</ele></trkpt>'
+               '<trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time><ele>110</ele></trkpt>'
+               '</trkseg></trk></gpx>')
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        output = tmp_path / "output"
+        output.mkdir()
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
+
+        updates = []
+        result = service.process(
+            segments, photos, MatcherConfig(), options,
+            photo_dir=tmp_path,
+            on_progress=lambda u: updates.append(u),
+        )
+
+        phases = [u.phase for u in updates]
+        assert ProgressPhase.WRITING in phases
+
+
+class TestCopyDestinationPaths:
+    """Test _copy_destination with keep_structure edge cases."""
+
+    def test_keep_structure_value_error_fallback(self):
+        service = GPSTaggingService()
+        options = ProcessOptions(
+            mode=ProcessMode.COPY,
+            output_dir=Path("/output"),
+            keep_structure=True,
+        )
+        # Path not relative to photo_dir → ValueError → fallback to filename
+        result = service._copy_destination(Path("/other/photo.jpg"), options, Path("/photos"))
+        assert result == Path("/output") / "photo.jpg"
+
+    def test_keep_structure_preserves_relative_path(self):
+        service = GPSTaggingService()
+        options = ProcessOptions(
+            mode=ProcessMode.COPY,
+            output_dir=Path("/output"),
+            keep_structure=True,
+        )
+        result = service._copy_destination(
+            Path("/photos/2026/feb/photo.jpg"), options, Path("/photos"),
+        )
+        assert result == Path("/output") / "2026" / "feb" / "photo.jpg"
+
+    def test_no_keep_structure_uses_filename_only(self):
+        service = GPSTaggingService()
+        options = ProcessOptions(
+            mode=ProcessMode.COPY,
+            output_dir=Path("/output"),
+            keep_structure=False,
+        )
+        result = service._copy_destination(
+            Path("/photos/2026/feb/photo.jpg"), options, Path("/photos"),
+        )
+        assert result == Path("/output") / "photo.jpg"
+

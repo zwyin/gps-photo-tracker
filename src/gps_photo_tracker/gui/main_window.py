@@ -2,36 +2,32 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSettings, QTimer
-from PySide6.QtGui import QPixmap, QPixmapCache
+from PySide6.QtCore import Qt, QSettings
 from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
-    QLineEdit,
     QMainWindow,
-    QMenuBar,
     QMessageBox,
     QPushButton,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
     QCheckBox,
     QComboBox,
-    QRadioButton,
-    QButtonGroup,
-    QProgressBar,
     QSplitter,
 )
 
 from gps_photo_tracker.core.models import MatcherConfig, ProcessMode, ProcessOptions
+from gps_photo_tracker.gui.config_panel import build_params_group, build_mode_group
 from gps_photo_tracker.gui.detail_dialog import DetailDialog
 from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
 from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
+from gps_photo_tracker.gui.photo_preview import PhotoPreview
+from gps_photo_tracker.gui.progress_panel import build_progress_group
+from gps_photo_tracker.gui.result_table import build_result_panel
 from gps_photo_tracker.gui.settings_dialog import SettingsDialog, load_settings
 from gps_photo_tracker.gui.worker import Worker
 
@@ -47,8 +43,6 @@ class MainWindow(QMainWindow):
         self._cached_segments = []
         self._cached_photos = []
         self._excluded_filenames: set[str] = set()
-        self._pending_thumb_path: str = ""
-        QPixmapCache.setCacheLimit(51200)  # 50 MB cache for thumbnails
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -88,14 +82,36 @@ class MainWindow(QMainWindow):
 
         # File selection
         layout.addWidget(self._build_file_group())
-        # Parameters
-        layout.addWidget(self._build_params_group())
-        # Process mode
-        layout.addWidget(self._build_mode_group())
+
+        # Parameters (from config_panel)
+        params_group, params_w = build_params_group()
+        self._isolated_spin = params_w["isolated_spin"]
+        self._middle_spin = params_w["middle_spin"]
+        self._context_spin = params_w["context_spin"]
+        self._distance_spin = params_w["distance_spin"]
+        self._offset_spin = params_w["offset_spin"]
+        self._match_tail_cb = params_w["match_tail_cb"]
+        self._overwrite_gps_cb = params_w["overwrite_gps_cb"]
+        self._keep_struct_cb = params_w["keep_struct_cb"]
+        layout.addWidget(params_group)
+
+        # Process mode (from config_panel)
+        mode_group, mode_btn_group, mode_radios = build_mode_group()
+        self._mode_group = mode_btn_group
+        self._preview_rb = mode_radios["preview_rb"]
+        self._copy_rb = mode_radios["copy_rb"]
+        self._overwrite_rb = mode_radios["overwrite_rb"]
+        layout.addWidget(mode_group)
+
         # Buttons
         layout.addWidget(self._build_buttons())
-        # Progress
-        layout.addWidget(self._build_progress_group())
+
+        # Progress (from progress_panel)
+        progress_group, phase_bars, progress_label, elapsed_label = build_progress_group()
+        self._phase_bars = phase_bars
+        self._progress_label = progress_label
+        self._elapsed_label = elapsed_label
+        layout.addWidget(progress_group)
 
         layout.addStretch()
         return widget
@@ -157,192 +173,42 @@ class MainWindow(QMainWindow):
         browser_row.addWidget(self._photo_browser_label)
         layout.addLayout(browser_row)
 
-        # Scan summary (read-only display)
+        # Scan summary
         self._scan_summary = QLabel("GPS: — | 照片: —")
         self._scan_summary.setStyleSheet("padding: 4px; color: #666;")
         layout.addWidget(self._scan_summary)
 
         return group
 
-    def _build_params_group(self) -> QGroupBox:
-        group = QGroupBox("参数配置")
-        layout = QVBoxLayout(group)
-
-        # Isolated window (spec: 60-3600)
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("孤立窗口:"))
-        self._isolated_spin = QSpinBox()
-        self._isolated_spin.setRange(60, 3600)
-        self._isolated_spin.setValue(300)
-        self._isolated_spin.setSuffix(" 秒")
-        row1.addWidget(self._isolated_spin)
-        layout.addLayout(row1)
-
-        # Middle time window (spec: 600-7200)
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("中间窗口:"))
-        self._middle_spin = QSpinBox()
-        self._middle_spin.setRange(600, 7200)
-        self._middle_spin.setValue(3600)
-        self._middle_spin.setSuffix(" 秒")
-        row2.addWidget(self._middle_spin)
-        layout.addLayout(row2)
-
-        # Context window (spec: 60-1800)
-        row3 = QHBoxLayout()
-        row3.addWidget(QLabel("上下文窗口:"))
-        self._context_spin = QSpinBox()
-        self._context_spin.setRange(60, 1800)
-        self._context_spin.setValue(300)
-        self._context_spin.setSuffix(" 秒")
-        row3.addWidget(self._context_spin)
-        layout.addLayout(row3)
-
-        # Max distance (spec: 50-1000)
-        row4 = QHBoxLayout()
-        row4.addWidget(QLabel("距离阈值:"))
-        self._distance_spin = QSpinBox()
-        self._distance_spin.setRange(50, 1000)
-        self._distance_spin.setValue(200)
-        self._distance_spin.setSuffix(" 米")
-        row4.addWidget(self._distance_spin)
-        layout.addLayout(row4)
-
-        # Checkboxes
-        self._match_tail_cb = QCheckBox("匹配首尾孤立照片")
-        self._match_tail_cb.setChecked(True)
-        layout.addWidget(self._match_tail_cb)
-
-        self._overwrite_gps_cb = QCheckBox("覆盖已有 GPS")
-        self._overwrite_gps_cb.setChecked(False)
-        layout.addWidget(self._overwrite_gps_cb)
-
-        self._keep_struct_cb = QCheckBox("保持目录结构")
-        self._keep_struct_cb.setChecked(True)
-        layout.addWidget(self._keep_struct_cb)
-
-        # Time offset
-        row5 = QHBoxLayout()
-        row5.addWidget(QLabel("时间偏移:"))
-        self._offset_spin = QSpinBox()
-        self._offset_spin.setRange(-3600, 3600)
-        self._offset_spin.setValue(0)
-        self._offset_spin.setSuffix(" 秒")
-        row5.addWidget(self._offset_spin)
-        layout.addLayout(row5)
-
-        return group
-
-    def _build_mode_group(self) -> QGroupBox:
-        group = QGroupBox("处理模式")
-        layout = QHBoxLayout(group)
-
-        self._mode_group = QButtonGroup(self)
-        self._preview_rb = QRadioButton("预览")
-        self._copy_rb = QRadioButton("拷贝")
-        self._overwrite_rb = QRadioButton("覆盖")
-        self._preview_rb.setChecked(True)
-
-        self._mode_group.addButton(self._preview_rb, 0)
-        self._mode_group.addButton(self._copy_rb, 1)
-        self._mode_group.addButton(self._overwrite_rb, 2)
-
-        layout.addWidget(self._preview_rb)
-        layout.addWidget(self._copy_rb)
-        layout.addWidget(self._overwrite_rb)
-        return group
-
     def _build_buttons(self) -> QWidget:
         widget = QWidget()
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
-
         self._start_btn = QPushButton("开始处理")
         self._start_btn.clicked.connect(self._on_start)
-        layout.addWidget(self._start_btn)
-
         self._cancel_btn = QPushButton("取消")
         self._cancel_btn.setEnabled(False)
         self._cancel_btn.clicked.connect(self._on_cancel)
+        layout.addWidget(self._start_btn)
         layout.addWidget(self._cancel_btn)
-
         return widget
-
-    def _build_progress_group(self) -> QGroupBox:
-        group = QGroupBox("进度")
-        layout = QVBoxLayout(group)
-
-        # 4 phase progress bars
-        phase_labels = ["扫描GPS", "扫描照片", "匹配", "写入"]
-        self._phase_bars: list[QProgressBar] = []
-        for label_text in phase_labels:
-            row = QHBoxLayout()
-            lbl = QLabel(f"{label_text}:")
-            lbl.setFixedWidth(60)
-            bar = QProgressBar()
-            bar.setValue(0)
-            bar.setMaximum(100)
-            bar.setFixedHeight(16)
-            bar.setTextVisible(False)
-            row.addWidget(lbl)
-            row.addWidget(bar)
-            layout.addLayout(row)
-            self._phase_bars.append(bar)
-
-        self._progress_label = QLabel("就绪")
-        layout.addWidget(self._progress_label)
-
-        self._elapsed_label = QLabel("")
-        layout.addWidget(self._elapsed_label)
-
-        return group
 
     # ── Right panel ─────────────────────────────────────────
 
     def _build_right_panel(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        # Stats card
-        self._stats_label = QLabel("匹配结果将在此显示")
-        self._stats_label.setStyleSheet("padding: 8px; background: #f0f0f0; border-radius: 4px;")
-        layout.addWidget(self._stats_label)
-
-        # Result filter
-        filter_row = QHBoxLayout()
-        filter_row.addWidget(QLabel("筛选:"))
-        self._result_filter = QComboBox()
-        self._result_filter.addItems(["全部", "成功", "失败", "跳过"])
+        # Result table (from result_table module)
+        result_widget, self._stats_label, self._result_filter, self._results_table = build_result_panel()
         self._result_filter.currentIndexChanged.connect(self._apply_result_filter)
-        filter_row.addWidget(self._result_filter)
-        filter_row.addStretch()
-        layout.addLayout(filter_row)
-
-        # Results table
-        self._results_table = QTableWidget(0, 5)
-        self._results_table.setHorizontalHeaderLabels(["文件名", "GPS(前)", "GPS(后)", "方式", "状态"])
-        self._results_table.horizontalHeader().setStretchLastSection(True)
-        self._results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._results_table.setSortingEnabled(True)
         self._results_table.doubleClicked.connect(self._on_table_double_click)
         self._results_table.selectionModel().selectionChanged.connect(self._on_selection_changed)
-        layout.addWidget(self._results_table, stretch=1)
 
-        # Thumbnail preview
-        thumb_row = QHBoxLayout()
-        self._thumb_label = QLabel()
-        self._thumb_label.setFixedSize(200, 200)
-        self._thumb_label.setStyleSheet("background: #e8e8e8; border: 1px solid #ccc;")
-        self._thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        thumb_row.addWidget(self._thumb_label)
-        self._thumb_info = QLabel("选中照片查看预览")
-        self._thumb_info.setWordWrap(True)
-        thumb_row.addWidget(self._thumb_info, stretch=1)
-        layout.addLayout(thumb_row)
+        layout = result_widget.layout()
 
-        return widget
+        # Photo preview (from photo_preview module)
+        self._photo_preview = PhotoPreview()
+        layout.addWidget(self._photo_preview)
+
+        return result_widget
 
     # ── Actions ─────────────────────────────────────────────
 
@@ -444,6 +310,8 @@ class MainWindow(QMainWindow):
             keep_structure=self._keep_struct_cb.isChecked(),
         )
 
+    # ── Processing ──────────────────────────────────────────
+
     def _on_start(self):
         gps_dir = self._gps_dir_edit.currentText()
         photo_dir = self._photo_dir_edit.currentText()
@@ -455,6 +323,19 @@ class MainWindow(QMainWindow):
         if mode_id == 1 and not self._output_dir_edit.currentText():
             QMessageBox.warning(self, "提示", "拷贝模式需要指定输出目录")
             return
+
+        # Overwrite mode confirmation (spec CF-05)
+        if mode_id == 2:
+            reply = QMessageBox.question(
+                self, "确认覆盖",
+                "覆盖模式将直接修改原始照片文件。\n\n"
+                "建议先使用预览模式确认匹配结果，再使用拷贝模式。\n\n"
+                "确定要使用覆盖模式吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
 
         self._start_btn.setEnabled(False)
         self._cancel_btn.setEnabled(True)
@@ -519,11 +400,9 @@ class MainWindow(QMainWindow):
         filename = result_dict.get("filename", "")
         self._results_table.setItem(row, 0, QTableWidgetItem(filename))
 
-        # GPS before — check if photo had existing GPS
         has_existing = result_dict.get("has_gps", False)
         self._results_table.setItem(row, 1, QTableWidgetItem("有" if has_existing else "无"))
 
-        # GPS after
         lat = result_dict.get("latitude")
         lon = result_dict.get("longitude")
         if lat is not None and lon is not None:
@@ -532,12 +411,10 @@ class MainWindow(QMainWindow):
             gps_text = "—"
         self._results_table.setItem(row, 2, QTableWidgetItem(gps_text))
 
-        # Method
         method = result_dict.get("method", "")
         method_text = {"interpolated": "插值", "nearest": "就近"}.get(method, "")
         self._results_table.setItem(row, 3, QTableWidgetItem(method_text))
 
-        # Status
         success = result_dict.get("success", False)
         if success:
             status = "成功"
@@ -550,17 +427,13 @@ class MainWindow(QMainWindow):
 
         self._results_table.scrollToBottom()
         self._result_details.append(result_dict)
-        # Apply current filter
         self._apply_result_filter()
-        # Update stats card in real-time
         self._update_stats_card()
 
     def _update_stats_card(self):
-        """Update stats label from current result_details."""
         total = len(self._result_details)
         matched = sum(1 for d in self._result_details if d.get("success"))
         failed = sum(1 for d in self._result_details if not d.get("success"))
-        # Skipped: matched but already had GPS (service decided not to write)
         skipped = sum(1 for d in self._result_details
                       if d.get("has_gps") and d.get("success"))
         overwritten = sum(1 for d in self._result_details if d.get("overwritten"))
@@ -585,7 +458,6 @@ class MainWindow(QMainWindow):
         self._progress_label.setText("完成")
         self.statusBar().showMessage(f"处理完成: {matched}/{total} 成功")
 
-        # Completion notification
         QMessageBox.information(
             self, "处理完成",
             f"处理完成！\n\n总数: {total}\n成功: {matched}\n失败: {failed}\n跳过: {skipped}\n成功率: {rate:.1%}"
@@ -607,7 +479,6 @@ class MainWindow(QMainWindow):
             elif filter_idx == 2:
                 self._results_table.setRowHidden(row, success)
             elif filter_idx == 3:
-                # Skipped: photo had GPS and was matched but not written
                 self._results_table.setRowHidden(row, not (has_gps and success))
 
     def _on_scan_done(self, segments: list[dict]):
@@ -640,53 +511,19 @@ class MainWindow(QMainWindow):
     def _on_selection_changed(self):
         rows = self._results_table.selectionModel().selectedRows()
         if not rows:
-            self._thumb_label.clear()
-            self._thumb_info.setText("选中照片查看预览")
+            self._photo_preview.clear()
             return
         row = rows[0].row()
         if 0 <= row < len(self._result_details):
             detail = self._result_details[row]
             photo_path = detail.get("path", "")
-            # Async thumbnail loading with QPixmapCache (spec 6.7)
-            if photo_path:
-                cache_key = f"thumb:{photo_path}"
-                cached = QPixmapCache.find(cache_key)
-                if cached:
-                    self._thumb_label.setPixmap(cached)
-                else:
-                    self._thumb_label.setText("加载中...")
-                    self._pending_thumb_path = photo_path
-                    QTimer.singleShot(10, self._load_thumb_preview)
-            else:
-                self._thumb_label.clear()
-            # Info text
             lat = detail.get("latitude")
             lon = detail.get("longitude")
             method = detail.get("method", "")
             method_text = {"interpolated": "插值", "nearest": "就近"}.get(method, "—")
-            # Use is not None check to avoid altitude=0 bug (Bug-EXIF-01 pattern)
             gps_str = f"{lat:.4f}, {lon:.4f}" if lat is not None and lon is not None else "—"
             info = f"文件: {detail.get('filename', '—')}\nGPS: {gps_str}\n方式: {method_text}"
-            self._thumb_info.setText(info)
-
-    def _load_thumb_preview(self):
-        """Load thumbnail asynchronously with QPixmapCache."""
-        path = self._pending_thumb_path
-        if not path:
-            return
-        cache_key = f"thumb:{path}"
-        pixmap = QPixmap(path)
-        if not pixmap.isNull():
-            scaled = pixmap.scaled(
-                200, 200,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            QPixmapCache.insert(cache_key, scaled)
-            if path == self._pending_thumb_path:
-                self._thumb_label.setPixmap(scaled)
-        else:
-            self._thumb_label.clear()
+            self._photo_preview.show_photo(photo_path, info)
 
     def _open_settings(self):
         dialog = SettingsDialog(self)
@@ -703,14 +540,12 @@ class MainWindow(QMainWindow):
         self._match_tail_cb.setChecked(bool(s.get("match_tail", True)))
         self._overwrite_gps_cb.setChecked(bool(s.get("overwrite_gps", False)))
 
-        # Restore saved processing mode
         mode_id = int(s.get("mode", 0))
         for rb, mid in [(self._preview_rb, 0), (self._copy_rb, 1), (self._overwrite_rb, 2)]:
             if mid == mode_id:
                 rb.setChecked(True)
                 break
 
-        # Restore window geometry
         geo = QSettings("GPSPhotoTracker", "GPSPhotoTracker").value("window_geometry")
         if geo:
             self.restoreGeometry(geo)
