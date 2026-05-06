@@ -191,3 +191,9 @@ class Worker(QThread):
             })
         except OperationCancelledError:
             pass  # User cancelled — do not emit error
+        except Exception as e:
+            self.done_signal.emit({
+                "error": str(e),
+                "total": 0, "matched": 0, "failed": 0,
+                "skipped": 0, "overwritten": 0, "success_rate": 0.0,
+            })

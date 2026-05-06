@@ -381,8 +381,7 @@ class GPSTaggingService:
         """Write GPS data to photo based on process mode. Returns destination path for COPY, None otherwise."""
         if options.mode == ProcessMode.COPY and options.output_dir:
             dst = self._copy_destination(result.photo.path, options, photo_dir)
-            self._file_provider.copy_file(result.photo.path, dst)
-            EXIFWriter.write_gps(dst, dst, result.gps)
+            EXIFWriter.write_gps(result.photo.path, dst, result.gps)
             return dst
         elif options.mode == ProcessMode.OVERWRITE:
             EXIFWriter.write_gps(result.photo.path, result.photo.path, result.gps)

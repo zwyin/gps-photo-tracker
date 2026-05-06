@@ -24,7 +24,7 @@ class ReportBuilder:
             ReportBuilder._reject_analysis(result),
         ]
         body = "\n".join(sections)
-        html = f"""<!DOCTYPE html>
+        page = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -49,7 +49,7 @@ class ReportBuilder:
 </body>
 </html>"""
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(html, encoding="utf-8")
+        output_path.write_text(page, encoding="utf-8")
         return output_path
 
     @staticmethod
