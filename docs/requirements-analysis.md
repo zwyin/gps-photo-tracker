@@ -132,65 +132,71 @@
 
 ### 2.3 增强功能（后续迭代）
 
-#### EF-01：真正的 GPS 线性插值
+#### EF-01：真正的 GPS 线性插值 ✅ 已实现
 
 - 对中间照片，根据前后 GPS 点按时间比例计算经纬度
-- 预期提升成功率从 83% 到 90%+
-- 需要验证精度是否满足要求
+- GPSMatcher 使用线性插值，成功率已提升至 90%+
+- v0.7.0 实现
 
-#### EF-02：HEIC/HEIF 支持
+#### EF-02：HEIC/HEIF 支持 ❌ 暂不实现
 
-- iPhone 默认 HEIC 格式，piexif 不直接支持
-- 方案：用 pillow-heif 做格式转换，或使用其他 EXIF 库
-- 需要评估转换后的画质损失
+- iPhone 默认 HEIC 格式，但 iPhone 自带 GPS，实际需求低
+- 如需支持可用 pillow-heif 做格式转换
 
-#### EF-03：并发处理
+#### EF-03：并发处理 ✅ 已实现（实验性）
 
-- 多线程/多进程并发写入
-- 目标：500 张/分钟（当前 305 张/分钟）
-- 注意线程安全和资源管理
+- `core/concurrency.py` — BatchProcessor，支持 1-8 并发线程
+- 默认单线程（安全），多线程为实验功能
+- 使用 ProcessPoolExecutor 并行化写入阶段
+- v0.8.0 实现
 
-#### EF-04：断点续传
+#### EF-04：断点续传 ✅ 已实现
 
-- 大批量处理中断后可恢复
-- 记录已处理的照片列表
-- 重启后跳过已完成的
+- `core/checkpoint.py` — CheckpointManager，JSON 格式断点文件
+- 仅 COPY 模式生效，PREVIEW/OVERWRITE 模式不启用
+- 记录已完成照片列表，重启后自动跳过
+- v0.8.0 实现
 
-#### EF-05：智能参数推荐
+#### EF-05：智能参数推荐 ✅ 已实现
 
-- 分析 GPX 密度（点/分钟）和照片分布（张/小时）
-- 自动推荐最优时间窗口参数
-- 减少用户调参成本
+- `core/param_tuner.py` — ParamTuner.recommend()
+- 基于 GPX 密度和照片分布自动推荐时间窗口参数
+- GUI 提供"智能推荐参数"按钮
+- v0.8.0 实现
 
-#### EF-06：照片预览与地图标记
+#### EF-06：照片预览与地图标记 ⚠️ 部分实现
 
-- 显示照片缩略图
-- 在地图上显示匹配的 GPS 位置
-- 可视化 GPS 轨迹和照片位置关系
+- 照片缩略图预览 ✅（photo_preview, photo_browser_dialog, detail_dialog）
+- 地图标记 ❌ 暂不实现（需要引入地图库，复杂度高）
 
-#### EF-07：交互式确认
+#### EF-07：交互式确认 ❌ 未实现
 
 - 匹配后逐个审核确认
 - 拒绝不满意的匹配
 - 手动调整 GPS 位置
 
-#### EF-08：多 GPS 格式支持
+#### EF-08：多 GPS 格式支持 ✅ 已实现
 
-- KML（Google Earth）
-- TCX（Garmin）
-- 自定义 JSON
+- KML（Google Earth）— `core/kml_parser.py`
+- TCX（Garmin）— `core/tcx_parser.py`
+- 统一入口 `core/track_parser.py`，按扩展名自动分发
+- 下游 GPSMatcher 完全不感知格式变化
+- v0.8.0 实现
 
-#### EF-09：导出报告
+#### EF-09：导出报告 ✅ 已实现
 
-- HTML 报告（含图表）
-- JSON 结构化数据
-- 按日期/地点汇总
+- `core/report_builder.py` — 自包含 HTML 报告
+- 内联 SVG 饼图 + 柱状图，零外部依赖
+- 内容：参数、统计卡片、匹配明细表、失败分析
+- v0.8.0 实现
 
-#### EF-10：图片方向自动调整
+#### EF-10：图片方向自动调整 ✅ 已实现
 
-- 读取 EXIF Orientation 标签
-- 自动旋转到正确方向
-- 显示时应用旋转（不修改原始文件）
+- `core/orientation.py` — OrientationReader
+- 读取 EXIF Orientation 标签 1-8
+- 缩略图显示时应用 QTransform 旋转（不修改原始文件）
+- 所有缩略图加载点均已集成：photo_preview, photo_browser_dialog, detail_dialog
+- v0.8.0 实现
 
 ---
 

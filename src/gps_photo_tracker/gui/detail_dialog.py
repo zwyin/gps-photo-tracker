@@ -155,6 +155,10 @@ class DetailDialog(QDialog):
         if pixmap.isNull():
             self._thumb.setText("无法加载")
             return
+        from gps_photo_tracker.core.orientation import OrientationReader
+        orientation = OrientationReader.get_orientation(path)
+        if orientation and orientation != 1:
+            pixmap = OrientationReader.apply_orientation(pixmap, orientation)
         scaled = pixmap.scaled(300, 300, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._thumb.setPixmap(scaled)
 

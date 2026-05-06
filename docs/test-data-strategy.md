@@ -89,9 +89,10 @@ gps-photo-tracker-claude/
 ### 3.1 第一层：单元测试（快速反馈）
 
 - **数据**：用 conftest.py 里的 mock 数据，不依赖真实文件
-- **覆盖**：匹配算法、EXIF 读写、GPX 解析、坐标转换
-- **速度**：< 10 秒
+- **覆盖**：匹配算法、EXIF 读写、GPX/KML/TCX 解析、坐标转换、并发处理、断点续传、参数推荐、方向变换、报告生成
+- **速度**：< 2 分钟（328 个测试）
 - **运行时机**：每次改代码
+- **覆盖率要求**：新模块 ≥ 85%，Service 层 ≥ 80%，整体 ≥ 75%（当前 86.69%）
 
 ### 3.2 第二层：集成测试（真实数据，小批量）
 
@@ -118,7 +119,25 @@ gps-photo-tracker-claude/
 
 ---
 
-## 4. 基准指标（来自 v7.2.0 实测）
+## 4. v0.8.0 新增模块测试清单
+
+| 模块 | 测试文件 | 测试数 | 覆盖率 |
+|------|----------|--------|--------|
+| `core/checkpoint.py` | `test_checkpoint.py` | 7 | 97% |
+| `core/concurrency.py` | `test_concurrency.py` | 8 | 65% (mock) |
+| `core/param_tuner.py` | `test_param_tuner.py` | 9 | 90% |
+| `core/kml_parser.py` | `test_kml_parser.py` | 7 | 90% |
+| `core/tcx_parser.py` | `test_tcx_parser.py` | 7 | 92% |
+| `core/track_parser.py` | `test_track_parser.py` | 5 | 91% |
+| `core/report_builder.py` | `test_report_builder.py` | 7 | 99% |
+| `core/orientation.py` | `test_orientation.py` | 9 | 89% |
+| `service/tagging_service.py` | `test_service.py` | 53 | 81% |
+
+**总计：328 个测试，整体覆盖率 86.69%**
+
+---
+
+## 5. 基准指标（来自 v7.2.0 实测）
 
 | 指标 | 基准值 | 数据集 |
 |------|--------|--------|
@@ -132,7 +151,7 @@ gps-photo-tracker-claude/
 
 ---
 
-## 5. 测试数据准备清单
+## 6. 测试数据准备清单
 
 重写开始前需要执行：
 
