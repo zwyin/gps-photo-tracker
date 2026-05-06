@@ -53,6 +53,12 @@ class PhotoPreview(QWidget):
         cache_key = f"thumb:{path}"
         pixmap = QPixmap(path)
         if not pixmap.isNull():
+            # Apply EXIF orientation transform
+            from pathlib import Path
+            from gps_photo_tracker.core.orientation import OrientationReader
+            orientation = OrientationReader.get_orientation(Path(path))
+            if orientation and orientation != 1:
+                pixmap = OrientationReader.apply_orientation(pixmap, orientation)
             scaled = pixmap.scaled(
                 200, 200,
                 Qt.AspectRatioMode.KeepAspectRatio,

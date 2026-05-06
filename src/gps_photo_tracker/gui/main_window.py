@@ -93,6 +93,9 @@ class MainWindow(QMainWindow):
         self._match_tail_cb = params_w["match_tail_cb"]
         self._overwrite_gps_cb = params_w["overwrite_gps_cb"]
         self._keep_struct_cb = params_w["keep_struct_cb"]
+        self._auto_tune_btn = params_w["auto_tune_btn"]
+        self._workers_spin = params_w["workers_spin"]
+        self._auto_tune_btn.clicked.connect(self._on_auto_tune)
         layout.addWidget(params_group)
 
         # Process mode (from config_panel)
@@ -234,18 +237,18 @@ class MainWindow(QMainWindow):
 
     def _auto_scan_gpx(self, gps_dir: Path):
         from gps_photo_tracker.core.file_provider import FileProvider
-        from gps_photo_tracker.core.gpx_parser import GPXParser
+        from gps_photo_tracker.core.track_parser import TrackParser
         provider = FileProvider()
-        parser = GPXParser()
-        gpx_files = provider.list_gpx(gps_dir)
+        parser = TrackParser()
+        track_files = provider.list_tracks(gps_dir)
         total_points = 0
-        for f in gpx_files:
+        for f in track_files:
             try:
                 segs = parser.parse_file(f)
                 total_points += sum(len(s.points) for s in segs)
             except Exception:
                 pass
-        self._gpx_browser_label.setText(f"GPS: {len(gpx_files)}文件 {total_points}点")
+        self._gpx_browser_label.setText(f"GPS: {len(track_files)}文件 {total_points}点")
 
     def _auto_scan_photos(self, photo_dir: Path):
         from gps_photo_tracker.core.exif_writer import EXIFWriter
@@ -303,12 +306,52 @@ class MainWindow(QMainWindow):
         mode_id = self._mode_group.checkedId()
         mode = [ProcessMode.PREVIEW, ProcessMode.COPY, ProcessMode.OVERWRITE][mode_id]
         output_dir = Path(self._output_dir_edit.currentText()) if self._output_dir_edit.currentText() else None
+        settings = QSettings()
         return ProcessOptions(
             mode=mode,
             output_dir=output_dir,
             overwrite_gps=self._overwrite_gps_cb.isChecked(),
             keep_structure=self._keep_struct_cb.isChecked(),
+            resume=bool(settings.value("resume", False, type=bool)),
+            generate_report=bool(settings.value("generate_report", False, type=bool)),
+            workers=self._workers_spin.value(),
         )
+
+    def _on_auto_tune(self):
+        """Auto-tune parameters based on scanned GPS and photo data."""
+        if not self._cached_segments and not self._cached_photos:
+            QMessageBox.information(self, "提示", "请先扫描 GPS 和照片目录")
+            return
+        from gps_photo_tracker.service.tagging_service import GPSTaggingService
+        from gps_photo_tracker.core.models import GPXSegment, TrackPoint
+        # Convert cached segment dicts back to GPXSegment for auto-tune
+        segments = []
+        for s in self._cached_segments:
+            pts = [TrackPoint(timestamp=0, latitude=0, longitude=0)]  # placeholder
+            segments.append(GPXSegment(
+                filename=s.get("filename", ""),
+                start=s.get("start", 0),
+                end=s.get("end", 0),
+                points=pts,
+            ))
+        from gps_photo_tracker.core.models import PhotoInfo
+        photos = []
+        for p in self._cached_photos:
+            photos.append(PhotoInfo(
+                path=Path(p.get("path", "")),
+                filename=p.get("filename", ""),
+                timestamp=p.get("timestamp"),
+                has_gps=p.get("has_gps", False),
+            ))
+        service = GPSTaggingService()
+        config = service.auto_tune(segments, photos)
+        self._isolated_spin.setValue(config.isolated_window)
+        self._middle_spin.setValue(config.middle_time_window)
+        self._context_spin.setValue(config.context_window)
+        self._distance_spin.setValue(config.max_gps_distance)
+        self._offset_spin.setValue(config.time_offset)
+        self._match_tail_cb.setChecked(config.match_tail)
+        self.statusBar().showMessage("参数已根据数据自动推荐")
 
     # ── Processing ──────────────────────────────────────────
 
@@ -539,6 +582,7 @@ class MainWindow(QMainWindow):
         self._offset_spin.setValue(int(s.get("time_offset", 0)))
         self._match_tail_cb.setChecked(bool(s.get("match_tail", True)))
         self._overwrite_gps_cb.setChecked(bool(s.get("overwrite_gps", False)))
+        self._workers_spin.setValue(int(s.get("workers", 1)))
 
         mode_id = int(s.get("mode", 0))
         for rb, mid in [(self._preview_rb, 0), (self._copy_rb, 1), (self._overwrite_rb, 2)]:

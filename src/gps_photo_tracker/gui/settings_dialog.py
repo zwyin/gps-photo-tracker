@@ -29,6 +29,9 @@ SETTINGS_KEYS = {
     "mode": 0,  # 0=preview, 1=copy, 2=overwrite
     "log_dir": "",
     "log_retention_days": 30,
+    "workers": 1,
+    "resume": False,
+    "generate_report": False,
 }
 
 
@@ -98,6 +101,25 @@ class SettingsDialog(QDialog):
         self._keep_structure = QCheckBox("保持目录结构")
         self._keep_structure.setChecked(self._settings.get("keep_structure", True))
         proc_layout.addRow(self._keep_structure)
+
+        self._resume = QCheckBox("断点续传（拷贝模式）")
+        self._resume.setChecked(self._settings.get("resume", False))
+        proc_layout.addRow(self._resume)
+
+        self._generate_report = QCheckBox("生成 HTML 报告")
+        self._generate_report.setChecked(self._settings.get("generate_report", False))
+        proc_layout.addRow(self._generate_report)
+
+        # Workers (experimental)
+        workers_row = QHBoxLayout()
+        workers_row.addWidget(QLabel("并发线程:"))
+        self._workers_spin = QSpinBox()
+        self._workers_spin.setRange(1, 8)
+        self._workers_spin.setValue(int(self._settings.get("workers", 1)))
+        self._workers_spin.setSuffix(" (实验性)")
+        workers_row.addWidget(self._workers_spin)
+        workers_row.addStretch()
+        proc_layout.addRow(workers_row)
 
         # Default processing mode radio buttons
         self._mode_group = QButtonGroup(self)
@@ -182,6 +204,9 @@ class SettingsDialog(QDialog):
         self._match_tail.setChecked(SETTINGS_KEYS["match_tail"])
         self._overwrite.setChecked(SETTINGS_KEYS["overwrite_gps"])
         self._keep_structure.setChecked(SETTINGS_KEYS["keep_structure"])
+        self._resume.setChecked(SETTINGS_KEYS["resume"])
+        self._generate_report.setChecked(SETTINGS_KEYS["generate_report"])
+        self._workers_spin.setValue(SETTINGS_KEYS["workers"])
         self._mode_preview_rb.setChecked(True)
         self._log_dir_edit.setText("")
         self._retention_spin.setValue(30)
@@ -201,6 +226,9 @@ class SettingsDialog(QDialog):
             "match_tail": self._match_tail.isChecked(),
             "overwrite_gps": self._overwrite.isChecked(),
             "keep_structure": self._keep_structure.isChecked(),
+            "resume": self._resume.isChecked(),
+            "generate_report": self._generate_report.isChecked(),
+            "workers": self._workers_spin.value(),
             "mode": self._mode_group.checkedId(),
             "log_dir": self._log_dir_edit.text(),
             "log_retention_days": self._retention_spin.value(),
