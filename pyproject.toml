@@ -1,6 +1,6 @@
 [project]
 name = "gps-photo-tracker"
-version = "1.0.0"
+version = "0.8.0"
 description = "Batch process photos with GPX tracks to write GPS EXIF tags"
 requires-python = ">=3.11"
 dependencies = [
