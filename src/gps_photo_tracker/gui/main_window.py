@@ -479,6 +479,17 @@ class MainWindow(QMainWindow):
         self._start_btn.setEnabled(True)
         self._cancel_btn.setEnabled(False)
 
+        if result_dict.get("cancelled"):
+            self._progress_label.setText("已取消")
+            self.statusBar().showMessage("处理已取消")
+            return
+
+        if "error" in result_dict:
+            QMessageBox.warning(self, "处理错误", f"处理失败：{result_dict['error']}")
+            self._progress_label.setText("错误")
+            self.statusBar().showMessage("处理失败")
+            return
+
         total = result_dict.get("total", 0)
         matched = result_dict.get("matched", 0)
         failed = result_dict.get("failed", 0)
@@ -573,8 +584,9 @@ class MainWindow(QMainWindow):
         self._match_tail_cb.setChecked(bool(s.get("match_tail", True)))
         self._overwrite_gps_cb.setChecked(bool(s.get("overwrite_gps", False)))
         self._workers_spin.setValue(int(s.get("workers", 1)))
+        self._keep_struct_cb.setChecked(bool(s.get("keep_structure", True)))
 
-        mode_id = int(s.get("mode", 0))
+        mode_id = max(0, int(s.get("mode", 0)))
         for rb, mid in [(self._preview_rb, 0), (self._copy_rb, 1), (self._overwrite_rb, 2)]:
             if mid == mode_id:
                 rb.setChecked(True)
