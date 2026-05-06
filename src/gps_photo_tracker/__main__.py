@@ -2,7 +2,7 @@
 
 
 def main():
-    from gps_photo_tracker.gui.main_window import run_app
+    from gps_photo_tracker.gui import run_app
     run_app()
 
 
