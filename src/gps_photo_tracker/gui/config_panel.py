@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QSpinBox,
     QVBoxLayout,
+    QPushButton,
 )
 
 
@@ -90,6 +91,23 @@ def build_params_group() -> tuple[QGroupBox, dict]:
     keep_struct_cb.setChecked(True)
     layout.addWidget(keep_struct_cb)
     widgets["keep_struct_cb"] = keep_struct_cb
+
+    # Auto-tune button
+    auto_tune_btn = QPushButton("智能推荐参数")
+    auto_tune_btn.setToolTip("根据扫描到的轨迹和照片数据自动推荐匹配参数")
+    layout.addWidget(auto_tune_btn)
+    widgets["auto_tune_btn"] = auto_tune_btn
+
+    # Workers spinbox
+    row_workers = QHBoxLayout()
+    row_workers.addWidget(QLabel("并发线程:"))
+    workers_spin = QSpinBox()
+    workers_spin.setRange(1, 8)
+    workers_spin.setValue(1)
+    workers_spin.setToolTip("实验性功能。多线程可加速大批量写入，但可能影响稳定性。")
+    row_workers.addWidget(workers_spin)
+    layout.addLayout(row_workers)
+    widgets["workers_spin"] = workers_spin
 
     return group, widgets
 
