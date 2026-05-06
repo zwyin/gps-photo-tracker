@@ -8,7 +8,11 @@ from typing import Callable
 from gps_photo_tracker.core.exif_writer import EXIFWriter
 from gps_photo_tracker.core.file_provider import FileProvider
 from gps_photo_tracker.core.gps_matcher import GPSMatcher
-from gps_photo_tracker.core.gpx_parser import GPXParser
+from gps_photo_tracker.core.track_parser import TrackParser
+from gps_photo_tracker.core.checkpoint import CheckpointManager
+from gps_photo_tracker.core.orientation import OrientationReader
+from gps_photo_tracker.core.param_tuner import ParamTuner
+from gps_photo_tracker.core.report_builder import ReportBuilder
 from gps_photo_tracker.core.models import (
     BatchResult,
     GPXSegment,
@@ -33,29 +37,33 @@ class GPSTaggingService:
     """
 
     def __init__(self, log_dir: Path | None = None):
-        self._gpx_parser = GPXParser()
+        self._track_parser = TrackParser()
         self._file_provider = FileProvider()
         self._op_logger = OperationLogger(log_dir) if log_dir else None
 
+    def auto_tune(self, segments: list[GPXSegment], photos: list[PhotoInfo]) -> MatcherConfig:
+        """Recommend optimal parameters based on track and photo data."""
+        return ParamTuner.recommend(segments, photos)
+
     def scan_gpx(self, gpx_dir: Path, on_progress: Callable | None = None) -> list[GPXSegment]:
-        """Scan directory for GPX files and parse them."""
+        """Scan directory for track files (GPX, KML, TCX) and parse them."""
         start = time.time()
-        gpx_files = self._file_provider.list_gpx(gpx_dir)
+        track_files = self._file_provider.list_tracks(gpx_dir)
         all_segments: list[GPXSegment] = []
-        for i, gpx_path in enumerate(gpx_files):
+        for i, track_path in enumerate(track_files):
             try:
-                segments = self._gpx_parser.parse_file(gpx_path)
+                segments = self._track_parser.parse_file(track_path)
                 all_segments.extend(segments)
             except Exception as e:
-                logger.warning("跳过无法解析的 GPX 文件: %s", gpx_path)
+                logger.warning("跳过无法解析的轨迹文件: %s", track_path)
                 if self._op_logger:
-                    self._op_logger.log_error(f"scan_gpx: {gpx_path}", e)
+                    self._op_logger.log_error(f"scan_gpx: {track_path}", e)
             if on_progress:
                 on_progress(ProgressUpdate(
                     phase=ProgressPhase.SCANNING_GPX,
                     current=i + 1,
-                    total=len(gpx_files),
-                    current_file=gpx_path.name,
+                    total=len(track_files),
+                    current_file=track_path.name,
                     elapsed_seconds=time.time() - start,
                 ))
         return all_segments
@@ -69,12 +77,14 @@ class GPSTaggingService:
             try:
                 ts = EXIFWriter.read_datetime(path)
                 gps = EXIFWriter.read_gps(path)
+                orientation = OrientationReader.get_orientation(path)
                 photos.append(PhotoInfo(
                     path=path,
                     filename=path.name,
                     timestamp=ts,
                     has_gps=gps is not None,
                     existing_gps=gps,
+                    orientation=orientation,
                 ))
             except Exception as e:
                 logger.warning("读取照片 EXIF 失败: %s", path)
@@ -143,6 +153,17 @@ class GPSTaggingService:
         matcher = GPSMatcher(config)
         is_preview = options is None or options.mode == ProcessMode.PREVIEW
         is_copy = options and options.mode == ProcessMode.COPY
+        use_checkpoint = (
+            options and options.resume
+            and is_copy and options.output_dir
+        )
+
+        # Resume: skip already-completed photos
+        completed_set: set[str] = set()
+        if use_checkpoint and options.output_dir:
+            completed_set = CheckpointManager.load(options.output_dir)
+            if completed_set:
+                logger.info("断点续传: 跳过 %d 已完成照片", len(completed_set))
 
         if self._op_logger:
             self._op_logger.log_operation_start({
@@ -159,6 +180,10 @@ class GPSTaggingService:
         if valid_photos:
             match_results = matcher.match(valid_photos, segments)
 
+        # Create checkpoint for COPY mode resume
+        if use_checkpoint and options and options.output_dir:
+            CheckpointManager.create(options.output_dir, total_photos=len(match_results))
+
         matched = 0
         skipped = 0
         failed = 0
@@ -168,6 +193,10 @@ class GPSTaggingService:
         for i, result in enumerate(match_results):
             if cancel and cancel.is_cancelled:
                 break
+
+            # Resume: skip already-completed photos
+            if completed_set and result.photo.filename in completed_set:
+                continue
 
             elapsed = time.time() - start
             if on_progress:
@@ -229,12 +258,33 @@ class GPSTaggingService:
             if on_photo_processed:
                 on_photo_processed(result)
 
+            # Checkpoint: mark completed after successful write
+            if use_checkpoint and options and options.output_dir and result.success:
+                CheckpointManager.mark(options.output_dir, result.photo.filename)
+
+        # Checkpoint: finalize if not cancelled
+        if use_checkpoint and options and options.output_dir:
+            if not (cancel and cancel.is_cancelled):
+                CheckpointManager.complete(options.output_dir)
+
         elapsed = time.time() - start
         success_rate = matched / len(valid_photos) if valid_photos else 0.0
 
         logger.info(
             "处理完成: %d/%d 成功, %d 跳过, %d 失败, %.1f%%, %.1fs",
             matched, len(valid_photos), skipped, failed, success_rate * 100, elapsed,
+        )
+
+        batch_result = BatchResult(
+            total=len(valid_photos),
+            matched=matched,
+            skipped=skipped,
+            failed=failed,
+            overwritten=overwritten,
+            success_rate=success_rate,
+            results=match_results,
+            reject_groups=reject_groups,
+            concurrent_workers=options.workers if options else 1,
         )
 
         if self._op_logger:
@@ -247,16 +297,16 @@ class GPSTaggingService:
                 "elapsed": f"{elapsed:.1f}s",
             })
 
-        return BatchResult(
-            total=len(valid_photos),
-            matched=matched,
-            skipped=skipped,
-            failed=failed,
-            overwritten=overwritten,
-            success_rate=success_rate,
-            results=match_results,
-            reject_groups=reject_groups,
-        )
+        # Generate HTML report if requested
+        if options and options.generate_report and options.output_dir:
+            try:
+                report_path = options.output_dir / "report.html"
+                ReportBuilder.build(batch_result, config, segments, report_path)
+                logger.info("报告已生成: %s", report_path)
+            except Exception as e:
+                logger.warning("报告生成失败: %s", e)
+
+        return batch_result
 
     def _should_write(self, result: MatchResult, options: ProcessOptions) -> bool:
         """Decide if GPS should be written for this photo."""

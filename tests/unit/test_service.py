@@ -959,6 +959,194 @@ class TestPipelineProgressCallback:
         assert ProgressPhase.WRITING in phases
 
 
+class TestAutoTune:
+    """auto_tune delegates to ParamTuner.recommend."""
+
+    def test_auto_tune_returns_config(self):
+        from gps_photo_tracker.core.models import GPXSegment, TrackPoint
+        segments = [GPXSegment(
+            filename="t.gpx", start=0, end=600,
+            points=[TrackPoint(0, 25.0, 100.0), TrackPoint(600, 25.001, 100.001)],
+        )]
+        photos = [PhotoInfo(path=Path("/a.jpg"), filename="a.jpg", timestamp=300.0, has_gps=False)]
+        service = GPSTaggingService()
+        config = service.auto_tune(segments, photos)
+        assert isinstance(config, MatcherConfig)
+
+    def test_auto_tune_empty_returns_defaults(self):
+        service = GPSTaggingService()
+        config = service.auto_tune([], [])
+        assert isinstance(config, MatcherConfig)
+        assert config.isolated_window == MatcherConfig().isolated_window
+
+
+class TestOrientationInScan:
+    """scan_photos reads orientation via OrientationReader."""
+
+    def test_scan_reads_orientation(self, tmp_path):
+        from gps_photo_tracker.core.orientation import OrientationReader
+        img = Image.new("RGB", (10, 10))
+        exif = {
+            "Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:00:00"},
+            "0th": {piexif.ImageIFD.Orientation: 6},
+        }
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        service = GPSTaggingService()
+        photos = service.scan_photos(tmp_path)
+        assert len(photos) == 1
+        assert photos[0].orientation == 6
+
+    def test_scan_photo_no_orientation(self, tmp_path):
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:00:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        service = GPSTaggingService()
+        photos = service.scan_photos(tmp_path)
+        assert len(photos) == 1
+        # orientation is None when not set in EXIF
+        assert photos[0].orientation is None
+
+
+class TestResumeCheckpoint:
+    """Resume skips already-completed photos via checkpoint."""
+
+    def test_resume_skips_completed(self, tmp_path):
+        from gps_photo_tracker.core.checkpoint import CheckpointManager
+        from gps_photo_tracker.core.models import GPXSegment, TrackPoint
+
+        gpx = ('<?xml version="1.0"?><gpx><trk><trkseg>'
+               '<trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>'
+               '<trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time></trkpt>'
+               '</trkseg></trk></gpx>')
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        output = tmp_path / "output"
+        output.mkdir()
+
+        # Pre-create checkpoint with photo already completed
+        CheckpointManager.create(output, total_photos=1)
+        CheckpointManager.mark(output, "photo.jpg")
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        options = ProcessOptions(
+            mode=ProcessMode.COPY, output_dir=output, resume=True,
+        )
+
+        result = service.process(segments, photos, MatcherConfig(), options, photo_dir=tmp_path)
+        # Photo was skipped by resume
+        assert result.matched == 0
+
+    def test_checkpoint_completes_on_success(self, tmp_path):
+        from gps_photo_tracker.core.checkpoint import CheckpointManager
+
+        gpx = ('<?xml version="1.0"?><gpx><trk><trkseg>'
+               '<trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>'
+               '<trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time></trkpt>'
+               '</trkseg></trk></gpx>')
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        output = tmp_path / "output"
+        output.mkdir()
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        options = ProcessOptions(
+            mode=ProcessMode.COPY, output_dir=output, resume=True,
+        )
+
+        result = service.process(segments, photos, MatcherConfig(), options, photo_dir=tmp_path)
+        # After completion, checkpoint should be completed
+        assert not CheckpointManager.is_interrupted(output)
+
+
+class TestReportGeneration:
+    """generate_report triggers ReportBuilder.build."""
+
+    def test_report_generated_on_process(self, tmp_path):
+        gpx = ('<?xml version="1.0"?><gpx><trk><trkseg>'
+               '<trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>'
+               '<trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time></trkpt>'
+               '</trkseg></trk></gpx>')
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        output = tmp_path / "output"
+        output.mkdir()
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        options = ProcessOptions(
+            mode=ProcessMode.COPY, output_dir=output, generate_report=True,
+        )
+
+        result = service.process(segments, photos, MatcherConfig(), options, photo_dir=tmp_path)
+        report_path = output / "report.html"
+        assert report_path.exists()
+        content = report_path.read_text(encoding="utf-8")
+        assert "<html" in content
+
+
+class TestConcurrentWorkersInResult:
+    """BatchResult.concurrent_workers reflects options.workers."""
+
+    def test_default_workers(self, tmp_path):
+        gpx = ('<?xml version="1.0"?><gpx><trk><trkseg>'
+               '<trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>'
+               '<trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time></trkpt>'
+               '</trkseg></trk></gpx>')
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+
+        result = service.preview(segments, photos, MatcherConfig())
+        assert result.concurrent_workers == 1
+
+    def test_custom_workers(self, tmp_path):
+        gpx = ('<?xml version="1.0"?><gpx><trk><trkseg>'
+               '<trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>'
+               '<trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time></trkpt>'
+               '</trkseg></trk></gpx>')
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        output = tmp_path / "output"
+        output.mkdir()
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, workers=4)
+
+        result = service.process(segments, photos, MatcherConfig(), options)
+        assert result.concurrent_workers == 4
+
+
 class TestCopyDestinationPaths:
     """Test _copy_destination with keep_structure edge cases."""
 
