@@ -44,6 +44,15 @@ class FileProvider:
             if p.is_file() and p.suffix.lower() == ".gpx"
         )
 
+    def list_tracks(self, directory: Path) -> list[Path]:
+        """Find all track files (GPX, KML, TCX) in directory (non-recursive)."""
+        if not directory.exists():
+            raise FileAccessError(f"Directory not found: {directory}")
+        return sorted(
+            p for p in directory.iterdir()
+            if p.is_file() and p.suffix.lower() in (".gpx", ".kml", ".tcx")
+        )
+
     @_RETRY
     def copy_file(self, src: Path, dst: Path) -> None:
         """Copy file with 30s timeout, creating destination directory if needed."""
