@@ -1,4 +1,5 @@
 """EF-08: Unified track file parser — dispatches by extension."""
+import logging
 from pathlib import Path
 
 from gps_photo_tracker.core.gpx_parser import GPXParser
@@ -6,6 +7,7 @@ from gps_photo_tracker.core.kml_parser import KMLParser
 from gps_photo_tracker.core.models import GPXParseError, GPXSegment
 from gps_photo_tracker.core.tcx_parser import TCXParser
 
+logger = logging.getLogger("gps_tracker")
 _TRACK_EXTENSIONS = {".gpx", ".kml", ".tcx"}
 
 
@@ -38,5 +40,5 @@ class TrackParser:
                     segments = self.parse_file(path)
                     all_segments.extend(segments)
                 except Exception:
-                    pass
+                    logger.warning("跳过无法解析的轨迹文件: %s", path)
         return all_segments

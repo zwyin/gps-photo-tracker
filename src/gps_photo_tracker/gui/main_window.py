@@ -318,32 +318,21 @@ class MainWindow(QMainWindow):
         )
 
     def _on_auto_tune(self):
-        """Auto-tune parameters based on scanned GPS and photo data."""
-        if not self._cached_segments and not self._cached_photos:
-            QMessageBox.information(self, "提示", "请先扫描 GPS 和照片目录")
+        """Auto-tune parameters by re-scanning actual data."""
+        gps_dir = self._gps_dir_edit.currentText()
+        photo_dir = self._photo_dir_edit.currentText()
+        if not gps_dir or not photo_dir:
+            QMessageBox.information(self, "提示", "请先选择 GPS 轨迹目录和照片目录")
             return
         from gps_photo_tracker.service.tagging_service import GPSTaggingService
-        from gps_photo_tracker.core.models import GPXSegment, TrackPoint
-        # Convert cached segment dicts back to GPXSegment for auto-tune
-        segments = []
-        for s in self._cached_segments:
-            pts = [TrackPoint(timestamp=0, latitude=0, longitude=0)]  # placeholder
-            segments.append(GPXSegment(
-                filename=s.get("filename", ""),
-                start=s.get("start", 0),
-                end=s.get("end", 0),
-                points=pts,
-            ))
-        from gps_photo_tracker.core.models import PhotoInfo
-        photos = []
-        for p in self._cached_photos:
-            photos.append(PhotoInfo(
-                path=Path(p.get("path", "")),
-                filename=p.get("filename", ""),
-                timestamp=p.get("timestamp"),
-                has_gps=p.get("has_gps", False),
-            ))
         service = GPSTaggingService()
+        self.statusBar().showMessage("正在分析数据...")
+        try:
+            segments = service.scan_gpx(Path(gps_dir))
+            photos = service.scan_photos(Path(photo_dir))
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"扫描失败: {e}")
+            return
         config = service.auto_tune(segments, photos)
         self._isolated_spin.setValue(config.isolated_window)
         self._middle_spin.setValue(config.middle_time_window)
