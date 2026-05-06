@@ -1147,6 +1147,87 @@ class TestConcurrentWorkersInResult:
         assert result.concurrent_workers == 4
 
 
+class TestParallelWrite:
+    """workers > 1 triggers BatchProcessor for write phase."""
+
+    def test_parallel_uses_batch_processor(self, tmp_path):
+        """When workers>1, BatchProcessor.submit_all is called instead of inline write."""
+        from unittest.mock import patch, MagicMock
+        import gps_photo_tracker.service.tagging_service as ts_mod
+
+        # Create a real JPEG file
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        # Construct matched results directly (bypass matching to avoid timezone issues)
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        match_result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0, 50),
+            method="interpolated", time_diff=10.0,
+        )
+
+        output = tmp_path / "output"
+        output.mkdir()
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, workers=2)
+
+        MockBP = MagicMock()
+        mock_instance = MagicMock()
+        mock_instance.submit_all.return_value = []
+        MockBP.return_value = mock_instance
+
+        # Swap BatchProcessor in the module namespace
+        original_bp = ts_mod.BatchProcessor
+        ts_mod.BatchProcessor = MockBP
+
+        try:
+            with patch.object(ts_mod.GPSMatcher, "match", return_value=[match_result]):
+                service = GPSTaggingService()
+                result = service.process(
+                    [], [photo], MatcherConfig(), options, photo_dir=tmp_path,
+                )
+
+                MockBP.assert_called_once_with(workers=2)
+                assert mock_instance.submit_all.called
+        finally:
+            ts_mod.BatchProcessor = original_bp
+
+    def test_workers_1_does_not_use_batch_processor(self, tmp_path):
+        """workers=1 uses inline sequential write, not BatchProcessor."""
+        import textwrap
+        from unittest.mock import patch
+
+        gpx = textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>
+            <trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:10:00Z</time></trkpt>
+          </trkseg></trk>
+        </gpx>""")
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        output = tmp_path / "output"
+        output.mkdir()
+
+        service = GPSTaggingService()
+        segments = service.scan_gpx(tmp_path)
+        photos = service.scan_photos(tmp_path)
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, workers=1)
+
+        with patch("gps_photo_tracker.service.tagging_service.BatchProcessor") as MockBP:
+            service.process(segments, photos, MatcherConfig(), options, photo_dir=tmp_path)
+            # BatchProcessor should NOT have been instantiated
+            MockBP.assert_not_called()
+
+
 class TestCopyDestinationPaths:
     """Test _copy_destination with keep_structure edge cases."""
 

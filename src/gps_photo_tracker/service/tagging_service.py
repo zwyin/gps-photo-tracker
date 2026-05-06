@@ -10,6 +10,7 @@ from gps_photo_tracker.core.file_provider import FileProvider
 from gps_photo_tracker.core.gps_matcher import GPSMatcher
 from gps_photo_tracker.core.track_parser import TrackParser
 from gps_photo_tracker.core.checkpoint import CheckpointManager
+from gps_photo_tracker.core.concurrency import BatchProcessor, WriteTask
 from gps_photo_tracker.core.orientation import OrientationReader
 from gps_photo_tracker.core.param_tuner import ParamTuner
 from gps_photo_tracker.core.report_builder import ReportBuilder
@@ -190,6 +191,14 @@ class GPSTaggingService:
         overwritten = 0
         reject_groups: dict[str, list[str]] = {}
 
+        use_parallel = (
+            not is_preview and options
+            and options.workers > 1
+            and options.mode in (ProcessMode.COPY, ProcessMode.OVERWRITE)
+        )
+        write_tasks: list[WriteTask] = []
+        write_task_indices: list[int] = []  # index into match_results for each task
+
         for i, result in enumerate(match_results):
             if cancel and cancel.is_cancelled:
                 break
@@ -220,25 +229,29 @@ class GPSTaggingService:
                                 self._op_logger.log_gps_overwrite(
                                     result.photo, result.photo.existing_gps, result.gps,
                                 )
-                        try:
-                            dst = self._write_photo(result, options, photo_dir)
-                            if self._op_logger:
-                                self._op_logger.log_write_success(result.photo, result.gps, dest=dst)
-                        except Exception as e:
-                            failed += 1
-                            matched -= 1
-                            if self._op_logger:
-                                self._op_logger.log_error(f"write: {result.photo.filename}", e)
-                            # COPY mode: copy even if GPS write fails (output == input)
-                            if is_copy and options.output_dir:
-                                try:
-                                    dst = self._copy_destination(result.photo.path, options, photo_dir)
-                                    self._file_provider.copy_file(result.photo.path, dst)
-                                except Exception as copy_err:
-                                    if self._op_logger:
-                                        self._op_logger.log_error(f"copy_after_write_fail: {result.photo.filename}", copy_err)
+                        if use_parallel:
+                            write_tasks.append(WriteTask(
+                                match_result=result, options=options, photo_dir=photo_dir,
+                            ))
+                            write_task_indices.append(i)
+                        else:
+                            try:
+                                dst = self._write_photo(result, options, photo_dir)
+                                if self._op_logger:
+                                    self._op_logger.log_write_success(result.photo, result.gps, dest=dst)
+                            except Exception as e:
+                                failed += 1
+                                matched -= 1
+                                if self._op_logger:
+                                    self._op_logger.log_error(f"write: {result.photo.filename}", e)
+                                if is_copy and options.output_dir:
+                                    try:
+                                        dst = self._copy_destination(result.photo.path, options, photo_dir)
+                                        self._file_provider.copy_file(result.photo.path, dst)
+                                    except Exception as copy_err:
+                                        if self._op_logger:
+                                            self._op_logger.log_error(f"copy_after_write_fail: {result.photo.filename}", copy_err)
                     else:
-                        # COPY mode: still copy even if not writing GPS
                         skipped += 1
                         if is_copy and options.output_dir:
                             dst = self._copy_destination(result.photo.path, options, photo_dir)
@@ -247,10 +260,8 @@ class GPSTaggingService:
                 failed += 1
                 if self._op_logger:
                     self._op_logger.log_match_failed(result)
-                # Track reject reasons
                 reason = result.reject_reason or "unknown"
                 reject_groups.setdefault(reason, []).append(result.photo.filename)
-                # COPY mode: copy even unmatched photos
                 if is_copy and options and options.output_dir:
                     dst = self._copy_destination(result.photo.path, options, photo_dir)
                     self._file_provider.copy_file(result.photo.path, dst)
@@ -258,9 +269,51 @@ class GPSTaggingService:
             if on_photo_processed:
                 on_photo_processed(result)
 
-            # Checkpoint: mark completed after successful write
-            if use_checkpoint and options and options.output_dir and result.success:
+            # Checkpoint: mark completed (sequential mode only; parallel marks after batch)
+            if not use_parallel and use_checkpoint and options and options.output_dir and result.success:
                 CheckpointManager.mark(options.output_dir, result.photo.filename)
+
+        # Parallel write phase
+        if use_parallel and write_tasks:
+            logger.info("并行写入: %d 任务, %d workers", len(write_tasks), options.workers)
+            processor = BatchProcessor(workers=options.workers)
+
+            completed_filenames: list[str] = []
+            def _on_write_progress(done: int, total: int):
+                if on_progress:
+                    on_progress(ProgressUpdate(
+                        phase=ProgressPhase.WRITING,
+                        current=done,
+                        total=total,
+                        current_file="",
+                        elapsed_seconds=time.time() - start,
+                    ))
+
+            def _on_write_result(wr):
+                if wr.success:
+                    completed_filenames.append(wr.filename)
+                    if self._op_logger:
+                        idx = write_task_indices[len(completed_filenames) - 1]
+                        r = match_results[idx]
+                        self._op_logger.log_write_success(r.photo, r.gps, dest=wr.dest_path)
+                else:
+                    nonlocal failed, matched
+                    failed += 1
+                    matched -= 1
+                    if self._op_logger:
+                        self._op_logger.log_error(f"parallel_write: {wr.filename}", wr.error)
+
+            write_results = processor.submit_all(
+                write_tasks,
+                on_progress=_on_write_progress,
+                on_result=_on_write_result,
+                cancel=cancel,
+            )
+
+            # Checkpoint: batch-mark all completed writes (no race — single-threaded)
+            if use_checkpoint and options.output_dir:
+                for fn in completed_filenames:
+                    CheckpointManager.mark(options.output_dir, fn)
 
         # Checkpoint: finalize if not cancelled
         if use_checkpoint and options and options.output_dir:
