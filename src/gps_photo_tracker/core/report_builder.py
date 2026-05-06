@@ -1,4 +1,5 @@
 """EF-09: Self-contained HTML report builder with inline SVG charts."""
+import html
 import math
 from pathlib import Path
 
@@ -137,10 +138,10 @@ class ReportBuilder:
         for r in result.results:
             status = '<span class="ok">OK</span>' if r.success else '<span class="fail">FAIL</span>'
             gps = f"{r.gps.latitude:.4f}, {r.gps.longitude:.4f}" if r.gps else "-"
-            method = r.method or "-"
+            method = html.escape(r.method or "-")
             td = f"{r.time_diff:.1f}s" if r.time_diff else "-"
             rows += (
-                f"<tr><td>{r.photo.filename}</td><td>{status}</td>"
+                f"<tr><td>{html.escape(r.photo.filename)}</td><td>{status}</td>"
                 f"<td>{gps}</td><td>{method}</td><td>{td}</td></tr>"
             )
         return f"""<h2>Match Details</h2>
@@ -155,10 +156,10 @@ class ReportBuilder:
             return ""
         rows = ""
         for reason, files in sorted(result.reject_groups.items(), key=lambda x: -len(x[1])):
-            file_list = ", ".join(files[:20])
+            file_list = ", ".join(html.escape(f) for f in files[:20])
             if len(files) > 20:
                 file_list += f" ... ({len(files)} total)"
-            rows += f"<tr><td>{reason}</td><td>{len(files)}</td><td>{file_list}</td></tr>"
+            rows += f"<tr><td>{html.escape(reason)}</td><td>{len(files)}</td><td>{file_list}</td></tr>"
         return f"""<h2>Reject Reasons</h2>
 <table>
 <tr><th>Reason</th><th>Count</th><th>Files</th></tr>
