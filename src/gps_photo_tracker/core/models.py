@@ -108,6 +108,7 @@ class PhotoInfo:
     timestamp: float | None  # UTC timestamp (from EXIF capture time), None if unreadable
     has_gps: bool
     existing_gps: GPSInfo | None = None
+    orientation: int | None = None  # EXIF Orientation 1-8, None if unreadable
 
 
 @dataclass
@@ -134,6 +135,7 @@ class BatchResult:
     success_rate: float
     results: list[MatchResult] = field(default_factory=list)
     reject_groups: dict[str, list[str]] = field(default_factory=dict)
+    concurrent_workers: int = 1
 
 
 @dataclass
@@ -152,6 +154,9 @@ class ProcessOptions:
     output_dir: Path | None = None  # required for COPY mode
     keep_structure: bool = True
     overwrite_gps: bool = False
+    resume: bool = False
+    generate_report: bool = False
+    workers: int = 1
 
 
 @dataclass
