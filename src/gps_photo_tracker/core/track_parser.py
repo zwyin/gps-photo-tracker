@@ -39,6 +39,6 @@ class TrackParser:
                 try:
                     segments = self.parse_file(path)
                     all_segments.extend(segments)
-                except Exception:
-                    logger.warning("跳过无法解析的轨迹文件: %s", path)
+                except Exception as e:
+                    logger.warning("跳过无法解析的轨迹文件: %s (%s)", path, e)
         return all_segments

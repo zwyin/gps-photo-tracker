@@ -77,7 +77,7 @@ class TestBatchProcessorSequential:
 
 class TestBatchProcessorParallel:
     def test_multi_worker_uses_executor(self):
-        with patch("gps_photo_tracker.core.concurrency.ProcessPoolExecutor") as MockExec:
+        with patch("gps_photo_tracker.core.concurrency.ThreadPoolExecutor") as MockExec:
             mock_future = MagicMock()
             mock_future.result.return_value = WriteResult(success=True, filename="a.jpg")
             ctx = MagicMock()

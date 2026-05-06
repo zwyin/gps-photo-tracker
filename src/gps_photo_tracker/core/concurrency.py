@@ -1,13 +1,12 @@
 """EF-03: Concurrent batch processor for write+copy phase."""
 from __future__ import annotations
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 from gps_photo_tracker.core.exif_writer import EXIFWriter
-from gps_photo_tracker.core.file_provider import FileProvider
 from gps_photo_tracker.core.models import MatchResult, ProcessMode, ProcessOptions
 from gps_photo_tracker.service.cancel_token import CancellationToken
 
@@ -38,10 +37,9 @@ def _copy_destination(src_path: Path, options: ProcessOptions, photo_dir: Path |
 
 
 def execute_task(task: WriteTask) -> WriteResult:
-    """Execute a single write task. Top-level function for process safety."""
+    """Execute a single write task. Top-level function for thread safety."""
     result = task.match_result
     opts = task.options
-    file_provider = FileProvider()
 
     try:
         if not result.gps:
@@ -49,8 +47,7 @@ def execute_task(task: WriteTask) -> WriteResult:
 
         if opts.mode == ProcessMode.COPY and opts.output_dir:
             dst = _copy_destination(result.photo.path, opts, task.photo_dir)
-            file_provider.copy_file(result.photo.path, dst)
-            EXIFWriter.write_gps(dst, dst, result.gps)
+            EXIFWriter.write_gps(result.photo.path, dst, result.gps)
             return WriteResult(success=True, filename=result.photo.filename, dest_path=dst)
         elif opts.mode == ProcessMode.OVERWRITE:
             EXIFWriter.write_gps(result.photo.path, result.photo.path, result.gps)
@@ -110,7 +107,7 @@ class BatchProcessor:
         cancel: CancellationToken | None,
     ) -> list[WriteResult]:
         results = []
-        with ProcessPoolExecutor(max_workers=self._workers) as executor:
+        with ThreadPoolExecutor(max_workers=self._workers) as executor:
             futures = {executor.submit(execute_task, t): t for t in tasks}
             for future in as_completed(futures):
                 if cancel and cancel.is_cancelled:

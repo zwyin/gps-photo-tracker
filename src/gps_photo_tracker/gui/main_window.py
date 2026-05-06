@@ -1,8 +1,11 @@
 """Main window for GPS Photo Tracker."""
 
+import logging
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QSettings
+
+logger = logging.getLogger("gps_tracker")
 from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
@@ -247,8 +250,7 @@ class MainWindow(QMainWindow):
                 segs = parser.parse_file(f)
                 total_points += sum(len(s.points) for s in segs)
             except Exception:
-                pass
-        self._gpx_browser_label.setText(f"GPS: {len(track_files)}文件 {total_points}点")
+                logger.debug("跳过无法解析的轨迹文件: %s", f)
 
     def _auto_scan_photos(self, photo_dir: Path):
         from gps_photo_tracker.core.exif_writer import EXIFWriter
@@ -262,8 +264,7 @@ class MainWindow(QMainWindow):
                 if gps:
                     has_gps += 1
             except Exception:
-                pass
-        self._photo_browser_label.setText(f"照片: {len(photo_paths)}张 {has_gps}有GPS")
+                logger.debug("跳过无法读取GPS的照片: %s", p)
 
     def _add_path_history(self, key: str, path: str, combo: QComboBox):
         settings = QSettings()
