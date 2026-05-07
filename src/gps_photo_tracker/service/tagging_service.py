@@ -279,6 +279,11 @@ class GPSTaggingService:
             logger.info("并行写入: %d 任务, %d workers", len(write_tasks), options.workers)
             processor = BatchProcessor(workers=options.workers)
 
+            # Build lookup dict for O(1) access (handles duplicate filenames in different dirs)
+            task_by_filename: dict[str, WriteTask] = {}
+            for wt in write_tasks:
+                task_by_filename[wt.match_result.photo.filename] = wt
+
             completed_filenames: list[str] = []
             def _on_write_progress(done: int, total: int):
                 if on_progress:
@@ -295,7 +300,7 @@ class GPSTaggingService:
                 if wr.success:
                     completed_filenames.append(wr.filename)
                     if self._op_logger:
-                        task = next((t for t in write_tasks if t.match_result.photo.filename == wr.filename), None)
+                        task = task_by_filename.get(wr.filename)
                         if task:
                             r = task.match_result
                             self._op_logger.log_write_success(r.photo, r.gps, dest=wr.dest_path)
@@ -307,6 +312,16 @@ class GPSTaggingService:
                         overwritten -= 1
                     if self._op_logger:
                         self._op_logger.log_error(f"parallel_write: {wr.filename}", wr.error)
+                    # Fallback: copy original photo to output (all photos must output)
+                    if is_copy and options.output_dir:
+                        try:
+                            task = task_by_filename.get(wr.filename)
+                            if task:
+                                dst = self._copy_destination(task.match_result.photo.path, options, photo_dir)
+                                self._file_provider.copy_file(task.match_result.photo.path, dst)
+                        except Exception as copy_err:
+                            if self._op_logger:
+                                self._op_logger.log_error(f"parallel_fallback_copy: {wr.filename}", copy_err)
 
             try:
                 write_results = processor.submit_all(
@@ -319,6 +334,14 @@ class GPSTaggingService:
                 logger.error("并行写入基础设施失败: %s", e)
                 if self._op_logger:
                     self._op_logger.log_error("parallel_submit_all", e)
+                # Fallback: copy all queued photos to output sequentially
+                for wt in write_tasks:
+                    try:
+                        dst = self._copy_destination(wt.match_result.photo.path, options, photo_dir)
+                        self._file_provider.copy_file(wt.match_result.photo.path, dst)
+                    except Exception as copy_err:
+                        failed += 1
+                        matched -= 1
 
             # Checkpoint: batch-mark all completed writes (no race — single-threaded)
             if use_checkpoint and options.output_dir:

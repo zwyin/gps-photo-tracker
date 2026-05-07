@@ -59,8 +59,8 @@ class GPSMatcher:
         is_middle = (
             prev_photo is not None
             and next_photo is not None
-            and (adjusted_time - prev_photo.timestamp) <= self.config.context_window
-            and (next_photo.timestamp - adjusted_time) <= self.config.context_window
+            and (photo.timestamp - prev_photo.timestamp) <= self.config.context_window
+            and (next_photo.timestamp - photo.timestamp) <= self.config.context_window
         )
 
         # Step 3: find prev/next GPS points
