@@ -245,12 +245,17 @@ class MainWindow(QMainWindow):
         parser = TrackParser()
         track_files = provider.list_tracks(gps_dir)
         total_points = 0
+        gpx_count = 0
         for f in track_files:
             try:
                 segs = parser.parse_file(f)
                 total_points += sum(len(s.points) for s in segs)
+                gpx_count += len(segs)
             except Exception:
                 logger.debug("跳过无法解析的轨迹文件: %s", f)
+        if gpx_count > 0:
+            self._gpx_browser_label.setText(f"GPS: {gpx_count} 段, {total_points} 点 (点击查看)")
+            self._scan_summary.setText(f"GPS: {gpx_count} 段, {total_points} 点")
 
     def _auto_scan_photos(self, photo_dir: Path):
         from gps_photo_tracker.core.exif_writer import EXIFWriter
@@ -265,6 +270,10 @@ class MainWindow(QMainWindow):
                     has_gps += 1
             except Exception:
                 logger.debug("跳过无法读取GPS的照片: %s", p)
+        total = len(photo_paths)
+        self._photo_browser_label.setText(f"照片: {total}张 ({has_gps}有GPS) (点击查看)")
+        prefix = self._scan_summary.text()
+        self._scan_summary.setText(f"{prefix} | 照片: {total}张 ({has_gps}有GPS)")
 
     def _add_path_history(self, key: str, path: str, combo: QComboBox):
         settings = QSettings()
@@ -304,7 +313,7 @@ class MainWindow(QMainWindow):
         )
 
     def _get_process_options(self) -> ProcessOptions:
-        mode_id = self._mode_group.checkedId()
+        mode_id = max(0, self._mode_group.checkedId())
         mode = [ProcessMode.PREVIEW, ProcessMode.COPY, ProcessMode.OVERWRITE][mode_id]
         output_dir = Path(self._output_dir_edit.currentText()) if self._output_dir_edit.currentText() else None
         settings = QSettings()

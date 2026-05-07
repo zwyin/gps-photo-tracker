@@ -111,6 +111,8 @@ class BatchProcessor:
             futures = {executor.submit(execute_task, t): t for t in tasks}
             for future in as_completed(futures):
                 if cancel and cancel.is_cancelled:
+                    for f in futures:
+                        f.cancel()
                     break
                 wr = future.result()
                 results.append(wr)
