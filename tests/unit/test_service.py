@@ -1316,3 +1316,100 @@ class TestCopyDestinationPaths:
         )
         assert result == Path("/output") / "photo.jpg"
 
+
+class TestOverwriteMode:
+    """OVERWRITE mode writes GPS to original file in-place."""
+
+    def test_overwrite_writes_gps_in_place(self, tmp_path):
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        match_result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0, 50),
+            method="interpolated", time_diff=10.0,
+        )
+
+        from unittest.mock import patch, MagicMock
+        from gps_photo_tracker.core.exif_writer import EXIFWriter as RealWriter
+        mock_writer = MagicMock()
+        with patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher, \
+             patch("gps_photo_tracker.service.tagging_service.EXIFWriter", mock_writer):
+            MockMatcher.return_value.match.return_value = [match_result]
+            service = GPSTaggingService()
+            opts = ProcessOptions(mode=ProcessMode.OVERWRITE)
+            result = service.process([], [photo], MatcherConfig(), opts)
+
+            assert result.matched == 1
+            mock_writer.write_gps.assert_called_once()
+            call_args = mock_writer.write_gps.call_args[0]
+            assert call_args[0] == call_args[1]
+
+
+class TestReportGenerationFailure:
+    """Report generation failure is caught gracefully."""
+
+    def test_report_failure_does_not_crash(self, tmp_path):
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        match_result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0, 50),
+            method="interpolated", time_diff=10.0,
+        )
+        output = tmp_path / "output"
+        output.mkdir()
+        opts = ProcessOptions(
+            mode=ProcessMode.COPY, output_dir=output, generate_report=True,
+        )
+
+        from unittest.mock import patch
+        with patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher, \
+             patch("gps_photo_tracker.service.tagging_service.ReportBuilder") as MockRB:
+            MockMatcher.return_value.match.return_value = [match_result]
+            MockRB.build.side_effect = OSError("disk full")
+            service = GPSTaggingService()
+            result = service.process([], [photo], MatcherConfig(), opts, photo_dir=tmp_path)
+            assert result.matched == 1
+
+
+class TestSequentialWriteError:
+    """Sequential write failure falls back to copy and adjusts counters."""
+
+    def test_write_failure_copies_original(self, tmp_path):
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        match_result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0, 50),
+            method="interpolated", time_diff=10.0,
+        )
+        output = tmp_path / "output"
+        output.mkdir()
+        opts = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
+
+        from unittest.mock import patch
+        with patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher, \
+             patch("gps_photo_tracker.service.tagging_service.EXIFWriter") as MockWriter:
+            MockMatcher.return_value.match.return_value = [match_result]
+            MockWriter.write_gps.side_effect = OSError("write failed")
+            service = GPSTaggingService()
+            result = service.process([], [photo], MatcherConfig(), opts, photo_dir=tmp_path)
+            assert result.matched == 0
+            assert result.failed == 1
+            assert (output / "photo.jpg").exists()
+
