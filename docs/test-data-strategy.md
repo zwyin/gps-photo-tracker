@@ -9,7 +9,7 @@
 
 ### 1.1 数据源位置
 
-所有测试数据在原项目 `/Users/zhiweiyin/repo_ds1600/gps-photo-tracker/test-data/`。
+所有测试数据在原项目 `~/projects/gps-photo-tracker/test-data/`。
 
 | 目录 | 内容 | 规模 | 用途 |
 |------|------|------|------|
