@@ -42,7 +42,7 @@ python -m gps_photo_tracker
 ### Basic Workflow
 
 1. Select a directory containing GPS track files (GPX/KML/TCX)
-2. Select a directory containing photos (JPEG/PNG)
+2. Select a directory containing photos (JPEG)
 3. Adjust matching parameters or use "Smart Recommend"
 4. Preview results, then run in copy or overwrite mode
 
@@ -93,7 +93,7 @@ Matching parameters can be adjusted in the GUI or programmatically:
 | `isolated_window` | 300s | 60-3600 | Max time diff for isolated photos |
 | `middle_time_window` | 3600s | 600-7200 | Max time diff for interpolated photos |
 | `context_window` | 300s | 60-1800 | Window to determine interpolation eligibility |
-| `gps_distance_threshold` | 200m | 50-1000 | Max distance between consecutive GPS points |
+| `max_gps_distance` | 200m | 50-1000 | Max distance between consecutive GPS points |
 | `match_tail` | True | — | Match photos at track boundaries |
 | `time_offset` | 0s | -3600~3600 | Camera clock correction |
 

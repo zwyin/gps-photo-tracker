@@ -41,7 +41,7 @@ python -m gps_photo_tracker
 ### 使用流程
 
 1. 选择包含 GPS 轨迹文件（GPX/KML/TCX）的目录
-2. 选择包含照片（JPEG/PNG）的目录
+2. 选择包含照片（JPEG）的目录
 3. 调整匹配参数，或点击"智能推荐"
 4. 预览匹配结果，确认后选择复制模式或覆盖模式执行
 
@@ -120,7 +120,7 @@ python scripts/build.py --clean  # 清理构建
 
 ## 许可证
 
-本项目基于 [GNU General Public License v3.0](LICENSE) 开源。
+本项目基于 [GNU General Public License v3.0](../LICENSE) 开源。
 
 ## 致谢
 
