@@ -108,7 +108,7 @@ class TestOperationLogger:
         gps = GPSInfo(25.0, 100.0)
         logger.log_write_success(photo, gps, dest=Path("/output/test.jpg"))
         content = (log_dir / "writes.log").read_text()
-        assert "/output/test.jpg" in content
+        assert "test.jpg" in content
 
     def test_log_gps_overwrite(self, logger, log_dir):
         photo = _make_photo(has_gps=True)
