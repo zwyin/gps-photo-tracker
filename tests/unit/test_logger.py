@@ -68,7 +68,7 @@ class TestOperationLogger:
     def test_log_match_success(self, logger, log_dir):
         result = _make_result()
         logger.log_match_success(result)
-        content = (log_dir / "matches.log").read_text()
+        content = (log_dir / "matches.log").read_text(encoding="utf-8")
         assert "OK test.jpg" in content
         assert "interpolated" in content
 
@@ -83,7 +83,7 @@ class TestOperationLogger:
             interpolation_distance=None,  # No interpolation distance for nearest
         )
         logger.log_match_success(result)
-        content = (log_dir / "matches.log").read_text()
+        content = (log_dir / "matches.log").read_text(encoding="utf-8")
         assert "OK test.jpg" in content
         assert "nearest" in content
         assert "—" in content  # Distance shows as —
@@ -91,7 +91,7 @@ class TestOperationLogger:
     def test_log_match_failed(self, logger, log_dir):
         result = _make_result(success=False, reject_reason="no_gps_coverage")
         logger.log_match_failed(result)
-        content = (log_dir / "matches.log").read_text()
+        content = (log_dir / "matches.log").read_text(encoding="utf-8")
         assert "FAIL test.jpg" in content
         assert "no_gps_coverage" in content
 
@@ -99,7 +99,7 @@ class TestOperationLogger:
         photo = _make_photo()
         gps = GPSInfo(25.0, 100.0, 1800)
         logger.log_write_success(photo, gps)
-        content = (log_dir / "writes.log").read_text()
+        content = (log_dir / "writes.log").read_text(encoding="utf-8")
         assert "WRITE test.jpg" in content
         assert "25.0000,100.0000" in content
 
@@ -107,7 +107,7 @@ class TestOperationLogger:
         photo = _make_photo()
         gps = GPSInfo(25.0, 100.0)
         logger.log_write_success(photo, gps, dest=Path("/output/test.jpg"))
-        content = (log_dir / "writes.log").read_text()
+        content = (log_dir / "writes.log").read_text(encoding="utf-8")
         assert "test.jpg" in content
 
     def test_log_gps_overwrite(self, logger, log_dir):
@@ -115,23 +115,23 @@ class TestOperationLogger:
         old = GPSInfo(25.0, 100.0)
         new = GPSInfo(25.001, 100.001)
         logger.log_gps_overwrite(photo, old, new)
-        content = (log_dir / "writes.log").read_text()
+        content = (log_dir / "writes.log").read_text(encoding="utf-8")
         assert "OVERWRITE test.jpg" in content
 
     def test_log_error(self, logger, log_dir):
         logger.log_error("scan_gpx", GPXParseError("bad file"))
-        content = (log_dir / "errors.log").read_text()
+        content = (log_dir / "errors.log").read_text(encoding="utf-8")
         assert "scan_gpx" in content
 
     def test_log_operation_start(self, logger, log_dir):
         logger.log_operation_start({"mode": "preview", "total": 100})
-        content = (log_dir / "operations.log").read_text()
+        content = (log_dir / "operations.log").read_text(encoding="utf-8")
         assert "START" in content
         assert "preview" in content
 
     def test_log_operation_end(self, logger, log_dir):
         logger.log_operation_end({"matched": 95, "failed": 5})
-        content = (log_dir / "operations.log").read_text()
+        content = (log_dir / "operations.log").read_text(encoding="utf-8")
         assert "END" in content
         assert "95" in content
 

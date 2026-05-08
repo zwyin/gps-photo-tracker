@@ -594,7 +594,7 @@ class TestOperationLoggerIntegration:
         photos = service.scan_photos(tmp_path)
         service.preview(segments, photos, MatcherConfig())
 
-        ops = (log_dir / "operations.log").read_text()
+        ops = (log_dir / "operations.log").read_text(encoding="utf-8")
         assert "START" in ops
         assert "END" in ops
         assert "preview" in ops
@@ -613,7 +613,7 @@ class TestOperationLoggerIntegration:
         result = service.preview(segments, photos, MatcherConfig())
 
         if result.matched > 0:
-            matches = (log_dir / "matches.log").read_text()
+            matches = (log_dir / "matches.log").read_text(encoding="utf-8")
             assert "OK photo.jpg" in matches
 
     def test_matches_log_on_failure(self, tmp_path):
@@ -644,7 +644,7 @@ class TestOperationLoggerIntegration:
         result = service.preview(segments, photos, MatcherConfig())
 
         if result.failed > 0:
-            matches = (log_dir / "matches.log").read_text()
+            matches = (log_dir / "matches.log").read_text(encoding="utf-8")
             assert "FAIL photo.jpg" in matches
 
     def test_writes_log_on_copy(self, tmp_path):
@@ -665,7 +665,7 @@ class TestOperationLoggerIntegration:
         result = service.process(segments, photos, MatcherConfig(), options)
 
         if result.matched > 0:
-            writes = (log_dir / "writes.log").read_text()
+            writes = (log_dir / "writes.log").read_text(encoding="utf-8")
             assert "WRITE" in writes
 
     def test_error_log_on_bad_gpx(self, tmp_path):
@@ -679,7 +679,7 @@ class TestOperationLoggerIntegration:
         service = GPSTaggingService(log_dir=log_dir)
         service.scan_gpx(tmp_path)
 
-        errors = (log_dir / "errors.log").read_text()
+        errors = (log_dir / "errors.log").read_text(encoding="utf-8")
         assert "scan_gpx" in errors
         assert "bad.gpx" in errors
 
@@ -694,7 +694,7 @@ class TestOperationLoggerIntegration:
         service = GPSTaggingService(log_dir=log_dir)
         service.scan_photos(tmp_path)
 
-        errors = (log_dir / "errors.log").read_text()
+        errors = (log_dir / "errors.log").read_text(encoding="utf-8")
         assert "scan_photos" in errors
         assert "bad.jpg" in errors
 
