@@ -1,7 +1,8 @@
 [project]
 name = "gps-photo-tracker"
-version = "0.8.0"
-description = "Batch process photos with GPX tracks to write GPS EXIF tags"
+version = "1.0.0"
+description = "Batch process photos with GPS tracks (GPX/KML/TCX) to write EXIF GPS tags"
+license = {text = "GPL-3.0-or-later"}
 requires-python = ">=3.11"
 dependencies = [
     "PySide6>=6.6",
@@ -11,6 +12,9 @@ dependencies = [
     "geopy>=2.4.0",
     "tenacity>=8.0.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/zwyin/gps-photo-tracker-claude"
 
 [project.optional-dependencies]
 dev = [

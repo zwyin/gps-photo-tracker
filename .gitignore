@@ -3,7 +3,16 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .coverage
+htmlcov/
 build/
 dist/
 *.egg-info/
+*.spec
 .serena/
+.DS_Store
+*.log
+.env
+.venv/
+venv/
+test-data/
+docs/superpowers/
