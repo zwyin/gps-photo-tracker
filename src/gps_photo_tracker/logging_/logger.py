@@ -68,6 +68,12 @@ class OperationLogger:
         cutoff = time.time() - retention_days * 86400
         for log_file in log_dir.glob("*.log"):
             if log_file.stat().st_mtime < cutoff:
+                # Close file handlers referencing this file before unlinking (Windows)
+                for logger in (self._ops, self._matches, self._writes, self._errors):
+                    for handler in list(logger.handlers):
+                        if hasattr(handler, 'baseFilename') and handler.baseFilename == str(log_file):
+                            handler.close()
+                            logger.removeHandler(handler)
                 log_file.unlink()
 
     def log_operation_start(self, params: dict):
