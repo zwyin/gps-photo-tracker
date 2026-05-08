@@ -31,6 +31,8 @@ jobs:
 
       - name: Run tests with coverage
         run: pytest tests/ --cov=gps_photo_tracker --cov-report=term-missing -q
+        env:
+          QT_QPA_PLATFORM: offscreen
 
   build:
     needs: test
