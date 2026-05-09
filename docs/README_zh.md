@@ -4,6 +4,16 @@
 
 批量处理照片，根据 GPS 轨迹（GPX/KML/TCX）自动写入 EXIF GPS 标签。为没有内置 GPS 的相机拍摄的照片添加地理信息，使照片管理软件（Photos、Lightroom 等）能按地点整理照片。
 
+## 下载
+
+预编译安装包可在 [GitHub Actions](../../actions/workflows/build.yml)（最新成功运行的 Artifacts 区域）下载：
+
+| 平台 | 文件 |
+|------|------|
+| macOS | `GPS-Photo-Tracker-v0.8.0-macos.zip` |
+| Windows | `GPS-Photo-Tracker-v0.8.0-windows.zip` |
+| Linux | `GPS-Photo-Tracker-v0.8.0-linux.zip` |
+
 ## 功能特点
 
 - **多格式 GPS 轨迹支持** — GPX、KML（Google Earth）、TCX（Garmin），自动识别格式

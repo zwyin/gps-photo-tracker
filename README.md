@@ -4,6 +4,16 @@
 
 Batch process photos with GPS tracks (GPX/KML/TCX) to automatically write EXIF GPS tags. Built for photographers and travelers who need to geotag photos from cameras without built-in GPS.
 
+## Download
+
+Pre-built packages are available from [GitHub Actions](../../actions/workflows/build.yml) (Artifacts section of the latest successful run):
+
+| Platform | File |
+|----------|------|
+| macOS | `GPS-Photo-Tracker-v0.8.0-macos.zip` |
+| Windows | `GPS-Photo-Tracker-v0.8.0-windows.zip` |
+| Linux | `GPS-Photo-Tracker-v0.8.0-linux.zip` |
+
 ## Features
 
 - **Multi-format GPS track support** — GPX, KML (Google Earth), TCX (Garmin) with auto-detection
