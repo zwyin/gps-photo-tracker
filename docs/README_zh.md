@@ -4,16 +4,6 @@
 
 批量处理照片，根据 GPS 轨迹（GPX/KML/TCX）自动写入 EXIF GPS 标签。为没有内置 GPS 的相机拍摄的照片添加地理信息，使照片管理软件（Photos、Lightroom 等）能按地点整理照片。
 
-## 下载
-
-预编译安装包可在 [GitHub Actions](../../actions/workflows/build.yml)（最新成功运行的 Artifacts 区域）下载：
-
-| 平台 | 文件 |
-|------|------|
-| macOS | `GPS-Photo-Tracker-v0.8.0-macos.zip` |
-| Windows | `GPS-Photo-Tracker-v0.8.0-windows.zip` |
-| Linux | `GPS-Photo-Tracker-v0.8.0-linux.zip` |
-
 ## 功能特点
 
 - **多格式 GPS 轨迹支持** — GPX、KML（Google Earth）、TCX（Garmin），自动识别格式
@@ -29,24 +19,50 @@
 
 ## 快速开始
 
-### 环境要求
+### 方式一：下载安装包（推荐）
 
-- Python 3.11+
-- PySide6（GUI 界面）
+从 [GitHub Actions](../../actions/workflows/build.yml) 下载 → 点击最近一次成功的运行 → 页面底部 **Artifacts** 区域：
 
-### 安装
+| 平台 | 文件 |
+|------|------|
+| macOS | `GPS-Photo-Tracker-v0.8.0-macos.zip` |
+| Windows | `GPS-Photo-Tracker-v0.8.0-windows.zip` |
+| Linux | `GPS-Photo-Tracker-v0.8.0-linux.zip` |
+
+下载后解压，双击即可运行，无需安装 Python 或任何其他软件。
+
+### 方式二：从源码运行
+
+**第 1 步 — 检查 Python 版本**
+
+```bash
+python --version
+```
+
+需要 **Python 3.11 或更高版本**。如果版本低于 3.11，请到 [python.org](https://www.python.org/downloads/) 下载安装。
+
+**第 2 步 — 下载源码**
 
 ```bash
 git clone https://github.com/zwyin/gps-photo-tracker-claude.git
 cd gps-photo-tracker-claude
+```
+
+**第 3 步 — 安装依赖**
+
+```bash
 pip install -e .
 ```
 
-### 运行
+这条命令会自动安装所有需要的包：PySide6、piexif、gpxpy、Pillow、geopy、tenacity。
+
+**第 4 步 — 启动**
 
 ```bash
 python -m gps_photo_tracker
 ```
+
+启动时程序会自动检查依赖。如果缺少某个包，会显示明确的提示，告诉你需要安装什么。
 
 ### 使用流程
 

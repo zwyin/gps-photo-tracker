@@ -1,3 +1,3 @@
 """GPS Photo Tracker - Batch process photos with GPX tracks."""
 
-__version__ = "1.0.0"
+__version__ = "0.8.0"

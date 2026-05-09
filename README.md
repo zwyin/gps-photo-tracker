@@ -4,16 +4,6 @@
 
 Batch process photos with GPS tracks (GPX/KML/TCX) to automatically write EXIF GPS tags. Built for photographers and travelers who need to geotag photos from cameras without built-in GPS.
 
-## Download
-
-Pre-built packages are available from [GitHub Actions](../../actions/workflows/build.yml) (Artifacts section of the latest successful run):
-
-| Platform | File |
-|----------|------|
-| macOS | `GPS-Photo-Tracker-v0.8.0-macos.zip` |
-| Windows | `GPS-Photo-Tracker-v0.8.0-windows.zip` |
-| Linux | `GPS-Photo-Tracker-v0.8.0-linux.zip` |
-
 ## Features
 
 - **Multi-format GPS track support** — GPX, KML (Google Earth), TCX (Garmin) with auto-detection
@@ -29,25 +19,50 @@ Pre-built packages are available from [GitHub Actions](../../actions/workflows/b
 
 ## Quick Start
 
-### Requirements
+### Option A: Download Pre-built Package (Recommended)
 
-- Python 3.11+
-- PySide6 (for GUI)
+Download from [GitHub Actions](../../actions/workflows/build.yml) → click the latest successful run → scroll down to **Artifacts**:
 
-### Install
+| Platform | File |
+|----------|------|
+| macOS | `GPS-Photo-Tracker-v0.8.0-macos.zip` |
+| Windows | `GPS-Photo-Tracker-v0.8.0-windows.zip` |
+| Linux | `GPS-Photo-Tracker-v0.8.0-linux.zip` |
+
+Download, unzip, and double-click to run. No Python or any other software needed.
+
+### Option B: Run from Source
+
+**Step 1 — Check Python version**
+
+```bash
+python --version
+```
+
+Need **Python 3.11 or higher**. If you see a lower version, download from [python.org](https://www.python.org/downloads/).
+
+**Step 2 — Download source code**
 
 ```bash
 git clone https://github.com/zwyin/gps-photo-tracker-claude.git
 cd gps-photo-tracker-claude
+```
+
+**Step 3 — Install dependencies**
+
+```bash
 pip install -e .
 ```
 
-### Run
+This automatically installs all required packages: PySide6, piexif, gpxpy, Pillow, geopy, tenacity.
+
+**Step 4 — Launch**
 
 ```bash
-# Launch GUI
 python -m gps_photo_tracker
 ```
+
+The program will automatically check dependencies on startup. If anything is missing, it shows a clear message telling you exactly what to install.
 
 ### Basic Workflow
 
