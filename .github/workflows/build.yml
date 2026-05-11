@@ -39,24 +39,21 @@ jobs:
     needs: test
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
             platform: macos
             build_cmd: python -m PyInstaller gps-photo-tracker.spec --noconfirm
-            artifact_path: "dist/GPS Photo Tracker.app"
           - os: windows-latest
             platform: windows
             build_cmd: python -m PyInstaller --onefile --windowed --name "GPS Photo Tracker" src/gps_photo_tracker/__main__.py
-            artifact_path: "dist/GPS Photo Tracker.exe"
           - os: windows-latest
             platform: windows-debug
             build_cmd: python -m PyInstaller --onefile --console --name "GPS-Photo-Tracker-debug" src/gps_photo_tracker/__main__.py
-            artifact_path: "dist/GPS-Photo-Tracker-debug.exe"
           - os: ubuntu-latest
             platform: linux
             build_cmd: python -m PyInstaller --onefile --windowed --name "GPS Photo Tracker" src/gps_photo_tracker/__main__.py
-            artifact_path: "dist/GPS Photo Tracker"
 
     steps:
       - uses: actions/checkout@v4
@@ -83,9 +80,37 @@ jobs:
       - name: Build
         run: ${{ matrix.build_cmd }}
 
+      - name: Package (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          cd dist
+          zip -r -q "GPS-Photo-Tracker-v${{ steps.version.outputs.version }}-macos.zip" "GPS Photo Tracker.app"
+
+      - name: Package (Windows)
+        if: matrix.platform == 'windows'
+        run: |
+          cd dist
+          Compress-Archive -Path "GPS Photo Tracker.exe" -DestinationPath "GPS-Photo-Tracker-v${{ steps.version.outputs.version }}-windows.zip"
+        shell: pwsh
+
+      - name: Package (Windows debug)
+        if: matrix.platform == 'windows-debug'
+        run: |
+          cd dist
+          Compress-Archive -Path "GPS-Photo-Tracker-debug.exe" -DestinationPath "GPS-Photo-Tracker-v${{ steps.version.outputs.version }}-windows-debug.zip"
+        shell: pwsh
+
+      - name: Package (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          cd dist
+          tar -czf "GPS-Photo-Tracker-v${{ steps.version.outputs.version }}-linux.tar.gz" "GPS Photo Tracker"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: GPS-Photo-Tracker-v${{ steps.version.outputs.version }}-${{ matrix.platform }}
-          path: ${{ matrix.artifact_path }}
+          path: |
+            dist/GPS-Photo-Tracker-v${{ steps.version.outputs.version }}-*.zip
+            dist/GPS-Photo-Tracker-v${{ steps.version.outputs.version }}-*.tar.gz
           retention-days: 30
