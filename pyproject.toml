@@ -1,6 +1,6 @@
 [project]
 name = "gps-photo-tracker"
-version = "0.8.0"
+version = "0.8.1"
 description = "Batch process photos with GPS tracks (GPX/KML/TCX) to write EXIF GPS tags"
 license = {text = "GPL-3.0-or-later"}
 requires-python = ">=3.11"

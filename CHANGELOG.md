@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-05-11
+
+### Fixed
+
+- Startup crash handler: global try/catch writes crash log + shows error dialog
+- Windows debug build (`--console`) for troubleshooting silent startup failures
+- macOS .app bundle now packaged as .zip (preserves structure and permissions)
+- Linux binary now packaged as .tar.gz (preserves executable bit)
+- All platform artifacts include version number in filename
+- Version alignment: pyproject.toml / __init__.py / spec / README all consistent
+
 ## [1.0.0] - 2026-05-08
 
 ### Added
@@ -50,5 +61,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GUI integrated smart recommend, workers, resume, and report controls
 - BatchProcessor uses ThreadPoolExecutor (not ProcessPoolExecutor)
 
+[0.8.1]: https://github.com/zwyin/gps-photo-tracker-claude/releases/tag/v0.8.1
 [1.0.0]: https://github.com/zwyin/gps-photo-tracker-claude/releases/tag/v1.0.0
 [0.8.0]: https://github.com/zwyin/gps-photo-tracker-claude/releases/tag/v0.8.0

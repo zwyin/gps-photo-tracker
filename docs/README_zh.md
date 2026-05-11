@@ -25,9 +25,9 @@
 
 | 平台 | 文件 |
 |------|------|
-| macOS | `GPS-Photo-Tracker-v0.8.0-macos.zip` |
-| Windows | `GPS-Photo-Tracker-v0.8.0-windows.zip` |
-| Linux | `GPS-Photo-Tracker-v0.8.0-linux.zip` |
+| macOS | `GPS-Photo-Tracker-v0.8.1-macos.zip` |
+| Windows | `GPS-Photo-Tracker-v0.8.1-windows.zip` |
+| Linux | `GPS-Photo-Tracker-v0.8.1-linux.tar.gz` |
 
 下载后解压，双击即可运行，无需安装 Python 或任何其他软件。
 

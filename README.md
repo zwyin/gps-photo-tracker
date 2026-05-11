@@ -25,9 +25,9 @@ Download from [GitHub Actions](../../actions/workflows/build.yml) → click the 
 
 | Platform | File |
 |----------|------|
-| macOS | `GPS-Photo-Tracker-v0.8.0-macos.zip` |
-| Windows | `GPS-Photo-Tracker-v0.8.0-windows.zip` |
-| Linux | `GPS-Photo-Tracker-v0.8.0-linux.zip` |
+| macOS | `GPS-Photo-Tracker-v0.8.1-macos.zip` |
+| Windows | `GPS-Photo-Tracker-v0.8.1-windows.zip` |
+| Linux | `GPS-Photo-Tracker-v0.8.1-linux.tar.gz` |
 
 Download, unzip, and double-click to run. No Python or any other software needed.
 
