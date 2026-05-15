@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from gps_photo_tracker.core.models import (
+    GPXSegment,
     MatcherConfig,
     MatchResult,
     PhotoInfo,
@@ -32,6 +33,7 @@ from gps_photo_tracker.core.models import (
     ReviewAction,
     ReviewDecision,
     ReviewState,
+    TrackPoint,
 )
 from gps_photo_tracker.gui.review_dialog import ReviewDialog
 from gps_photo_tracker.gui.config_panel import build_params_group, build_mode_group
@@ -507,7 +509,6 @@ class MainWindow(QMainWindow):
 
     def _on_review_ready(self, review_data: dict):
         """Handle review_ready_signal: show ReviewDialog for failed matches."""
-        from gps_photo_tracker.core.models import TrackPoint, GPXSegment
         failed_results = []
         for fr in review_data.get("failed_results", []):
             photo = PhotoInfo(

@@ -74,7 +74,10 @@ class GPSTaggingService:
                 result.success = True
                 result.method = "manual_gps"
             elif decision.action == ReviewAction.MANUAL_COORD:
-                if decision.manual_lat is not None and decision.manual_lon is not None:
+                if (decision.manual_lat is not None
+                        and decision.manual_lon is not None
+                        and -90 <= decision.manual_lat <= 90
+                        and -180 <= decision.manual_lon <= 180):
                     result.review_gps = GPSInfo(
                         latitude=decision.manual_lat,
                         longitude=decision.manual_lon,
