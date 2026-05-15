@@ -16,6 +16,7 @@ Batch process photos with GPS tracks (GPX/KML/TCX) to automatically write EXIF G
 - **Resume capability** — Checkpoint system for copy mode, can resume interrupted batches
 - **Parallel write** — Multi-threaded EXIF writing for faster processing
 - **EXIF orientation** — Correctly displays thumbnails with orientation transforms
+- **Interactive review** — Review failed GPS matches after preview, manually assign coordinates or pick nearby track points
 
 ## Quick Start
 
@@ -25,9 +26,9 @@ Download from [GitHub Actions](../../actions/workflows/build.yml) → click the 
 
 | Platform | File |
 |----------|------|
-| macOS | `GPS-Photo-Tracker-v0.8.1-macos.zip` |
-| Windows | `GPS-Photo-Tracker-v0.8.1-windows.zip` |
-| Linux | `GPS-Photo-Tracker-v0.8.1-linux.tar.gz` |
+| macOS | `GPS-Photo-Tracker-v0.9.0-macos.zip` |
+| Windows | `GPS-Photo-Tracker-v0.9.0-windows.zip` |
+| Linux | `GPS-Photo-Tracker-v0.9.0-linux.tar.gz` |
 
 Download, unzip, and double-click to run. No Python or any other software needed.
 
