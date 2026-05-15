@@ -23,7 +23,17 @@ from PySide6.QtWidgets import (
     QSplitter,
 )
 
-from gps_photo_tracker.core.models import MatcherConfig, ProcessMode, ProcessOptions
+from gps_photo_tracker.core.models import (
+    MatcherConfig,
+    MatchResult,
+    PhotoInfo,
+    ProcessMode,
+    ProcessOptions,
+    ReviewAction,
+    ReviewDecision,
+    ReviewState,
+)
+from gps_photo_tracker.gui.review_dialog import ReviewDialog
 from gps_photo_tracker.gui.config_panel import build_params_group, build_mode_group
 from gps_photo_tracker.gui.detail_dialog import DetailDialog
 from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
@@ -72,6 +82,9 @@ class MainWindow(QMainWindow):
         file_menu = menu.addMenu("文件")
         settings_action = file_menu.addAction("设置")
         settings_action.triggered.connect(self._open_settings)
+
+        self._review_decisions: dict = {}
+        self._reviewed_results: list = []
 
         # Load saved settings
         self._apply_saved_settings()
@@ -408,6 +421,7 @@ class MainWindow(QMainWindow):
         self._worker.done_signal.connect(self._on_done)
         self._worker.scan_done_signal.connect(self._on_scan_done)
         self._worker.photos_scanned_signal.connect(self._on_photos_scanned)
+        self._worker.review_ready_signal.connect(self._on_review_ready)
         self._worker.start()
 
     def _on_cancel(self):
@@ -483,6 +497,62 @@ class MainWindow(QMainWindow):
         self._stats_label.setText(
             f"总数: {total} | 成功: {matched} | 跳过: {skipped} | 失败: {failed} | 覆盖: {overwritten} | 成功率: {rate:.1%}"
         )
+
+    def _on_review_ready(self, review_data: dict):
+        """Handle review_ready_signal: show ReviewDialog for failed matches."""
+        from gps_photo_tracker.core.models import TrackPoint, GPXSegment
+        failed_results = []
+        for fr in review_data.get("failed_results", []):
+            photo = PhotoInfo(
+                path=Path(fr["photo_path"]),
+                filename=fr["filename"],
+                timestamp=fr.get("timestamp"),
+                has_gps=False,
+            )
+            result = MatchResult(
+                photo=photo, success=False,
+                reject_reason=fr.get("reject_reason"),
+                time_diff=fr.get("time_diff"),
+            )
+            failed_results.append(result)
+
+        segments = []
+        for sd in review_data.get("gps_segments", []):
+            points = [
+                TrackPoint(
+                    timestamp=p["timestamp"],
+                    latitude=p["latitude"],
+                    longitude=p["longitude"],
+                    altitude=p.get("altitude"),
+                )
+                for p in sd.get("points", [])
+            ]
+            segments.append(GPXSegment(
+                filename=sd["filename"],
+                start=sd["start"],
+                end=sd["end"],
+                points=points,
+            ))
+
+        state = ReviewState(failed_results=failed_results, gps_segments=segments)
+        dialog = ReviewDialog(state, self)
+        dialog.exec()
+
+        reviewed_state = dialog.get_state()
+        if reviewed_state.decisions:
+            self._review_decisions = reviewed_state.decisions
+            self._reviewed_results = failed_results
+            manual_count = sum(
+                1 for d in reviewed_state.decisions.values()
+                if d.action in (ReviewAction.MANUAL_GPS, ReviewAction.MANUAL_COORD)
+            )
+            skip_count = sum(
+                1 for d in reviewed_state.decisions.values()
+                if d.action in (ReviewAction.SKIP, ReviewAction.KEEP_SKIP)
+            )
+            self.statusBar().showMessage(
+                f"审核完成: {manual_count} 张手动指定, {skip_count} 张跳过"
+            )
 
     def _on_done(self, result_dict: dict):
         self._start_btn.setEnabled(True)
