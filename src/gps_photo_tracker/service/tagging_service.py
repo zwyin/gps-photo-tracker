@@ -16,6 +16,7 @@ from gps_photo_tracker.core.param_tuner import ParamTuner
 from gps_photo_tracker.core.report_builder import ReportBuilder
 from gps_photo_tracker.core.models import (
     BatchResult,
+    GPSInfo,
     GPXSegment,
     MatcherConfig,
     MatchResult,
@@ -24,6 +25,9 @@ from gps_photo_tracker.core.models import (
     ProcessOptions,
     ProgressPhase,
     ProgressUpdate,
+    ReviewAction,
+    ReviewDecision,
+    ReviewState,
 )
 from gps_photo_tracker.logging_.logger import OperationLogger
 from gps_photo_tracker.service.cancel_token import CancellationToken
@@ -45,6 +49,40 @@ class GPSTaggingService:
     def auto_tune(self, segments: list[GPXSegment], photos: list[PhotoInfo]) -> MatcherConfig:
         """Recommend optimal parameters based on track and photo data."""
         return ParamTuner.recommend(segments, photos)
+
+    def prepare_review(self, results: list[MatchResult], segments: list[GPXSegment]) -> ReviewState:
+        """Extract failed match results into a ReviewState for GUI review."""
+        failed = [r for r in results if not r.success]
+        return ReviewState(failed_results=failed, gps_segments=segments)
+
+    def apply_review(self, results: list[MatchResult], state: ReviewState) -> list[MatchResult]:
+        """Merge user review decisions back into match results."""
+        for result in results:
+            if result.success:
+                continue
+            path_str = str(result.photo.path)
+            decision = state.decisions.get(path_str)
+            if not decision:
+                continue
+            if decision.action == ReviewAction.MANUAL_GPS and decision.selected_point:
+                pt = decision.selected_point
+                result.review_gps = GPSInfo(
+                    latitude=pt.latitude,
+                    longitude=pt.longitude,
+                    altitude=pt.altitude,
+                )
+                result.success = True
+                result.method = "manual_gps"
+            elif decision.action == ReviewAction.MANUAL_COORD:
+                if decision.manual_lat is not None and decision.manual_lon is not None:
+                    result.review_gps = GPSInfo(
+                        latitude=decision.manual_lat,
+                        longitude=decision.manual_lon,
+                    )
+                    result.success = True
+                    result.method = "manual_coord"
+            # KEEP_SKIP and SKIP: no change
+        return results
 
     def scan_gpx(self, gpx_dir: Path, on_progress: Callable | None = None) -> list[GPXSegment]:
         """Scan directory for track files (GPX, KML, TCX) and parse them."""
