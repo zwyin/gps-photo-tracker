@@ -169,11 +169,13 @@
 - 照片缩略图预览 ✅（photo_preview, photo_browser_dialog, detail_dialog）
 - 地图标记 ❌ 暂不实现（需要引入地图库，复杂度高）
 
-#### EF-07：交互式确认 ❌ 未实现
+#### EF-07：交互式确认 ✅ 已实现
 
-- 匹配后逐个审核确认
-- 拒绝不满意的匹配
-- 手动调整 GPS 位置
+- Preview 后自动弹出审核窗口（ReviewDialog）
+- 列表驱动布局，支持批量操作（跳过/手动选GPS/输入坐标）
+- GPSPointPicker 手动选择轨迹点
+- COPY/OVERWRITE 自动应用审核决策
+- `gui/review_dialog.py`、`gui/gps_point_picker.py`、`service/tagging_service.py`
 
 #### EF-08：多 GPS 格式支持 ✅ 已实现
 
