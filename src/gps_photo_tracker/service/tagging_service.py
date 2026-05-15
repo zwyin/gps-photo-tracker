@@ -84,6 +84,95 @@ class GPSTaggingService:
             # KEEP_SKIP and SKIP: no change
         return results
 
+    def write_phase(
+        self,
+        results: list[MatchResult],
+        options: ProcessOptions,
+        photo_dir: Path | None = None,
+        on_progress: Callable | None = None,
+        on_photo_processed: Callable | None = None,
+        cancel: CancellationToken | None = None,
+    ) -> BatchResult:
+        """Write GPS data for matched/reviewed photos. Uses review_gps when set."""
+        start = time.time()
+        is_preview = options.mode == ProcessMode.PREVIEW
+        is_copy = options.mode == ProcessMode.COPY
+        matched = 0
+        skipped = 0
+        failed = 0
+        overwritten = 0
+        reject_groups: dict[str, list[str]] = {}
+
+        for i, result in enumerate(results):
+            if cancel and cancel.is_cancelled:
+                break
+
+            effective_gps = result.review_gps if result.review_gps else result.gps
+
+            if on_progress:
+                on_progress(ProgressUpdate(
+                    phase=ProgressPhase.WRITING if not is_preview else ProgressPhase.MATCHING,
+                    current=i + 1,
+                    total=len(results),
+                    current_file=result.photo.filename,
+                    elapsed_seconds=time.time() - start,
+                ))
+
+            if result.success and effective_gps:
+                matched += 1
+                if not is_preview:
+                    write_result = MatchResult(
+                        photo=result.photo, success=True, gps=effective_gps,
+                        method=result.method, time_diff=result.time_diff,
+                    )
+                    if self._should_write(write_result, options):
+                        if result.photo.has_gps:
+                            overwritten += 1
+                        try:
+                            dst = self._write_photo(write_result, options, photo_dir)
+                            if self._op_logger:
+                                self._op_logger.log_write_success(result.photo, effective_gps, dest=dst)
+                        except Exception as e:
+                            failed += 1
+                            matched -= 1
+                            if self._op_logger:
+                                self._op_logger.log_error(f"write: {result.photo.filename}", e)
+                            if is_copy and options.output_dir:
+                                try:
+                                    dst = self._copy_destination(result.photo.path, options, photo_dir)
+                                    self._file_provider.copy_file(result.photo.path, dst)
+                                except Exception as copy_err:
+                                    if self._op_logger:
+                                        self._op_logger.log_error(f"copy_fallback: {result.photo.filename}", copy_err)
+                    else:
+                        skipped += 1
+                        if is_copy and options.output_dir:
+                            dst = self._copy_destination(result.photo.path, options, photo_dir)
+                            self._file_provider.copy_file(result.photo.path, dst)
+            else:
+                failed += 1
+                reason = result.reject_reason or "unknown"
+                reject_groups.setdefault(reason, []).append(result.photo.filename)
+                if is_copy and options.output_dir:
+                    dst = self._copy_destination(result.photo.path, options, photo_dir)
+                    self._file_provider.copy_file(result.photo.path, dst)
+
+            if on_photo_processed:
+                on_photo_processed(result)
+
+        elapsed = time.time() - start
+        success_rate = matched / len(results) if results else 0.0
+        return BatchResult(
+            total=len(results),
+            matched=matched,
+            skipped=skipped,
+            failed=failed,
+            overwritten=overwritten,
+            success_rate=success_rate,
+            results=results,
+            reject_groups=reject_groups,
+        )
+
     def scan_gpx(self, gpx_dir: Path, on_progress: Callable | None = None) -> list[GPXSegment]:
         """Scan directory for track files (GPX, KML, TCX) and parse them."""
         start = time.time()

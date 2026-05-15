@@ -8,6 +8,8 @@ from gps_photo_tracker.core.models import (
     MatcherConfig,
     MatchResult,
     PhotoInfo,
+    ProcessMode,
+    ProcessOptions,
     ReviewAction,
     ReviewDecision,
     ReviewState,
@@ -142,3 +144,38 @@ class TestApplyReview:
         )
         modified = service.apply_review(results, state)
         assert modified[0].review_gps.altitude == 500.0
+
+
+class TestWritePhaseWithReviewGPS:
+
+    def test_write_phase_uses_review_gps(self, tmp_path):
+        """write_phase should use review_gps when set, overriding gps."""
+        from PIL import Image
+        service = GPSTaggingService()
+        img = Image.new("RGB", (10, 10))
+        img.save(tmp_path / "test.jpg", "JPEG")
+
+        result = MatchResult(
+            photo=PhotoInfo(path=tmp_path / "test.jpg", filename="test.jpg",
+                            timestamp=1000.0, has_gps=False),
+            success=True,
+            gps=GPSInfo(latitude=0.0, longitude=0.0),
+            review_gps=GPSInfo(latitude=39.9, longitude=116.4),
+            method="manual_coord",
+        )
+        options = ProcessOptions(mode=ProcessMode.OVERWRITE)
+        batch = service.write_phase([result], options)
+        assert batch.matched == 1
+        from gps_photo_tracker.core.exif_writer import EXIFWriter
+        written = EXIFWriter.read_gps(tmp_path / "test.jpg")
+        assert written is not None
+        assert abs(written.latitude - 39.9) < 0.01
+        assert abs(written.longitude - 116.4) < 0.01
+
+    def test_write_phase_skips_failed(self, tmp_path):
+        service = GPSTaggingService()
+        result = _make_failed_result("fail.jpg")
+        options = ProcessOptions(mode=ProcessMode.OVERWRITE)
+        batch = service.write_phase([result], options)
+        assert batch.matched == 0
+        assert batch.failed == 1
