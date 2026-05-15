@@ -16,3 +16,5 @@ dist/
 venv/
 test-data/
 docs/superpowers/
+.claude/
+.superpowers/
