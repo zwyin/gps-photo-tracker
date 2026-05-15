@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-05-16
+
+### Added
+
+- EF-07: Interactive review for failed GPS matches
+  - ReviewAction enum, ReviewDecision and ReviewState data models
+  - Service layer split: match → review → write phases
+  - prepare_review() and apply_review() on GPSTaggingService
+  - write_phase() supports review GPS precedence over matched GPS
+  - Worker emits review_ready_signal for async review workflow
+  - GPSPointPicker dialog for manual GPS track point selection
+  - ReviewDialog with list-driven layout, batch actions, and inline dropdowns
+  - MainWindow review integration with status bar summary
+  - Coordinate input validation (-90~90 lat, -180~180 lon)
+
+### Tested
+
+- 360 unit/integration tests passing (26 new review tests)
+- TDD-driven development for all new components
+
 ## [0.8.1] - 2026-05-11
 
 ### Fixed
@@ -61,6 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GUI integrated smart recommend, workers, resume, and report controls
 - BatchProcessor uses ThreadPoolExecutor (not ProcessPoolExecutor)
 
+[0.9.0]: https://github.com/zwyin/gps-photo-tracker-claude/releases/tag/v0.9.0
 [0.8.1]: https://github.com/zwyin/gps-photo-tracker-claude/releases/tag/v0.8.1
 [1.0.0]: https://github.com/zwyin/gps-photo-tracker-claude/releases/tag/v1.0.0
 [0.8.0]: https://github.com/zwyin/gps-photo-tracker-claude/releases/tag/v0.8.0

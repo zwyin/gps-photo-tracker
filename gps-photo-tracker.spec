@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for GPS Photo Tracker v0.8.1."""
+"""PyInstaller spec for GPS Photo Tracker v0.9.0."""
 
 import os
 import sys

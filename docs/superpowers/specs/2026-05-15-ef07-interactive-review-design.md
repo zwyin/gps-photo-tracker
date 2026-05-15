@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-15
 **Status:** Approved
-**Affects versions:** 0.9.0
+**Affects versions:** 0.9.0 ✅ Implemented
 
 ## Summary
 
