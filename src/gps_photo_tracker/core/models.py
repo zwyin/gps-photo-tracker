@@ -75,6 +75,13 @@ class RejectReason:
     NO_TRACK_POINTS = "no_track_points"
 
 
+class ReviewAction(Enum):
+    KEEP_SKIP = "keep_skip"
+    MANUAL_GPS = "manual_gps"
+    MANUAL_COORD = "manual_coord"
+    SKIP = "skip"
+
+
 # ── Data structures ─────────────────────────────────────────
 
 
@@ -123,6 +130,23 @@ class MatchResult:
     interpolation_next: TrackPoint | None = None
     interpolation_distance: float | None = None  # meters
     interpolation_ratio: float | None = None
+    review_gps: GPSInfo | None = None  # GPS assigned during interactive review
+
+
+@dataclass
+class ReviewDecision:
+    photo_path: str
+    action: ReviewAction
+    selected_point: TrackPoint | None = None
+    manual_lat: float | None = None
+    manual_lon: float | None = None
+
+
+@dataclass
+class ReviewState:
+    failed_results: list[MatchResult]
+    decisions: dict[str, ReviewDecision] = field(default_factory=dict)
+    gps_segments: list[GPXSegment] = field(default_factory=list)
 
 
 @dataclass
