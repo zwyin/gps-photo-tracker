@@ -12,6 +12,7 @@ from gps_photo_tracker.core.models import (
     ProcessMode,
     ProcessOptions,
     ProgressPhase,
+    ReviewState,
 )
 from gps_photo_tracker.service.cancel_token import CancellationToken
 from gps_photo_tracker.service.tagging_service import GPSTaggingService
@@ -25,6 +26,7 @@ class Worker(QThread):
     done_signal = Signal(dict)  # BatchResult as dict
     scan_done_signal = Signal(list)  # list of GPX segment dicts for browser
     photos_scanned_signal = Signal(list)  # list of photo info dicts for browser
+    review_ready_signal = Signal(dict)  # ReviewState serialized as dict
 
     def __init__(
         self,
@@ -181,6 +183,39 @@ class Worker(QThread):
                     on_photo_processed=on_photo,
                     cancel=self._token,
                 )
+
+            # Check for failures needing review (PREVIEW mode only)
+            failed_results = [r for r in result.results if not r.success]
+            if failed_results and self._options.mode == ProcessMode.PREVIEW:
+                review_state = service.prepare_review(result.results, segments)
+                self.review_ready_signal.emit({
+                    "failed_results": [
+                        {
+                            "photo_path": str(r.photo.path),
+                            "filename": r.photo.filename,
+                            "timestamp": r.photo.timestamp,
+                            "reject_reason": r.reject_reason,
+                            "time_diff": r.time_diff,
+                        }
+                        for r in review_state.failed_results
+                    ],
+                    "gps_segments": [
+                        {
+                            "filename": s.filename,
+                            "start": s.start,
+                            "end": s.end,
+                            "points": [
+                                {"timestamp": p.timestamp, "latitude": p.latitude,
+                                 "longitude": p.longitude, "altitude": p.altitude}
+                                for p in s.points
+                            ],
+                        }
+                        for s in review_state.gps_segments
+                    ],
+                    "total": result.total,
+                    "matched": result.matched,
+                    "failed": result.failed,
+                })
 
             self.done_signal.emit({
                 "total": result.total,

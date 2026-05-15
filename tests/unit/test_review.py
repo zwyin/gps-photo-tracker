@@ -179,3 +179,45 @@ class TestWritePhaseWithReviewGPS:
         batch = service.write_phase([result], options)
         assert batch.matched == 0
         assert batch.failed == 1
+
+
+class TestWorkerReviewSignal:
+
+    def test_worker_emits_review_ready_on_failure(self, qtbot, tmp_path):
+        """Worker should emit review_ready when preview finds failures."""
+        import textwrap
+        from gps_photo_tracker.gui.worker import Worker
+        from gps_photo_tracker.core.models import ProcessMode, ProcessOptions, MatcherConfig
+        from PIL import Image
+        import piexif
+
+        gpx = textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>
+            <trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:05:00Z</time></trkpt>
+          </trkseg></trk>
+        </gpx>
+        """)
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 20:00:00"}}
+        img.save(tmp_path / "photo.jpg", "JPEG", exif=piexif.dump(exif))
+
+        options = ProcessOptions(mode=ProcessMode.PREVIEW)
+        config = MatcherConfig()
+        worker = Worker(
+            gps_dir=tmp_path, photo_dir=tmp_path,
+            config=config, options=options,
+        )
+
+        signals = []
+        worker.review_ready_signal.connect(lambda s: signals.append(s))
+
+        with qtbot.waitSignal(worker.done_signal, timeout=10000):
+            worker.run()
+
+        assert len(signals) == 1
+        assert len(signals[0]["failed_results"]) > 0
