@@ -36,6 +36,7 @@ class Worker(QThread):
         options: ProcessOptions,
         log_dir: Path | None = None,
         excluded_filenames: set[str] | None = None,
+        review_decisions: dict | None = None,
     ):
         super().__init__()
         self._gps_dir = gps_dir
@@ -45,6 +46,7 @@ class Worker(QThread):
         self._log_dir = log_dir
         self._excluded_filenames = excluded_filenames or set()
         self._token = CancellationToken()
+        self._review_decisions = review_decisions or {}
 
     def cancel(self):
         self._token.cancel()
@@ -175,6 +177,18 @@ class Worker(QThread):
                     on_photo_processed=on_photo,
                     cancel=self._token,
                 )
+            elif self._review_decisions:
+                # COPY/OVERWRITE with stored review decisions:
+                # match → apply review → write
+                match_result = service.preview(
+                    segments, photos, self._config,
+                    on_progress=on_progress,
+                    on_photo_processed=on_photo,
+                    cancel=self._token,
+                )
+                result = self._apply_stored_review(
+                    service, match_result.results, segments, on_photo,
+                )
             else:
                 result = service.process(
                     segments, photos, self._config, self._options,
@@ -216,6 +230,8 @@ class Worker(QThread):
                     "matched": result.matched,
                     "failed": result.failed,
                 })
+                # Don't emit done_signal — MainWindow handles it after review
+                return
 
             self.done_signal.emit({
                 "total": result.total,
@@ -233,3 +249,46 @@ class Worker(QThread):
                 "total": 0, "matched": 0, "failed": 0,
                 "skipped": 0, "overwritten": 0, "success_rate": 0.0,
             })
+
+    def _apply_stored_review(self, service, results, segments, on_photo):
+        """Apply stored review decisions then run write phase."""
+        from gps_photo_tracker.core.models import (
+            GPSInfo, ReviewAction, ReviewDecision, ReviewState, TrackPoint,
+        )
+        decisions = {}
+        for path_str, dec_data in self._review_decisions.items():
+            action = ReviewAction(dec_data["action"])
+            decision = ReviewDecision(photo_path=path_str, action=action)
+            if action == ReviewAction.MANUAL_GPS and dec_data.get("point"):
+                p = dec_data["point"]
+                decision.selected_point = TrackPoint(
+                    timestamp=p["timestamp"],
+                    latitude=p["latitude"],
+                    longitude=p["longitude"],
+                    altitude=p.get("altitude"),
+                )
+            elif action == ReviewAction.MANUAL_COORD:
+                decision.manual_lat = dec_data.get("lat")
+                decision.manual_lon = dec_data.get("lon")
+            decisions[path_str] = decision
+
+        state = ReviewState(
+            failed_results=[r for r in results if not r.success],
+            decisions=decisions,
+            gps_segments=segments,
+        )
+        modified = service.apply_review(results, state)
+
+        def on_write_progress(update):
+            self.progress_signal.emit(
+                update.phase.value, update.current, update.total,
+                update.current_file, update.elapsed_seconds,
+            )
+
+        return service.write_phase(
+            modified, self._options,
+            photo_dir=self._photo_dir,
+            on_progress=on_write_progress,
+            on_photo_processed=on_photo,
+            cancel=self._token,
+        )

@@ -131,6 +131,11 @@ class ReviewDialog(QDialog):
     def get_state(self) -> ReviewState:
         return self._state
 
+    def closeEvent(self, event):
+        """Treat X button as 'Skip All' per spec."""
+        self._skip_all()
+        event.accept()
+
     def _skip_all(self):
         for result in self._state.failed_results:
             path_str = str(result.photo.path)

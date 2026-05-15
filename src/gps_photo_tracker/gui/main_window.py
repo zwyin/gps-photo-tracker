@@ -408,6 +408,12 @@ class MainWindow(QMainWindow):
         log_dir_str = settings.value("log_dir", "")
         log_dir = Path(log_dir_str) if log_dir_str else None
 
+        # Pass stored review decisions to Worker for COPY/OVERWRITE
+        review_decisions = self._review_decisions if mode_id != 0 else None
+        # Clear stale decisions when starting a new Preview run
+        if mode_id == 0:
+            self._review_decisions = {}
+
         self._worker = Worker(
             gps_dir=Path(gps_dir),
             photo_dir=Path(photo_dir),
@@ -415,6 +421,7 @@ class MainWindow(QMainWindow):
             options=options,
             log_dir=log_dir,
             excluded_filenames=self._excluded_filenames,
+            review_decisions=review_decisions,
         )
         self._worker.progress_signal.connect(self._on_progress)
         self._worker.photo_signal.connect(self._on_photo_processed)
@@ -540,7 +547,22 @@ class MainWindow(QMainWindow):
 
         reviewed_state = dialog.get_state()
         if reviewed_state.decisions:
-            self._review_decisions = reviewed_state.decisions
+            # Store as serializable dict for Worker to consume on COPY/OVERWRITE
+            self._review_decisions = {}
+            for path_str, dec in reviewed_state.decisions.items():
+                dec_data = {"action": dec.action.value}
+                if dec.action == ReviewAction.MANUAL_GPS and dec.selected_point:
+                    dec_data["point"] = {
+                        "timestamp": dec.selected_point.timestamp,
+                        "latitude": dec.selected_point.latitude,
+                        "longitude": dec.selected_point.longitude,
+                        "altitude": dec.selected_point.altitude,
+                    }
+                elif dec.action == ReviewAction.MANUAL_COORD:
+                    dec_data["lat"] = dec.manual_lat
+                    dec_data["lon"] = dec.manual_lon
+                self._review_decisions[path_str] = dec_data
+
             self._reviewed_results = failed_results
             manual_count = sum(
                 1 for d in reviewed_state.decisions.values()
@@ -551,8 +573,20 @@ class MainWindow(QMainWindow):
                 if d.action in (ReviewAction.SKIP, ReviewAction.KEEP_SKIP)
             )
             self.statusBar().showMessage(
-                f"审核完成: {manual_count} 张手动指定, {skip_count} 张跳过"
+                f"审核完成: {manual_count} 张手动指定, {skip_count} 张跳过。点 COPY/OVERWRITE 执行写入。"
             )
+        else:
+            self._review_decisions = {}
+
+        # Manually trigger UI completion since Worker didn't emit done_signal
+        total = review_data.get("total", 0)
+        matched = review_data.get("matched", 0)
+        failed = review_data.get("failed", 0)
+        rate = matched / total if total > 0 else 0
+        self._on_done({
+            "total": total, "matched": matched, "failed": failed,
+            "skipped": 0, "overwritten": 0, "success_rate": rate,
+        })
 
     def _on_done(self, result_dict: dict):
         self._start_btn.setEnabled(True)

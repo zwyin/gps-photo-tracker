@@ -216,7 +216,7 @@ class TestWorkerReviewSignal:
         signals = []
         worker.review_ready_signal.connect(lambda s: signals.append(s))
 
-        with qtbot.waitSignal(worker.done_signal, timeout=10000):
+        with qtbot.waitSignal(worker.review_ready_signal, timeout=10000):
             worker.run()
 
         assert len(signals) == 1
