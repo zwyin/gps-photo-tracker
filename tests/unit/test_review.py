@@ -221,3 +221,139 @@ class TestWorkerReviewSignal:
 
         assert len(signals) == 1
         assert len(signals[0]["failed_results"]) > 0
+
+
+class TestWorkerApplyStoredReview:
+    """Test Worker._apply_stored_review: COPY mode with stored review decisions."""
+
+    def _setup_files(self, tmp_path):
+        import textwrap
+        from PIL import Image
+        import piexif
+
+        gpx = textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>
+            <trkpt lat="25.001" lon="100.001"><time>2026-02-17T08:05:00Z</time></trkpt>
+          </trkseg></trk>
+        </gpx>
+        """)
+        (tmp_path / "track.gpx").write_text(gpx)
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 20:00:00"}}
+        img.save(tmp_path / "photo.jpg", "JPEG", exif=piexif.dump(exif))
+        return tmp_path / "photo.jpg"
+
+    def test_copy_with_manual_coord_decision(self, qtbot, tmp_path):
+        from gps_photo_tracker.gui.worker import Worker
+        photo_path = self._setup_files(tmp_path)
+
+        review_decisions = {
+            str(photo_path): {
+                "action": "manual_coord",
+                "lat": 39.9,
+                "lon": 116.4,
+            }
+        }
+
+        options = ProcessOptions(mode=ProcessMode.COPY)
+        config = MatcherConfig()
+        worker = Worker(
+            gps_dir=tmp_path, photo_dir=tmp_path,
+            config=config, options=options,
+            review_decisions=review_decisions,
+        )
+
+        done_results = []
+        worker.done_signal.connect(lambda d: done_results.append(d))
+
+        with qtbot.waitSignal(worker.done_signal, timeout=15000):
+            worker.run()
+
+        assert len(done_results) == 1
+        assert done_results[0]["matched"] >= 1
+        assert done_results[0]["failed"] == 0
+
+    def test_copy_with_manual_gps_decision(self, qtbot, tmp_path):
+        from gps_photo_tracker.gui.worker import Worker
+        photo_path = self._setup_files(tmp_path)
+
+        review_decisions = {
+            str(photo_path): {
+                "action": "manual_gps",
+                "point": {
+                    "timestamp": 1739789100.0,
+                    "latitude": 25.0005,
+                    "longitude": 100.0005,
+                    "altitude": 105,
+                },
+            }
+        }
+
+        options = ProcessOptions(mode=ProcessMode.COPY)
+        config = MatcherConfig()
+        worker = Worker(
+            gps_dir=tmp_path, photo_dir=tmp_path,
+            config=config, options=options,
+            review_decisions=review_decisions,
+        )
+
+        done_results = []
+        worker.done_signal.connect(lambda d: done_results.append(d))
+
+        with qtbot.waitSignal(worker.done_signal, timeout=15000):
+            worker.run()
+
+        assert len(done_results) == 1
+        assert done_results[0]["matched"] >= 1
+
+    def test_copy_with_skip_decision_stays_failed(self, qtbot, tmp_path):
+        from gps_photo_tracker.gui.worker import Worker
+        photo_path = self._setup_files(tmp_path)
+
+        review_decisions = {
+            str(photo_path): {
+                "action": "skip",
+            }
+        }
+
+        options = ProcessOptions(mode=ProcessMode.COPY)
+        config = MatcherConfig()
+        worker = Worker(
+            gps_dir=tmp_path, photo_dir=tmp_path,
+            config=config, options=options,
+            review_decisions=review_decisions,
+        )
+
+        done_results = []
+        worker.done_signal.connect(lambda d: done_results.append(d))
+
+        with qtbot.waitSignal(worker.done_signal, timeout=15000):
+            worker.run()
+
+        assert len(done_results) == 1
+        assert done_results[0]["failed"] >= 1
+
+    def test_copy_without_decisions_uses_normal_pipeline(self, qtbot, tmp_path):
+        from gps_photo_tracker.gui.worker import Worker
+        self._setup_files(tmp_path)
+
+        options = ProcessOptions(mode=ProcessMode.COPY)
+        config = MatcherConfig()
+        worker = Worker(
+            gps_dir=tmp_path, photo_dir=tmp_path,
+            config=config, options=options,
+            review_decisions={},
+        )
+
+        done_results = []
+        worker.done_signal.connect(lambda d: done_results.append(d))
+
+        with qtbot.waitSignal(worker.done_signal, timeout=15000):
+            worker.run()
+
+        assert len(done_results) == 1
+        assert done_results[0]["failed"] >= 1

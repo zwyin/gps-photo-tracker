@@ -115,3 +115,58 @@ class TestReviewDialog:
         dialog = ReviewDialog(state)
         qtbot.addWidget(dialog)
         assert dialog.get_state() is state
+
+    def test_close_event_treated_as_skip_all(self, app, qtbot):
+        from PySide6.QtGui import QCloseEvent
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+        state = _make_review_state()
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        event = QCloseEvent()
+        dialog.closeEvent(event)
+        assert len(dialog._state.decisions) == 2
+        for d in dialog._state.decisions.values():
+            assert d.action == ReviewAction.SKIP
+        assert event.isAccepted()
+
+    def test_action_dropdown_skip(self, app, qtbot):
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+        state = _make_review_state()
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        dialog._action_combos[0].setCurrentIndex(1)  # "跳过"
+        path_str = str(state.failed_results[0].photo.path)
+        assert path_str in dialog._state.decisions
+        assert dialog._state.decisions[path_str].action == ReviewAction.SKIP
+
+    def test_batch_skip_selected(self, app, qtbot):
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+        state = _make_review_state()
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        # Check first row's checkbox
+        cb_widget = dialog._table.cellWidget(0, 0)
+        checkbox = cb_widget.findChild(__import__("PySide6.QtWidgets", fromlist=["QCheckBox"]).QCheckBox)
+        if checkbox:
+            checkbox.setChecked(True)
+        dialog._batch_action(1)  # index 1 = skip
+        path_str = str(state.failed_results[0].photo.path)
+        assert path_str in dialog._state.decisions
+        assert dialog._state.decisions[path_str].action == ReviewAction.SKIP
+
+    def test_progress_updates(self, app, qtbot):
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+        state = _make_review_state()
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        assert dialog._progress_label.text() == "已处理 0/2"
+        dialog._action_combos[0].setCurrentIndex(1)  # skip first
+        assert "1/2" in dialog._progress_label.text()
+
+    def test_row_click_updates_info(self, app, qtbot):
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+        state = _make_review_state()
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        dialog._on_row_clicked(0, 0)
+        assert "fail1.jpg" in dialog._info_label.text()
