@@ -81,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GUI integrated smart recommend, workers, resume, and report controls
 - BatchProcessor uses ThreadPoolExecutor (not ProcessPoolExecutor)
 
-[0.9.0]: https://github.com/zwyin/gps-photo-tracker-claude/releases/tag/v0.9.0
-[0.8.1]: https://github.com/zwyin/gps-photo-tracker-claude/releases/tag/v0.8.1
-[1.0.0]: https://github.com/zwyin/gps-photo-tracker-claude/releases/tag/v1.0.0
-[0.8.0]: https://github.com/zwyin/gps-photo-tracker-claude/releases/tag/v0.8.0
+[0.9.0]: https://github.com/zwyin/gps-photo-tracker/releases/tag/v0.9.0
+[0.8.1]: https://github.com/zwyin/gps-photo-tracker/releases/tag/v0.8.1
+[1.0.0]: https://github.com/zwyin/gps-photo-tracker/releases/tag/v1.0.0
+[0.8.0]: https://github.com/zwyin/gps-photo-tracker/releases/tag/v0.8.0

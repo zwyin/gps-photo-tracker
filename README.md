@@ -45,8 +45,8 @@ Need **Python 3.11 or higher**. If you see a lower version, download from [pytho
 **Step 2 — Download source code**
 
 ```bash
-git clone https://github.com/zwyin/gps-photo-tracker-claude.git
-cd gps-photo-tracker-claude
+git clone https://github.com/zwyin/gps-photo-tracker.git
+cd gps-photo-tracker
 ```
 
 **Step 3 — Install dependencies**
