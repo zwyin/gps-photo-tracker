@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QSettings, QUrl
-from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PySide6.QtGui import QBrush, QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent
 
 logger = logging.getLogger("gps_tracker")
 from PySide6.QtWidgets import (
@@ -515,9 +515,10 @@ class MainWindow(QMainWindow):
 
         # GPS(前) — existing GPS before processing
         gps_before = result_dict.get("gps_before", "")
-        self._results_table.setItem(row, 1, QTableWidgetItem(gps_before if gps_before else "无"))
+        before_text = gps_before if gps_before else "无"
+        self._results_table.setItem(row, 1, QTableWidgetItem(before_text))
 
-        # 计算GPS — computed GPS coordinates
+        # 计算GPS — computed GPS coordinates from matching
         lat = result_dict.get("latitude")
         lon = result_dict.get("longitude")
         if lat is not None and lon is not None:
@@ -526,9 +527,23 @@ class MainWindow(QMainWindow):
             gps_text = "—"
         self._results_table.setItem(row, 2, QTableWidgetItem(gps_text))
 
-        # GPS(后) — GPS after write (for preview same as computed)
-        gps_after = result_dict.get("gps_new", "")
-        self._results_table.setItem(row, 3, QTableWidgetItem(gps_after if gps_after else gps_text))
+        # GPS(后) — what GPS will be after processing
+        has_gps = result_dict.get("has_gps", False)
+        will_overwrite = has_gps and self._overwrite_gps_cb.isChecked()
+        if has_gps and not will_overwrite:
+            after_text = before_text  # no change — keep existing GPS
+        else:
+            after_text = gps_text  # new match result
+        self._results_table.setItem(row, 3, QTableWidgetItem(after_text))
+
+        # Color-code matching GPS values
+        same_brush = QBrush(QColor(220, 245, 220))  # light green
+        if before_text not in ("无", "—") and before_text == after_text:
+            self._results_table.item(row, 1).setBackground(same_brush)
+            self._results_table.item(row, 3).setBackground(same_brush)
+        if gps_text not in ("无", "—") and gps_text == after_text:
+            self._results_table.item(row, 2).setBackground(same_brush)
+            self._results_table.item(row, 3).setBackground(same_brush)
 
         method = result_dict.get("method", "")
         method_text = {"interpolated": "插值", "nearest": "就近"}.get(method, "")
