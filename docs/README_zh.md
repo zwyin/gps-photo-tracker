@@ -44,8 +44,8 @@ python --version
 **第 2 步 — 下载源码**
 
 ```bash
-git clone https://github.com/zwyin/gps-photo-tracker-claude.git
-cd gps-photo-tracker-claude
+git clone https://github.com/zwyin/gps-photo-tracker.git
+cd gps-photo-tracker
 ```
 
 **第 3 步 — 安装依赖**
