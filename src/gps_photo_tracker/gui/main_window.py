@@ -247,6 +247,7 @@ class MainWindow(QMainWindow):
         if path:
             self._photo_dir_edit.setCurrentText(path)
             self._add_path_history("photo_dir_history", path, self._photo_dir_edit)
+            self._clear_results()
             self._auto_scan_photos(Path(path))
 
     def _browse_output_dir(self):
@@ -254,6 +255,12 @@ class MainWindow(QMainWindow):
         if path:
             self._output_dir_edit.setCurrentText(path)
             self._add_path_history("output_dir_history", path, self._output_dir_edit)
+
+    def _clear_results(self):
+        self._results_table.setRowCount(0)
+        self._result_details.clear()
+        self._stats_label.setText("")
+        self._photo_preview.clear()
 
     def _auto_scan_gpx(self, gps_dir: Path):
         from gps_photo_tracker.core.file_provider import FileProvider
@@ -350,6 +357,15 @@ class MainWindow(QMainWindow):
         photo_dir = self._photo_dir_edit.currentText()
         if not gps_dir or not photo_dir:
             QMessageBox.information(self, "提示", "请先选择 GPS 轨迹目录和照片目录")
+            return
+        reply = QMessageBox.question(
+            self, "智能推荐参数",
+            "将根据已扫描的 GPS 轨迹和照片数据，自动分析并推荐最优匹配参数。\n\n"
+            "当前参数值将被替换。是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
             return
         from gps_photo_tracker.service.tagging_service import GPSTaggingService
         service = GPSTaggingService()
@@ -498,15 +514,22 @@ class MainWindow(QMainWindow):
         self._update_stats_card()
 
     def _update_stats_card(self):
-        total = len(self._result_details)
-        matched = sum(1 for d in self._result_details if d.get("success"))
-        failed = sum(1 for d in self._result_details if not d.get("success"))
-        skipped = sum(1 for d in self._result_details
-                      if d.get("has_gps") and d.get("success"))
-        overwritten = sum(1 for d in self._result_details if d.get("overwritten"))
+        details = self._result_details
+        total = len(details)
+        has_gps_total = sum(1 for d in details if d.get("has_gps"))
+        new_matched = sum(1 for d in details if not d.get("has_gps") and d.get("success"))
+        skipped_existing = sum(
+            1 for d in details
+            if d.get("has_gps") and d.get("success") and not d.get("overwritten")
+        )
+        overwritten = sum(1 for d in details if d.get("overwritten"))
+        failed = sum(1 for d in details if not d.get("success"))
+        matched = new_matched + skipped_existing + overwritten
         rate = matched / total if total > 0 else 0
         self._stats_label.setText(
-            f"总数: {total} | 成功: {matched} | 跳过: {skipped} | 失败: {failed} | 覆盖: {overwritten} | 成功率: {rate:.1%}"
+            f"总数: {total} | 已有GPS: {has_gps_total} | "
+            f"新匹配: {new_matched} | 跳过(已有): {skipped_existing} | "
+            f"覆盖: {overwritten} | 失败: {failed} | 成功率: {rate:.1%}"
         )
 
     def _on_review_ready(self, review_data: dict):
@@ -682,7 +705,8 @@ class MainWindow(QMainWindow):
             method = detail.get("method", "")
             method_text = {"interpolated": "插值", "nearest": "就近"}.get(method, "—")
             gps_str = f"{lat:.4f}, {lon:.4f}" if lat is not None and lon is not None else "—"
-            info = f"文件: {detail.get('filename', '—')}\nGPS: {gps_str}\n方式: {method_text}"
+            time_str = detail.get("capture_time") or "—"
+            info = f"文件: {detail.get('filename', '—')}\n拍摄时间: {time_str}\nGPS: {gps_str}\n方式: {method_text}"
             self._photo_preview.show_photo(photo_path, info)
 
     def _open_settings(self):
@@ -758,6 +782,7 @@ class MainWindow(QMainWindow):
         if photo_dir:
             self._photo_dir_edit.setCurrentText(str(photo_dir))
             self._add_path_history("photo_dir_history", str(photo_dir), self._photo_dir_edit)
+            self._clear_results()
             self._auto_scan_photos(photo_dir)
         if not gps_dir and not photo_dir:
             QMessageBox.information(self, "拖放", "无法识别拖入的内容类型")
