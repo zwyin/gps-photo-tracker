@@ -215,22 +215,7 @@ class SettingsDialog(QDialog):
         return lbl, spin
 
     def _reset_defaults(self):
-        for key, default in SETTINGS_KEYS.items():
-            self._settings[key] = default
-        self._isolated[1].setValue(SETTINGS_KEYS["isolated_window"])
-        self._middle[1].setValue(SETTINGS_KEYS["middle_time_window"])
-        self._context[1].setValue(SETTINGS_KEYS["context_window"])
-        self._distance[1].setValue(SETTINGS_KEYS["max_gps_distance"])
-        self._offset[1].setValue(SETTINGS_KEYS["time_offset"])
-        self._match_tail.setChecked(SETTINGS_KEYS["match_tail"])
-        self._overwrite.setChecked(SETTINGS_KEYS["overwrite_gps"])
-        self._keep_structure.setChecked(SETTINGS_KEYS["keep_structure"])
-        self._resume.setChecked(SETTINGS_KEYS["resume"])
-        self._generate_report.setChecked(SETTINGS_KEYS["generate_report"])
-        self._workers_spin.setValue(SETTINGS_KEYS["workers"])
-        self._mode_preview_rb.setChecked(True)
-        self._log_dir_edit.setText("")
-        self._retention_spin.setValue(30)
+        self._apply_values(SETTINGS_KEYS)
 
     def _browse_log_dir(self):
         path = QFileDialog.getExistingDirectory(self, "选择日志目录")
@@ -238,22 +223,7 @@ class SettingsDialog(QDialog):
             self._log_dir_edit.setText(path)
 
     def _save(self):
-        values = {
-            "isolated_window": self._isolated[1].value(),
-            "middle_time_window": self._middle[1].value(),
-            "context_window": self._context[1].value(),
-            "max_gps_distance": self._distance[1].value(),
-            "time_offset": self._offset[1].value(),
-            "match_tail": self._match_tail.isChecked(),
-            "overwrite_gps": self._overwrite.isChecked(),
-            "keep_structure": self._keep_structure.isChecked(),
-            "resume": self._resume.isChecked(),
-            "generate_report": self._generate_report.isChecked(),
-            "workers": self._workers_spin.value(),
-            "mode": self._mode_group.checkedId(),
-            "log_dir": self._log_dir_edit.text(),
-            "log_retention_days": self._retention_spin.value(),
-        }
+        values = self._collect_form_values()
         save_settings(values)
         self.accept()
 
@@ -283,6 +253,8 @@ class SettingsDialog(QDialog):
             "generate_report": self._generate_report.isChecked(),
             "workers": self._workers_spin.value(),
             "mode": self._mode_group.checkedId(),
+            "log_dir": self._log_dir_edit.text(),
+            "log_retention_days": self._retention_spin.value(),
         }
 
     def _apply_values(self, values: dict):
@@ -310,7 +282,12 @@ class SettingsDialog(QDialog):
             self._workers_spin.setValue(int(values["workers"]))
         if "mode" in values:
             mode_id = int(values["mode"])
-            [self._mode_preview_rb, self._mode_copy_rb, self._mode_overwrite_rb][mode_id].setChecked(True)
+            if 0 <= mode_id <= 2:
+                [self._mode_preview_rb, self._mode_copy_rb, self._mode_overwrite_rb][mode_id].setChecked(True)
+        if "log_dir" in values:
+            self._log_dir_edit.setText(str(values["log_dir"]))
+        if "log_retention_days" in values:
+            self._retention_spin.setValue(int(values["log_retention_days"]))
 
     def _load_profile(self):
         idx = self._profile_cb.currentIndex()

@@ -109,6 +109,8 @@ class TestLoadProfile:
             "match_tail": False,
             "mode": 2,
             "workers": 4,
+            "log_dir": "/tmp/logs",
+            "log_retention_days": 60,
         })
         dialog._profile_cb.addItem("hiking")
         dialog._profile_cb.setCurrentText("hiking")
@@ -118,6 +120,8 @@ class TestLoadProfile:
         assert dialog._match_tail.isChecked() is False
         assert dialog._mode_overwrite_rb.isChecked() is True
         assert dialog._workers_spin.value() == 4
+        assert dialog._log_dir_edit.text() == "/tmp/logs"
+        assert dialog._retention_spin.value() == 60
 
     def test_load_empty_profile(self, dialog):
         dialog._profile_cb.setCurrentIndex(0)
@@ -168,3 +172,59 @@ class TestResetDefaults:
         dialog._reset_defaults()
         assert dialog._isolated[1].value() == SETTINGS_KEYS["isolated_window"]
         assert dialog._match_tail.isChecked() == SETTINGS_KEYS["match_tail"]
+        assert dialog._log_dir_edit.text() == ""
+        assert dialog._retention_spin.value() == SETTINGS_KEYS["log_retention_days"]
+
+
+class TestFullRoundTrip:
+
+    def test_all_keys_survive_save_load_cycle(self, dialog):
+        """Every SETTINGS_KEYS field must round-trip through profile save/load."""
+        non_defaults = {
+            "isolated_window": 1200,
+            "middle_time_window": 5000,
+            "context_window": 600,
+            "max_gps_distance": 800,
+            "time_offset": 300,
+            "match_tail": False,
+            "overwrite_gps": True,
+            "keep_structure": False,
+            "resume": True,
+            "generate_report": True,
+            "workers": 6,
+            "mode": 2,
+            "log_dir": "/custom/logs",
+            "log_retention_days": 90,
+        }
+        dialog._apply_values(non_defaults)
+        with patch("gps_photo_tracker.gui.settings_dialog.QInputDialog.getText",
+                   return_value=("full", True)):
+            dialog._save_as_profile()
+
+        # Reset to defaults, then load profile
+        dialog._apply_values(SETTINGS_KEYS)
+        dialog._profile_cb.setCurrentText("full")
+        dialog._load_profile()
+
+        assert dialog._isolated[1].value() == 1200
+        assert dialog._middle[1].value() == 5000
+        assert dialog._context[1].value() == 600
+        assert dialog._distance[1].value() == 800
+        assert dialog._offset[1].value() == 300
+        assert dialog._match_tail.isChecked() is False
+        assert dialog._overwrite.isChecked() is True
+        assert dialog._keep_structure.isChecked() is False
+        assert dialog._resume.isChecked() is True
+        assert dialog._generate_report.isChecked() is True
+        assert dialog._workers_spin.value() == 6
+        assert dialog._mode_overwrite_rb.isChecked() is True
+        assert dialog._log_dir_edit.text() == "/custom/logs"
+        assert dialog._retention_spin.value() == 90
+
+    def test_mode_out_of_range_ignored(self, dialog):
+        s = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
+        s.setValue("profile/bad_mode", {"mode": 99})
+        dialog._profile_cb.addItem("bad_mode")
+        dialog._profile_cb.setCurrentText("bad_mode")
+        dialog._load_profile()
+        assert dialog._mode_preview_rb.isChecked() is True
