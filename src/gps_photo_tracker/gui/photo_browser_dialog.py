@@ -1,6 +1,6 @@
 """Photo browser dialog — view scanned photos with filter/sort/search."""
 
-from datetime import datetime, timezone
+from gps_photo_tracker.gui.settings_dialog import format_timestamp
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap, QPixmapCache
@@ -198,8 +198,6 @@ class PhotoBrowserDialog(QDialog):
 
     @staticmethod
     def _fmt_time(ts: float) -> str:
-        try:
-            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-            return dt.strftime("%Y-%m-%d %H:%M:%S")
-        except (OSError, ValueError):
+        if not ts:
             return "—"
+        return format_timestamp(ts)

@@ -1,6 +1,6 @@
 """Review dialog for failed GPS matches — list-driven layout."""
 
-from datetime import datetime, timezone
+from gps_photo_tracker.gui.settings_dialog import format_timestamp
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
@@ -296,7 +296,4 @@ class ReviewDialog(QDialog):
     def _format_time(ts: float | None) -> str:
         if ts is None:
             return "—"
-        try:
-            return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        except (OSError, ValueError):
-            return str(ts)
+        return format_timestamp(ts)
