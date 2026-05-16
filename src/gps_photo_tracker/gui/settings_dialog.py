@@ -31,6 +31,7 @@ SETTINGS_KEYS = {
     "time_offset": 0,
     "overwrite_gps": False,
     "keep_structure": True,
+    "timezone_offset": 8,
     "mode": 0,  # 0=preview, 1=copy, 2=overwrite
     "log_dir": "",
     "log_retention_days": 30,
@@ -57,6 +58,19 @@ def save_settings(values: dict) -> None:
     s = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
     for k, v in values.items():
         s.setValue(k, v)
+
+
+def format_timestamp(ts: float) -> str:
+    """Format a UTC timestamp using the configured timezone offset."""
+    from datetime import datetime, timezone, timedelta
+    s = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
+    offset = int(s.value("timezone_offset", 8))
+    tz = timezone(timedelta(hours=offset))
+    try:
+        dt = datetime.fromtimestamp(ts, tz=tz)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except (OSError, ValueError):
+        return "—"
 
 
 class SettingsDialog(QDialog):
@@ -172,6 +186,18 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(proc_group)
 
+        # Display settings
+        display_group = QGroupBox("显示")
+        display_layout = QFormLayout(display_group)
+        self._tz_spin = QSpinBox()
+        self._tz_spin.setRange(-12, 14)
+        self._tz_spin.setValue(int(self._settings.get("timezone_offset", 8)))
+        self._tz_spin.setPrefix("UTC")
+        self._tz_spin.setSuffix(" (东八区=8)")
+        self._tz_spin.setMinimumWidth(150)
+        display_layout.addRow("时区偏移:", self._tz_spin)
+        layout.addWidget(display_group)
+
         # Log settings
         log_group = QGroupBox("日志")
         log_layout = QFormLayout(log_group)
@@ -258,6 +284,7 @@ class SettingsDialog(QDialog):
             "mode": self._mode_group.checkedId(),
             "log_dir": self._log_dir_edit.text(),
             "log_retention_days": self._retention_spin.value(),
+            "timezone_offset": self._tz_spin.value(),
         }
 
     def _apply_values(self, values: dict):
@@ -291,6 +318,8 @@ class SettingsDialog(QDialog):
             self._log_dir_edit.setText(str(values["log_dir"]))
         if "log_retention_days" in values:
             self._retention_spin.setValue(int(values["log_retention_days"]))
+        if "timezone_offset" in values:
+            self._tz_spin.setValue(int(values["timezone_offset"]))
 
     def _load_profile(self):
         idx = self._profile_cb.currentIndex()
