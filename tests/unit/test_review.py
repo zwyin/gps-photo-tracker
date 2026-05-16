@@ -19,8 +19,13 @@ from gps_photo_tracker.service.tagging_service import GPSTaggingService
 
 
 def _make_photo(filename: str, timestamp: float = 1000.0) -> PhotoInfo:
-    return PhotoInfo(path=Path(f"/tmp/{filename}"), filename=filename,
+    p = Path(f"/tmp/{filename}")
+    return PhotoInfo(path=p, filename=filename,
                      timestamp=timestamp, has_gps=False)
+
+
+def _photo_key(photo: PhotoInfo) -> str:
+    return str(photo.path)
 
 
 def _make_failed_result(filename: str, reason: str = "time_diff") -> MatchResult:
@@ -73,12 +78,13 @@ class TestApplyReview:
         service = GPSTaggingService()
         seg = _make_segment()
         results = [_make_failed_result("fail.jpg")]
+        key = _photo_key(results[0].photo)
         state = ReviewState(
             failed_results=results,
             gps_segments=[seg],
         )
-        state.decisions["/tmp/fail.jpg"] = ReviewDecision(
-            photo_path="/tmp/fail.jpg",
+        state.decisions[key] = ReviewDecision(
+            photo_path=key,
             action=ReviewAction.MANUAL_GPS,
             selected_point=TrackPoint(timestamp=1000.0, latitude=25.001, longitude=100.001),
         )
@@ -91,9 +97,10 @@ class TestApplyReview:
     def test_manual_coord_sets_review_gps(self):
         service = GPSTaggingService()
         results = [_make_failed_result("fail.jpg")]
+        key = _photo_key(results[0].photo)
         state = ReviewState(failed_results=results)
-        state.decisions["/tmp/fail.jpg"] = ReviewDecision(
-            photo_path="/tmp/fail.jpg",
+        state.decisions[key] = ReviewDecision(
+            photo_path=key,
             action=ReviewAction.MANUAL_COORD,
             manual_lat=30.0,
             manual_lon=120.0,
@@ -105,9 +112,10 @@ class TestApplyReview:
     def test_skip_keeps_failure(self):
         service = GPSTaggingService()
         results = [_make_failed_result("fail.jpg")]
+        key = _photo_key(results[0].photo)
         state = ReviewState(failed_results=results)
-        state.decisions["/tmp/fail.jpg"] = ReviewDecision(
-            photo_path="/tmp/fail.jpg",
+        state.decisions[key] = ReviewDecision(
+            photo_path=key,
             action=ReviewAction.SKIP,
         )
         modified = service.apply_review(results, state)
@@ -117,9 +125,10 @@ class TestApplyReview:
     def test_keep_skip_does_nothing(self):
         service = GPSTaggingService()
         results = [_make_failed_result("fail.jpg")]
+        key = _photo_key(results[0].photo)
         state = ReviewState(failed_results=results)
-        state.decisions["/tmp/fail.jpg"] = ReviewDecision(
-            photo_path="/tmp/fail.jpg",
+        state.decisions[key] = ReviewDecision(
+            photo_path=key,
             action=ReviewAction.KEEP_SKIP,
         )
         modified = service.apply_review(results, state)
@@ -136,13 +145,15 @@ class TestApplyReview:
     def test_manual_gps_includes_altitude(self):
         service = GPSTaggingService()
         results = [_make_failed_result("fail.jpg")]
+        key = _photo_key(results[0].photo)
         state = ReviewState(failed_results=results)
-        state.decisions["/tmp/fail.jpg"] = ReviewDecision(
-            photo_path="/tmp/fail.jpg",
+        state.decisions[key] = ReviewDecision(
+            photo_path=key,
             action=ReviewAction.MANUAL_GPS,
             selected_point=TrackPoint(timestamp=1000.0, latitude=25.0, longitude=100.0, altitude=500.0),
         )
         modified = service.apply_review(results, state)
+        assert modified[0].success is True
         assert modified[0].review_gps.altitude == 500.0
 
 

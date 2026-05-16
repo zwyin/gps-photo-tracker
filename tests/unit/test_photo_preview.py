@@ -58,8 +58,11 @@ class TestPhotoPreview:
         preview._load_thumbnail()
         assert preview._thumb_label.text() == ""
 
-    def test_load_thumbnail_valid_image(self, preview):
-        preview._pending_thumb_path = "/tmp/test_photo_for_preview.jpg"
+    def test_load_thumbnail_valid_image(self, preview, tmp_path):
+        from PIL import Image
+        img = Image.new("RGB", (10, 10))
+        img.save(tmp_path / "test.jpg", "JPEG")
+        preview._pending_thumb_path = str(tmp_path / "test.jpg")
         preview._load_thumbnail()
         assert preview._thumb_label.pixmap() is not None
 
@@ -68,9 +71,13 @@ class TestPhotoPreview:
         preview._load_thumbnail()
         # Should not crash, just return
 
-    def test_load_thumbnail_caches_result(self, preview):
+    def test_load_thumbnail_caches_result(self, preview, tmp_path):
+        from PIL import Image
+        img = Image.new("RGB", (10, 10))
+        img.save(tmp_path / "test.jpg", "JPEG")
+        path = str(tmp_path / "test.jpg")
         QPixmapCache.clear()
-        preview._pending_thumb_path = "/tmp/test_photo_for_preview.jpg"
+        preview._pending_thumb_path = path
         preview._load_thumbnail()
-        cached = QPixmapCache.find("thumb:/tmp/test_photo_for_preview.jpg")
+        cached = QPixmapCache.find(f"thumb:{path}")
         assert cached is not None
