@@ -79,11 +79,12 @@ class MainWindow(QMainWindow):
         self._splitter.setStretchFactor(0, 1)
         self._splitter.setStretchFactor(1, 2)
         self._splitter.setCollapsible(0, True)
+        self._splitter.setSizes([300, 700])
 
-        # Restore splitter state
+        # Restore splitter state (only if previously saved)
         settings = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
         splitter_state = settings.value("main_splitter_state")
-        if splitter_state:
+        if splitter_state and isinstance(splitter_state, (bytes, bytearray)):
             self._splitter.restoreState(splitter_state)
         self._splitter.splitterMoved.connect(
             lambda: QSettings("GPSPhotoTracker", "GPSPhotoTracker").setValue(
@@ -277,11 +278,11 @@ class MainWindow(QMainWindow):
     # ── Actions ─────────────────────────────────────────────
 
     def _toggle_left_panel(self, checked: bool):
-        self._left_panel.setVisible(checked)
+        sizes = self._splitter.sizes()
         if checked:
-            sizes = self._splitter.sizes()
-            if sizes[0] == 0:
-                self._splitter.setSizes([300, sizes[1]])
+            self._splitter.setSizes([300, max(sizes[1], 400)])
+        else:
+            self._splitter.setSizes([0, sum(sizes)])
 
     def _browse_gps_dir(self):
         path = QFileDialog.getExistingDirectory(self, "选择 GPS 轨迹目录")
