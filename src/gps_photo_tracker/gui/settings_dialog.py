@@ -2,13 +2,16 @@
 
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -64,6 +67,24 @@ class SettingsDialog(QDialog):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
+
+        # Profile management
+        profile_row = QHBoxLayout()
+        profile_row.addWidget(QLabel("配置预设:"))
+        self._profile_cb = QComboBox()
+        self._profile_cb.addItem("— 选择预设 —")
+        self._profile_cb.addItems(self._list_profiles())
+        profile_row.addWidget(self._profile_cb, stretch=1)
+        load_btn = QPushButton("加载")
+        load_btn.clicked.connect(self._load_profile)
+        profile_row.addWidget(load_btn)
+        save_as_btn = QPushButton("另存为")
+        save_as_btn.clicked.connect(self._save_as_profile)
+        profile_row.addWidget(save_as_btn)
+        delete_btn = QPushButton("删除")
+        delete_btn.clicked.connect(self._delete_profile)
+        profile_row.addWidget(delete_btn)
+        layout.addLayout(profile_row)
 
         # Match params
         match_group = QGroupBox("匹配参数")
@@ -235,3 +256,103 @@ class SettingsDialog(QDialog):
         }
         save_settings(values)
         self.accept()
+
+    # ── Profile management ──────────────────────────────────
+
+    @staticmethod
+    def _list_profiles() -> list[str]:
+        s = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
+        return s.value("profile_list", [], type=list)
+
+    @staticmethod
+    def _set_profile_list(names: list[str]):
+        s = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
+        s.setValue("profile_list", names)
+
+    def _collect_form_values(self) -> dict:
+        return {
+            "isolated_window": self._isolated[1].value(),
+            "middle_time_window": self._middle[1].value(),
+            "context_window": self._context[1].value(),
+            "max_gps_distance": self._distance[1].value(),
+            "time_offset": self._offset[1].value(),
+            "match_tail": self._match_tail.isChecked(),
+            "overwrite_gps": self._overwrite.isChecked(),
+            "keep_structure": self._keep_structure.isChecked(),
+            "resume": self._resume.isChecked(),
+            "generate_report": self._generate_report.isChecked(),
+            "workers": self._workers_spin.value(),
+            "mode": self._mode_group.checkedId(),
+        }
+
+    def _apply_values(self, values: dict):
+        if "isolated_window" in values:
+            self._isolated[1].setValue(int(values["isolated_window"]))
+        if "middle_time_window" in values:
+            self._middle[1].setValue(int(values["middle_time_window"]))
+        if "context_window" in values:
+            self._context[1].setValue(int(values["context_window"]))
+        if "max_gps_distance" in values:
+            self._distance[1].setValue(int(values["max_gps_distance"]))
+        if "time_offset" in values:
+            self._offset[1].setValue(int(values["time_offset"]))
+        if "match_tail" in values:
+            self._match_tail.setChecked(bool(values["match_tail"]))
+        if "overwrite_gps" in values:
+            self._overwrite.setChecked(bool(values["overwrite_gps"]))
+        if "keep_structure" in values:
+            self._keep_structure.setChecked(bool(values["keep_structure"]))
+        if "resume" in values:
+            self._resume.setChecked(bool(values["resume"]))
+        if "generate_report" in values:
+            self._generate_report.setChecked(bool(values["generate_report"]))
+        if "workers" in values:
+            self._workers_spin.setValue(int(values["workers"]))
+        if "mode" in values:
+            mode_id = int(values["mode"])
+            [self._mode_preview_rb, self._mode_copy_rb, self._mode_overwrite_rb][mode_id].setChecked(True)
+
+    def _load_profile(self):
+        idx = self._profile_cb.currentIndex()
+        if idx <= 0:
+            return
+        name = self._profile_cb.currentText()
+        s = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
+        values = s.value(f"profile/{name}", {})
+        if values:
+            self._apply_values(values)
+
+    def _save_as_profile(self):
+        name, ok = QInputDialog.getText(self, "保存配置预设", "预设名称:")
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        s = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
+        values = self._collect_form_values()
+        s.setValue(f"profile/{name}", values)
+        profiles = self._list_profiles()
+        if name not in profiles:
+            profiles.append(name)
+            self._set_profile_list(profiles)
+            self._profile_cb.addItem(name)
+        self._profile_cb.setCurrentText(name)
+
+    def _delete_profile(self):
+        idx = self._profile_cb.currentIndex()
+        if idx <= 0:
+            return
+        name = self._profile_cb.currentText()
+        reply = QMessageBox.question(
+            self, "删除预设", f"确定删除预设「{name}」？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        s = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
+        s.remove(f"profile/{name}")
+        profiles = self._list_profiles()
+        if name in profiles:
+            profiles.remove(name)
+            self._set_profile_list(profiles)
+        self._profile_cb.removeItem(idx)
+        self._profile_cb.setCurrentIndex(0)
