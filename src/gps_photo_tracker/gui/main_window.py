@@ -695,6 +695,9 @@ class MainWindow(QMainWindow):
                 # FOLLOW_PREV/FOLLOW_NEXT: stored as action only, resolved at write time
                 self._review_decisions[path_str] = dec_data
 
+            # Write review decisions back into result table
+            self._apply_review_to_table(reviewed_state, all_results)
+
             self._reviewed_results = failed_results
             manual_count = sum(
                 1 for d in reviewed_state.decisions.values()
@@ -723,6 +726,85 @@ class MainWindow(QMainWindow):
             "total": total, "matched": matched, "failed": failed,
             "skipped": 0, "overwritten": 0, "success_rate": rate,
         })
+
+    def _apply_review_to_table(self, reviewed_state: ReviewState, all_results: list):
+        """Update result table rows with review decisions (GPS coords, method, status)."""
+        from gps_photo_tracker.core.models import GPSInfo
+
+        # Build time-ordered matched results for follow resolution
+        ordered = sorted(
+            [r for r in all_results if r.success and r.gps and r.photo.timestamp],
+            key=lambda r: r.photo.timestamp or 0,
+        )
+
+        # Resolve follow-prev/next to actual GPS for each decision
+        resolved_gps: dict[str, tuple[GPSInfo, str]] = {}  # path -> (gps, method_label)
+        for path_str, dec in reviewed_state.decisions.items():
+            if dec.action == ReviewAction.MANUAL_GPS and dec.selected_point:
+                pt = dec.selected_point
+                resolved_gps[path_str] = (GPSInfo(pt.latitude, pt.longitude, pt.altitude), "手动GPS")
+            elif dec.action == ReviewAction.MANUAL_COORD and dec.manual_lat is not None and dec.manual_lon is not None:
+                resolved_gps[path_str] = (GPSInfo(dec.manual_lat, dec.manual_lon), "手动坐标")
+            elif dec.action in (ReviewAction.FOLLOW_PREV, ReviewAction.FOLLOW_NEXT):
+                # Find the failed photo's timestamp in all_results
+                target_ts = None
+                for r in all_results:
+                    if str(r.photo.path) == path_str and r.photo.timestamp:
+                        target_ts = r.photo.timestamp
+                        break
+                if target_ts is None:
+                    continue
+                direction = -1 if dec.action == ReviewAction.FOLLOW_PREV else 1
+                label = "跟随上一个" if dec.action == ReviewAction.FOLLOW_PREV else "跟随下一个"
+                for j in range(len(ordered)):
+                    idx = j if direction > 0 else len(ordered) - 1 - j
+                    neighbor = ordered[idx]
+                    if direction > 0 and neighbor.photo.timestamp > target_ts:
+                        resolved_gps[path_str] = (neighbor.gps, label)
+                        break
+                    elif direction < 0 and neighbor.photo.timestamp < target_ts:
+                        resolved_gps[path_str] = (neighbor.gps, label)
+                        break
+
+        # Update matching rows in the result table
+        sorting_was_enabled = self._results_table.isSortingEnabled()
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(False)
+
+        for visual_row in range(self._results_table.rowCount()):
+            item = self._results_table.item(visual_row, 0)
+            if not item:
+                continue
+            data_row = item.data(Qt.ItemDataRole.UserRole)
+            if data_row is None or data_row >= len(self._result_details):
+                continue
+            detail = self._result_details[data_row]
+            path_str = detail.get("path", "")
+            if path_str not in resolved_gps:
+                continue
+
+            gps, method_label = resolved_gps[path_str]
+            gps_text = f"{gps.latitude:.4f}, {gps.longitude:.4f}"
+
+            # Update GPS(后) column — show the review-assigned GPS
+            self._results_table.setItem(visual_row, 3, QTableWidgetItem(gps_text))
+
+            # Update method column
+            self._results_table.setItem(visual_row, 4, QTableWidgetItem(method_label))
+
+            # Update status column
+            self._results_table.setItem(visual_row, 5, QTableWidgetItem("已审核"))
+
+            # Also update the detail dict so double-click shows correct info
+            detail["success"] = True
+            detail["method"] = method_label
+            detail["latitude"] = gps.latitude
+            detail["longitude"] = gps.longitude
+            detail["altitude"] = gps.altitude
+
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(True)
+        self._update_stats_card()
 
     def _on_done(self, result_dict: dict):
         self._start_btn.setEnabled(True)
