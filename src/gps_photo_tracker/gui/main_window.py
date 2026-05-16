@@ -227,9 +227,27 @@ class MainWindow(QMainWindow):
 
         layout = result_widget.layout()
 
-        # Photo preview (from photo_preview module)
+        # Move results_table into a vertical splitter with photo preview
+        layout.removeWidget(self._results_table)
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(self._results_table)
+
         self._photo_preview = PhotoPreview()
-        layout.addWidget(self._photo_preview)
+        splitter.addWidget(self._photo_preview)
+        splitter.setSizes([400, 200])
+
+        # Restore saved splitter state
+        settings = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
+        splitter_state = settings.value("right_splitter_state")
+        if splitter_state:
+            splitter.restoreState(splitter_state)
+        splitter.splitterMoved.connect(
+            lambda: QSettings("GPSPhotoTracker", "GPSPhotoTracker").setValue(
+                "right_splitter_state", splitter.saveState()
+            )
+        )
+
+        layout.addWidget(splitter, stretch=1)
 
         return result_widget
 
