@@ -65,19 +65,31 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         layout = QHBoxLayout(central)
 
-        splitter = QSplitter(Qt.Horizontal)
-        layout.addWidget(splitter)
+        self._splitter = QSplitter(Qt.Horizontal)
+        layout.addWidget(self._splitter)
 
         # Left panel
-        left = self._build_left_panel()
-        splitter.addWidget(left)
+        self._left_panel = self._build_left_panel()
+        self._splitter.addWidget(self._left_panel)
 
         # Right panel
         right = self._build_right_panel()
-        splitter.addWidget(right)
+        self._splitter.addWidget(right)
 
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2)
+        self._splitter.setStretchFactor(0, 1)
+        self._splitter.setStretchFactor(1, 2)
+        self._splitter.setCollapsible(0, True)
+
+        # Restore splitter state
+        settings = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
+        splitter_state = settings.value("main_splitter_state")
+        if splitter_state:
+            self._splitter.restoreState(splitter_state)
+        self._splitter.splitterMoved.connect(
+            lambda: QSettings("GPSPhotoTracker", "GPSPhotoTracker").setValue(
+                "main_splitter_state", self._splitter.saveState()
+            )
+        )
 
         self.statusBar().showMessage("就绪")
 
@@ -86,6 +98,13 @@ class MainWindow(QMainWindow):
         file_menu = menu.addMenu("文件")
         settings_action = file_menu.addAction("设置")
         settings_action.triggered.connect(self._open_settings)
+
+        view_menu = menu.addMenu("视图")
+        self._toggle_panel_action = view_menu.addAction("配置面板")
+        self._toggle_panel_action.setCheckable(True)
+        self._toggle_panel_action.setChecked(True)
+        self._toggle_panel_action.triggered.connect(self._toggle_left_panel)
+        view_menu.addAction(self._toggle_panel_action)
 
         debug_menu = menu.addMenu("调试")
         log_action = debug_menu.addAction("查看日志")
@@ -256,6 +275,13 @@ class MainWindow(QMainWindow):
         return result_widget
 
     # ── Actions ─────────────────────────────────────────────
+
+    def _toggle_left_panel(self, checked: bool):
+        self._left_panel.setVisible(checked)
+        if checked:
+            sizes = self._splitter.sizes()
+            if sizes[0] == 0:
+                self._splitter.setSizes([300, sizes[1]])
 
     def _browse_gps_dir(self):
         path = QFileDialog.getExistingDirectory(self, "选择 GPS 轨迹目录")
@@ -622,6 +648,30 @@ class MainWindow(QMainWindow):
             ))
 
         state = ReviewState(failed_results=failed_results, gps_segments=segments)
+
+        # Reconstruct all_results for neighbor lookup (follow-prev/next)
+        all_results = []
+        for ar in review_data.get("all_results", []):
+            photo = PhotoInfo(
+                path=Path(ar["photo_path"]),
+                filename=ar["filename"],
+                timestamp=ar.get("timestamp"),
+                has_gps=ar.get("latitude") is not None,
+            )
+            gps = None
+            if ar.get("latitude") is not None:
+                from gps_photo_tracker.core.models import GPSInfo
+                gps = GPSInfo(
+                    latitude=ar["latitude"],
+                    longitude=ar["longitude"],
+                    altitude=ar.get("altitude"),
+                )
+            result = MatchResult(
+                photo=photo, success=ar.get("success", False),
+                gps=gps, method=ar.get("method"),
+            )
+            all_results.append(result)
+        state.all_results = all_results
         dialog = ReviewDialog(state, self)
         dialog.exec()
 
@@ -641,6 +691,7 @@ class MainWindow(QMainWindow):
                 elif dec.action == ReviewAction.MANUAL_COORD:
                     dec_data["lat"] = dec.manual_lat
                     dec_data["lon"] = dec.manual_lon
+                # FOLLOW_PREV/FOLLOW_NEXT: stored as action only, resolved at write time
                 self._review_decisions[path_str] = dec_data
 
             self._reviewed_results = failed_results
@@ -648,12 +699,16 @@ class MainWindow(QMainWindow):
                 1 for d in reviewed_state.decisions.values()
                 if d.action in (ReviewAction.MANUAL_GPS, ReviewAction.MANUAL_COORD)
             )
+            follow_count = sum(
+                1 for d in reviewed_state.decisions.values()
+                if d.action in (ReviewAction.FOLLOW_PREV, ReviewAction.FOLLOW_NEXT)
+            )
             skip_count = sum(
                 1 for d in reviewed_state.decisions.values()
                 if d.action in (ReviewAction.SKIP, ReviewAction.KEEP_SKIP)
             )
             self.statusBar().showMessage(
-                f"审核完成: {manual_count} 张手动指定, {skip_count} 张跳过。点 COPY/OVERWRITE 执行写入。"
+                f"审核完成: {manual_count} 张手动指定, {follow_count} 张跟随, {skip_count} 张跳过。点 COPY/OVERWRITE 执行写入。"
             )
         else:
             self._review_decisions = {}

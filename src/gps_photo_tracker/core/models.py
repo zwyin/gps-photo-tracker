@@ -80,6 +80,8 @@ class ReviewAction(Enum):
     MANUAL_GPS = "manual_gps"
     MANUAL_COORD = "manual_coord"
     SKIP = "skip"
+    FOLLOW_PREV = "follow_prev"
+    FOLLOW_NEXT = "follow_next"
 
 
 # ── Data structures ─────────────────────────────────────────
@@ -147,6 +149,7 @@ class ReviewState:
     failed_results: list[MatchResult]
     decisions: dict[str, ReviewDecision] = field(default_factory=dict)
     gps_segments: list[GPXSegment] = field(default_factory=list)
+    all_results: list[MatchResult] = field(default_factory=list)
 
 
 @dataclass

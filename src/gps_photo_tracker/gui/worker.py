@@ -118,13 +118,10 @@ class Worker(QThread):
 
         def on_photo(result):
             from datetime import datetime, timezone
+            from gps_photo_tracker.gui.settings_dialog import format_timestamp
             capture_time = ""
             if result.photo.timestamp is not None:
-                try:
-                    dt = datetime.fromtimestamp(result.photo.timestamp, tz=timezone.utc)
-                    capture_time = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
-                except (OSError, ValueError):
-                    pass
+                capture_time = format_timestamp(result.photo.timestamp)
             gps_before = ""
             if result.photo.existing_gps:
                 g = result.photo.existing_gps
@@ -232,6 +229,19 @@ class Worker(QThread):
                         }
                         for s in review_state.gps_segments
                     ],
+                    "all_results": [
+                        {
+                            "photo_path": str(r.photo.path),
+                            "filename": r.photo.filename,
+                            "timestamp": r.photo.timestamp,
+                            "success": r.success,
+                            "latitude": r.gps.latitude if r.gps else None,
+                            "longitude": r.gps.longitude if r.gps else None,
+                            "altitude": r.gps.altitude if r.gps else None,
+                            "method": r.method,
+                        }
+                        for r in review_state.all_results
+                    ],
                     "total": result.total,
                     "matched": result.matched,
                     "failed": result.failed,
@@ -282,6 +292,7 @@ class Worker(QThread):
             failed_results=[r for r in results if not r.success],
             decisions=decisions,
             gps_segments=segments,
+            all_results=results,
         )
         modified = service.apply_review(results, state)
 

@@ -53,10 +53,17 @@ class GPSTaggingService:
     def prepare_review(self, results: list[MatchResult], segments: list[GPXSegment]) -> ReviewState:
         """Extract failed match results into a ReviewState for GUI review."""
         failed = [r for r in results if not r.success]
-        return ReviewState(failed_results=failed, gps_segments=segments)
+        return ReviewState(failed_results=failed, gps_segments=segments, all_results=results)
 
     def apply_review(self, results: list[MatchResult], state: ReviewState) -> list[MatchResult]:
         """Merge user review decisions back into match results."""
+        # Build time-ordered lookup for follow-prev/next
+        ordered = sorted(
+            [r for r in (state.all_results or results) if r.photo.timestamp is not None],
+            key=lambda r: r.photo.timestamp or 0,
+        )
+        path_to_idx = {str(r.photo.path): i for i, r in enumerate(ordered)}
+
         for result in results:
             if result.success:
                 continue
@@ -84,8 +91,38 @@ class GPSTaggingService:
                     )
                     result.success = True
                     result.method = "manual_coord"
+            elif decision.action == ReviewAction.FOLLOW_PREV:
+                self._apply_follow(result, ordered, path_to_idx, path_str, -1, "follow_prev")
+            elif decision.action == ReviewAction.FOLLOW_NEXT:
+                self._apply_follow(result, ordered, path_to_idx, path_str, 1, "follow_next")
             # KEEP_SKIP and SKIP: no change
         return results
+
+    def _apply_follow(
+        self,
+        result: MatchResult,
+        ordered: list[MatchResult],
+        path_to_idx: dict[str, int],
+        path_str: str,
+        direction: int,
+        method: str,
+    ):
+        """Resolve follow-prev/next by finding the nearest matched neighbor."""
+        idx = path_to_idx.get(path_str)
+        if idx is None:
+            return
+        search_range = range(idx + direction, -1 if direction < 0 else len(ordered), direction)
+        for j in search_range:
+            neighbor = ordered[j]
+            if neighbor.success and neighbor.gps:
+                result.review_gps = GPSInfo(
+                    latitude=neighbor.gps.latitude,
+                    longitude=neighbor.gps.longitude,
+                    altitude=neighbor.gps.altitude,
+                )
+                result.success = True
+                result.method = method
+                return
 
     def write_phase(
         self,
