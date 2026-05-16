@@ -60,19 +60,21 @@ class ReviewDialog(QDialog):
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.cellClicked.connect(self._on_row_clicked)
 
         for row, result in enumerate(self._state.failed_results):
-            checkbox = QCheckBox()
-            checkbox.setChecked(True)
-            cb_widget = QWidget()
-            cb_layout = QHBoxLayout(cb_widget)
-            cb_layout.addWidget(checkbox)
-            cb_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            cb_layout.setContentsMargins(0, 0, 0, 0)
-            self._table.setCellWidget(row, 0, cb_widget)
+            check_item = QTableWidgetItem()
+            check_item.setFlags(
+                Qt.ItemFlag.ItemIsUserCheckable
+                | Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+            )
+            check_item.setCheckState(Qt.CheckState.Checked)
+            check_item.setData(Qt.ItemDataRole.UserRole, row)
+            self._table.setItem(row, 0, check_item)
 
-            self._table.setItem(row, 1, QTableWidgetItem(result.photo.filename))
+            fn_item = QTableWidgetItem(result.photo.filename)
+            fn_item.setData(Qt.ItemDataRole.UserRole, row)
+            self._table.setItem(row, 1, fn_item)
             self._table.setItem(row, 2, QTableWidgetItem(self._format_time(result.photo.timestamp)))
             reason = result.reject_reason or "unknown"
             self._table.setItem(row, 3, QTableWidgetItem(
@@ -84,6 +86,17 @@ class ReviewDialog(QDialog):
             combo.currentIndexChanged.connect(lambda idx, r=row: self._on_action_changed(r, idx))
             self._table.setCellWidget(row, 4, combo)
             self._action_combos.append(combo)
+
+        self._table.setSortingEnabled(True)
+        self._table.sortByColumn(1, Qt.SortOrder.AscendingOrder)
+        self._reassign_combo_widgets()
+
+        self._table.horizontalHeader().sortIndicatorChanged.connect(
+            lambda col, order: self._reassign_combo_widgets()
+        )
+        self._table.currentCellChanged.connect(
+            lambda cr, cc, pr, pc: self._on_row_clicked(cr, cc)
+        )
 
         splitter.addWidget(self._table)
 
@@ -155,7 +168,10 @@ class ReviewDialog(QDialog):
         self.accept()
 
     def _on_row_clicked(self, row, col):
-        result = self._state.failed_results[row]
+        if row < 0 or row >= self._table.rowCount():
+            return
+        data_row = self._get_data_row(row)
+        result = self._state.failed_results[data_row]
         reason = result.reject_reason or "未知"
         info = f"<b>文件:</b> {result.photo.filename}<br>"
         info += f"<b>拍摄时间:</b> {self._format_time(result.photo.timestamp)}<br>"
@@ -236,20 +252,21 @@ class ReviewDialog(QDialog):
         )
 
     def _batch_action(self, combo_idx: int):
-        for row in range(len(self._state.failed_results)):
-            cb_widget = self._table.cellWidget(row, 0)
-            checkbox = cb_widget.findChild(QCheckBox) if cb_widget else None
-            if checkbox and checkbox.isChecked():
-                self._action_combos[row].setCurrentIndex(combo_idx)
+        for row in range(self._table.rowCount()):
+            check_item = self._table.item(row, 0)
+            if check_item and check_item.checkState() == Qt.CheckState.Checked:
+                data_row = self._get_data_row(row)
+                self._action_combos[data_row].setCurrentIndex(combo_idx)
         self._update_progress()
 
     def _on_select_all(self, state):
         checked = state == Qt.CheckState.Checked.value
-        for row in range(len(self._state.failed_results)):
-            cb_widget = self._table.cellWidget(row, 0)
-            checkbox = cb_widget.findChild(QCheckBox) if cb_widget else None
-            if checkbox:
-                checkbox.setChecked(checked)
+        for row in range(self._table.rowCount()):
+            check_item = self._table.item(row, 0)
+            if check_item:
+                check_item.setCheckState(
+                    Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+                )
 
     def _get_nearby_points(self, photo_ts: float, window: float = 1800) -> list[TrackPoint]:
         points = []
@@ -265,11 +282,21 @@ class ReviewDialog(QDialog):
         decided = len(self._state.decisions)
         self._progress_label.setText(f"已处理 {decided}/{total}")
 
+    def _get_data_row(self, visual_row: int) -> int:
+        item = self._table.item(visual_row, 1)
+        data = item.data(Qt.ItemDataRole.UserRole) if item else None
+        return data if data is not None else visual_row
+
+    def _reassign_combo_widgets(self):
+        for visual_row in range(self._table.rowCount()):
+            data_row = self._get_data_row(visual_row)
+            self._table.setCellWidget(visual_row, 4, self._action_combos[data_row])
+
     @staticmethod
     def _format_time(ts: float | None) -> str:
         if ts is None:
             return "—"
         try:
-            return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M:%S")
+            return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         except (OSError, ValueError):
             return str(ts)
