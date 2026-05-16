@@ -1,33 +1,69 @@
-"""Logging system with 4 log files for GPS Photo Tracker."""
+"""Logging system with rotating log files for GPS Photo Tracker."""
 
 import logging
+import time
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from gps_photo_tracker.core.models import GPSInfo, MatchResult, PhotoInfo
 
+_DEFAULT_RETENTION_DAYS = 30
+_DEFAULT_MAX_TOTAL_MB = 50
+
 
 class OperationLogger:
-    """Structured logger with separate files for operations, matches, writes, errors."""
+    """Structured logger with separate rotating files for operations, matches, writes, debug, errors."""
 
-    def __init__(self, log_dir: Path):
+    def __init__(self, log_dir: Path, retention_days: int = _DEFAULT_RETENTION_DAYS,
+                 max_total_mb: float = _DEFAULT_MAX_TOTAL_MB):
+        self._log_dir = log_dir
+        self._retention_days = retention_days
+        self._max_total_bytes = max_total_mb * 1024 * 1024
         log_dir.mkdir(parents=True, exist_ok=True)
-        self._ops = self._make_logger("gps_ops", log_dir / "operations.log")
-        self._matches = self._make_logger("gps_matches", log_dir / "matches.log")
-        self._writes = self._make_logger("gps_writes", log_dir / "writes.log")
-        self._errors = self._make_logger("gps_errors", log_dir / "errors.log")
 
-    @staticmethod
-    def _make_logger(name: str, path: Path) -> logging.Logger:
+        fmt = logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        self._ops = self._make_logger("gps_ops", log_dir / "operations.log", fmt)
+        self._matches = self._make_logger("gps_matches", log_dir / "matches.log", fmt)
+        self._writes = self._make_logger("gps_writes", log_dir / "writes.log", fmt)
+        self._debug = self._make_logger("gps_debug", log_dir / "debug.log", fmt, level=logging.DEBUG)
+        self._errors = self._make_logger("gps_errors", log_dir / "errors.log", fmt)
+
+        # Namespace handler: all gps_photo_tracker.* submodules → debug.log
+        self._setup_namespace_debug(log_dir / "debug.log", fmt)
+
+        self.cleanup()
+
+    def _make_logger(self, name: str, path: Path, fmt: logging.Formatter,
+                     level: int = logging.INFO) -> logging.Logger:
         logger = logging.getLogger(name)
         logger.setLevel(logging.DEBUG)
         if not logger.handlers:
-            fh = logging.FileHandler(path, encoding="utf-8")
-            fh.setLevel(logging.DEBUG)
-            fh.setFormatter(logging.Formatter(
-                "%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
-            ))
+            fh = TimedRotatingFileHandler(
+                str(path), when="D", interval=1,
+                backupCount=self._retention_days, encoding="utf-8",
+            )
+            fh.setLevel(level)
+            fh.setFormatter(fmt)
             logger.addHandler(fh)
         return logger
+
+    def _setup_namespace_debug(self, path: Path, fmt: logging.Formatter):
+        ns_logger = logging.getLogger("gps_photo_tracker")
+        ns_logger.setLevel(logging.DEBUG)
+        for h in ns_logger.handlers:
+            if getattr(h, "baseFilename", "") == str(path):
+                return
+        fh = TimedRotatingFileHandler(
+            str(path), when="D", interval=1,
+            backupCount=self._retention_days, encoding="utf-8",
+        )
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(fmt)
+        ns_logger.addHandler(fh)
+
+    # ── Match logging ────────────────────────────────────────
 
     def log_match_success(self, result: MatchResult):
         dist_str = f"{result.interpolation_distance:.0f}m" if result.interpolation_distance is not None else "—"
@@ -41,6 +77,8 @@ class OperationLogger:
         self._matches.warning(
             f"FAIL {result.photo.filename} | reason:{result.reject_reason}"
         )
+
+    # ── Write logging ────────────────────────────────────────
 
     def log_write_success(self, photo: PhotoInfo, gps: GPSInfo, dest: Path = None):
         target = str(dest) if dest else str(photo.path)
@@ -56,28 +94,66 @@ class OperationLogger:
             f"新({new.latitude:.4f},{new.longitude:.4f})"
         )
 
-    def log_error(self, context: str, error: Exception):
-        self._errors.error(f"{context}: {type(error).__name__}: {error}")
+    # ── Debug logging ────────────────────────────────────────
 
-    def cleanup_old_logs(self, retention_days: int = 30) -> None:
-        """Delete log files older than retention_days."""
-        import time
-        if not self._errors.handlers:
-            return
-        log_dir = Path(self._errors.handlers[0].baseFilename).parent
-        cutoff = time.time() - retention_days * 86400
-        for log_file in log_dir.glob("*.log"):
-            if log_file.stat().st_mtime < cutoff:
-                # Close file handlers referencing this file before unlinking (Windows)
-                for logger in (self._ops, self._matches, self._writes, self._errors):
-                    for handler in list(logger.handlers):
-                        if hasattr(handler, 'baseFilename') and handler.baseFilename == str(log_file):
-                            handler.close()
-                            logger.removeHandler(handler)
-                log_file.unlink()
+    def debug(self, msg: str):
+        self._debug.debug(msg)
+
+    # ── Operation lifecycle ───────────────────────────────────
 
     def log_operation_start(self, params: dict):
         self._ops.info(f"START | params={params}")
 
     def log_operation_end(self, stats: dict):
         self._ops.info(f"END | stats={stats}")
+
+    # ── Error logging ────────────────────────────────────────
+
+    def log_error(self, context: str, error: Exception):
+        self._errors.error(f"{context}: {type(error).__name__}: {error}")
+
+    # ── Cleanup ──────────────────────────────────────────────
+
+    def cleanup(self):
+        self._cleanup_time()
+        self._cleanup_size()
+
+    def _close_handlers_for(self, path: Path):
+        """Close file handlers referencing the given path (needed on Windows)."""
+        target = str(path.resolve())
+        for name in ("gps_ops", "gps_matches", "gps_writes", "gps_errors", "gps_debug",
+                      "gps_photo_tracker"):
+            lg = logging.getLogger(name)
+            for h in lg.handlers[:]:
+                if getattr(h, "baseFilename", "") == target:
+                    h.close()
+                    lg.removeHandler(h)
+
+    def _cleanup_time(self):
+        """Delete rotated log files older than retention_days."""
+        cutoff = time.time() - self._retention_days * 86400
+        for log_file in self._log_dir.glob("*.log*"):
+            try:
+                if log_file.stat().st_mtime < cutoff:
+                    self._close_handlers_for(log_file)
+                    log_file.unlink()
+            except OSError:
+                pass
+
+    def _cleanup_size(self):
+        """Delete oldest log files when total exceeds max_total_bytes."""
+        files = sorted(
+            self._log_dir.glob("*.log*"),
+            key=lambda f: f.stat().st_mtime,
+        )
+        total = sum(f.stat().st_size for f in files)
+        for f in files:
+            if total <= self._max_total_bytes:
+                break
+            size = f.stat().st_size
+            try:
+                self._close_handlers_for(f)
+                f.unlink()
+                total -= size
+            except OSError:
+                pass

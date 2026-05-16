@@ -653,14 +653,12 @@ class TestBrowserEntryPoints:
 class TestRealtimeStatsCard:
 
     def test_update_stats_card_empty(self, main_window):
-        """Fix #2: _update_stats_card with no results shows zero."""
         main_window._result_details = []
         main_window._update_stats_card()
         assert "总数: 0" in main_window._stats_label.text()
-        assert "成功: 0" in main_window._stats_label.text()
+        assert "成功率: 0.0%" in main_window._stats_label.text()
 
     def test_update_stats_card_with_results(self, main_window):
-        """Fix #2: _update_stats_card updates stats label."""
         main_window._result_details = [
             {"success": True, "has_gps": False},
             {"success": True, "has_gps": False},
@@ -669,11 +667,10 @@ class TestRealtimeStatsCard:
         main_window._update_stats_card()
         text = main_window._stats_label.text()
         assert "总数: 3" in text
-        assert "成功: 2" in text
+        assert "新匹配: 2" in text
         assert "失败: 1" in text
 
     def test_on_photo_processed_updates_stats(self, main_window):
-        """Fix #2: _on_photo_processed should update stats card in real-time."""
         result = {
             "filename": "test.jpg",
             "success": True,
@@ -684,10 +681,9 @@ class TestRealtimeStatsCard:
         }
         main_window._on_photo_processed(result)
         assert "总数: 1" in main_window._stats_label.text()
-        assert "成功: 1" in main_window._stats_label.text()
+        assert "新匹配: 1" in main_window._stats_label.text()
 
     def test_on_photo_processed_multiple(self, main_window):
-        """Fix #2: Multiple _on_photo_processed calls update stats progressively."""
         for i in range(3):
             main_window._on_photo_processed({
                 "filename": f"photo{i}.jpg",
@@ -698,7 +694,7 @@ class TestRealtimeStatsCard:
             })
         text = main_window._stats_label.text()
         assert "总数: 3" in text
-        assert "成功: 2" in text
+        assert "新匹配: 2" in text
         assert "失败: 1" in text
 
 
@@ -977,13 +973,14 @@ class TestSettingsDialogEnhanced:
         assert dlg._retention_spin.minimum() == 1
         assert dlg._retention_spin.maximum() == 365
 
-    def test_about_label_exists(self, qapp):
+    def test_settings_groups_exist(self, qapp):
         from gps_photo_tracker.gui.settings_dialog import SettingsDialog
         dlg = SettingsDialog()
-        # About group should contain version info
         groups = dlg.findChildren(QGroupBox)
-        about_found = any("关于" in g.title() for g in groups)
-        assert about_found
+        titles = [g.title() for g in groups]
+        assert "匹配参数" in titles
+        assert "处理选项" in titles
+        assert "日志" in titles
 
     def test_restore_defaults_clears_log_dir(self, qapp):
         from gps_photo_tracker.gui.settings_dialog import SettingsDialog

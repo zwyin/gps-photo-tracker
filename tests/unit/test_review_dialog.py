@@ -145,13 +145,13 @@ class TestReviewDialog:
 
     def test_batch_skip_selected(self, app, qtbot):
         from gps_photo_tracker.gui.review_dialog import ReviewDialog
+        from PySide6.QtCore import Qt
         state = _make_review_state()
         dialog = ReviewDialog(state)
         qtbot.addWidget(dialog)
-        cb_widget = dialog._table.cellWidget(0, 0)
-        checkbox = cb_widget.findChild(QCheckBox)
-        if checkbox:
-            checkbox.setChecked(True)
+        # Checkbox is a checkable QTableWidgetItem (not cell widget)
+        check_item = dialog._table.item(0, 0)
+        assert check_item.checkState() == Qt.CheckState.Checked
         dialog._batch_action(1)  # index 1 = skip
         path_str = str(state.failed_results[0].photo.path)
         assert path_str in dialog._state.decisions
@@ -210,19 +210,18 @@ class TestReviewDialog:
 
     def test_on_select_all_unchecks_and_checks(self, app, qtbot):
         from gps_photo_tracker.gui.review_dialog import ReviewDialog
+        from PySide6.QtCore import Qt
         state = _make_review_state()
         dialog = ReviewDialog(state)
         qtbot.addWidget(dialog)
         dialog._on_select_all(Qt.CheckState.Unchecked.value)
         for row in range(dialog._table.rowCount()):
-            cb_widget = dialog._table.cellWidget(row, 0)
-            cb = cb_widget.findChild(QCheckBox)
-            assert not cb.isChecked()
+            item = dialog._table.item(row, 0)
+            assert item.checkState() == Qt.CheckState.Unchecked
         dialog._on_select_all(Qt.CheckState.Checked.value)
         for row in range(dialog._table.rowCount()):
-            cb_widget = dialog._table.cellWidget(row, 0)
-            cb = cb_widget.findChild(QCheckBox)
-            assert cb.isChecked()
+            item = dialog._table.item(row, 0)
+            assert item.checkState() == Qt.CheckState.Checked
 
     def test_get_nearby_points_sorted_by_distance(self, app, qtbot):
         from gps_photo_tracker.gui.review_dialog import ReviewDialog

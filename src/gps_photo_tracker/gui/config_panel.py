@@ -1,6 +1,5 @@
 """Configuration panel widgets for GPS Photo Tracker."""
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -28,6 +27,7 @@ def build_params_group() -> tuple[QGroupBox, dict]:
     spin.setRange(60, 3600)
     spin.setValue(300)
     spin.setSuffix(" 秒")
+    spin.setToolTip("照片前后无轨迹点的时间窗口。超过此值的孤立照片将被跳过。\n增大此值可匹配更多边缘照片，但可能降低准确度。")
     row1.addWidget(spin)
     layout.addLayout(row1)
     widgets["isolated_spin"] = spin
@@ -39,6 +39,7 @@ def build_params_group() -> tuple[QGroupBox, dict]:
     spin2.setRange(600, 7200)
     spin2.setValue(3600)
     spin2.setSuffix(" 秒")
+    spin2.setToolTip("照片前后均有轨迹点时的最大匹配时间差。\n照片拍摄时间与此窗口内的轨迹点进行匹配。")
     row2.addWidget(spin2)
     layout.addLayout(row2)
     widgets["middle_spin"] = spin2
@@ -50,6 +51,7 @@ def build_params_group() -> tuple[QGroupBox, dict]:
     spin3.setRange(60, 1800)
     spin3.setValue(300)
     spin3.setSuffix(" 秒")
+    spin3.setToolTip("用于插值计算时，前后轨迹点的最大时间跨度。\n在此窗口内的前后轨迹点会通过插值计算照片位置。")
     row3.addWidget(spin3)
     layout.addLayout(row3)
     widgets["context_spin"] = spin3
@@ -61,6 +63,7 @@ def build_params_group() -> tuple[QGroupBox, dict]:
     spin4.setRange(50, 1000)
     spin4.setValue(200)
     spin4.setSuffix(" 米")
+    spin4.setToolTip("匹配时允许的最大 GPS 距离偏差。\n轨迹点到照片推测位置的距离超过此值将被拒绝。")
     row4.addWidget(spin4)
     layout.addLayout(row4)
     widgets["distance_spin"] = spin4
@@ -72,6 +75,7 @@ def build_params_group() -> tuple[QGroupBox, dict]:
     spin5.setRange(-3600, 3600)
     spin5.setValue(0)
     spin5.setSuffix(" 秒")
+    spin5.setToolTip("照片时间与 GPS 时间的校正值。\n正数表示照片时间比 GPS 时间快（如相机时钟偏快）。\n负数表示照片时间比 GPS 时间慢。")
     row5.addWidget(spin5)
     layout.addLayout(row5)
     widgets["offset_spin"] = spin5
@@ -79,16 +83,19 @@ def build_params_group() -> tuple[QGroupBox, dict]:
     # Checkboxes
     match_tail_cb = QCheckBox("匹配首尾孤立照片")
     match_tail_cb.setChecked(True)
+    match_tail_cb.setToolTip("允许匹配轨迹开头/结尾处的孤立照片。\n开启后，轨迹边缘的照片会使用最近的轨迹点。")
     layout.addWidget(match_tail_cb)
     widgets["match_tail_cb"] = match_tail_cb
 
     overwrite_gps_cb = QCheckBox("覆盖已有 GPS")
     overwrite_gps_cb.setChecked(False)
+    overwrite_gps_cb.setToolTip("覆盖照片中已有的 GPS 数据。\n关闭时，已有 GPS 信息的照片将被跳过。")
     layout.addWidget(overwrite_gps_cb)
     widgets["overwrite_gps_cb"] = overwrite_gps_cb
 
     keep_struct_cb = QCheckBox("保持目录结构")
     keep_struct_cb.setChecked(True)
+    keep_struct_cb.setToolTip("拷贝模式时保持源目录结构到输出目录。\n关闭后所有照片将拷贝到输出目录的根层级。")
     layout.addWidget(keep_struct_cb)
     widgets["keep_struct_cb"] = keep_struct_cb
 

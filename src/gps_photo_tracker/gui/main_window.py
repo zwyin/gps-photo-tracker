@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QSettings, QUrl
-from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PySide6.QtGui import QBrush, QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent
 
 logger = logging.getLogger("gps_tracker")
 from PySide6.QtWidgets import (
@@ -65,19 +65,32 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         layout = QHBoxLayout(central)
 
-        splitter = QSplitter(Qt.Horizontal)
-        layout.addWidget(splitter)
+        self._splitter = QSplitter(Qt.Horizontal)
+        layout.addWidget(self._splitter)
 
         # Left panel
-        left = self._build_left_panel()
-        splitter.addWidget(left)
+        self._left_panel = self._build_left_panel()
+        self._splitter.addWidget(self._left_panel)
 
         # Right panel
         right = self._build_right_panel()
-        splitter.addWidget(right)
+        self._splitter.addWidget(right)
 
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2)
+        self._splitter.setStretchFactor(0, 1)
+        self._splitter.setStretchFactor(1, 2)
+        self._splitter.setCollapsible(0, True)
+        self._splitter.setSizes([300, 700])
+
+        # Restore splitter state (only if previously saved)
+        settings = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
+        splitter_state = settings.value("main_splitter_state")
+        if splitter_state and isinstance(splitter_state, (bytes, bytearray)):
+            self._splitter.restoreState(splitter_state)
+        self._splitter.splitterMoved.connect(
+            lambda: QSettings("GPSPhotoTracker", "GPSPhotoTracker").setValue(
+                "main_splitter_state", self._splitter.saveState()
+            )
+        )
 
         self.statusBar().showMessage("就绪")
 
@@ -86,6 +99,17 @@ class MainWindow(QMainWindow):
         file_menu = menu.addMenu("文件")
         settings_action = file_menu.addAction("设置")
         settings_action.triggered.connect(self._open_settings)
+
+        view_menu = menu.addMenu("视图")
+        self._toggle_panel_action = view_menu.addAction("配置面板")
+        self._toggle_panel_action.setCheckable(True)
+        self._toggle_panel_action.setChecked(True)
+        self._toggle_panel_action.triggered.connect(self._toggle_left_panel)
+        view_menu.addAction(self._toggle_panel_action)
+
+        debug_menu = menu.addMenu("调试")
+        log_action = debug_menu.addAction("查看日志")
+        log_action.triggered.connect(self._open_log_viewer)
 
         self._review_decisions: dict = {}
         self._reviewed_results: list = []
@@ -183,14 +207,14 @@ class MainWindow(QMainWindow):
         browser_row = QHBoxLayout()
         self._gpx_browser_label = QLabel("GPS: —")
         self._gpx_browser_label.setStyleSheet(
-            "padding: 4px; background: #e8e8e8; border-radius: 3px; cursor: pointer;"
+            "padding: 4px; background: #e8e8e8; border-radius: 3px;"
         )
         self._gpx_browser_label.mousePressEvent = lambda e: self._open_gpx_browser()
         browser_row.addWidget(self._gpx_browser_label)
 
         self._photo_browser_label = QLabel("照片: —")
         self._photo_browser_label.setStyleSheet(
-            "padding: 4px; background: #e8e8e8; border-radius: 3px; cursor: pointer;"
+            "padding: 4px; background: #e8e8e8; border-radius: 3px;"
         )
         self._photo_browser_label.mousePressEvent = lambda e: self._open_photo_browser()
         browser_row.addWidget(self._photo_browser_label)
@@ -227,13 +251,38 @@ class MainWindow(QMainWindow):
 
         layout = result_widget.layout()
 
-        # Photo preview (from photo_preview module)
+        # Move results_table into a vertical splitter with photo preview
+        layout.removeWidget(self._results_table)
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(self._results_table)
+
         self._photo_preview = PhotoPreview()
-        layout.addWidget(self._photo_preview)
+        splitter.addWidget(self._photo_preview)
+        splitter.setSizes([400, 200])
+
+        # Restore saved splitter state
+        settings = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
+        splitter_state = settings.value("right_splitter_state")
+        if splitter_state:
+            splitter.restoreState(splitter_state)
+        splitter.splitterMoved.connect(
+            lambda: QSettings("GPSPhotoTracker", "GPSPhotoTracker").setValue(
+                "right_splitter_state", splitter.saveState()
+            )
+        )
+
+        layout.addWidget(splitter, stretch=1)
 
         return result_widget
 
     # ── Actions ─────────────────────────────────────────────
+
+    def _toggle_left_panel(self, checked: bool):
+        sizes = self._splitter.sizes()
+        if checked:
+            self._splitter.setSizes([300, max(sizes[1], 400)])
+        else:
+            self._splitter.setSizes([0, sum(sizes)])
 
     def _browse_gps_dir(self):
         path = QFileDialog.getExistingDirectory(self, "选择 GPS 轨迹目录")
@@ -247,6 +296,7 @@ class MainWindow(QMainWindow):
         if path:
             self._photo_dir_edit.setCurrentText(path)
             self._add_path_history("photo_dir_history", path, self._photo_dir_edit)
+            self._clear_results()
             self._auto_scan_photos(Path(path))
 
     def _browse_output_dir(self):
@@ -254,6 +304,12 @@ class MainWindow(QMainWindow):
         if path:
             self._output_dir_edit.setCurrentText(path)
             self._add_path_history("output_dir_history", path, self._output_dir_edit)
+
+    def _clear_results(self):
+        self._results_table.setRowCount(0)
+        self._result_details.clear()
+        self._stats_label.setText("")
+        self._photo_preview.clear()
 
     def _auto_scan_gpx(self, gps_dir: Path):
         from gps_photo_tracker.core.file_provider import FileProvider
@@ -350,6 +406,15 @@ class MainWindow(QMainWindow):
         photo_dir = self._photo_dir_edit.currentText()
         if not gps_dir or not photo_dir:
             QMessageBox.information(self, "提示", "请先选择 GPS 轨迹目录和照片目录")
+            return
+        reply = QMessageBox.question(
+            self, "智能推荐参数",
+            "将根据已扫描的 GPS 轨迹和照片数据，自动分析并推荐最优匹配参数。\n\n"
+            "当前参数值将被替换。是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
             return
         from gps_photo_tracker.service.tagging_service import GPSTaggingService
         service = GPSTaggingService()
@@ -461,15 +526,26 @@ class MainWindow(QMainWindow):
             self._elapsed_label.setText(f"已用: {elapsed:.0f}s  剩余: ~{eta_str}")
 
     def _on_photo_processed(self, result_dict: dict):
+        # Disable sorting during row insertion to prevent row displacement
+        sorting_was_enabled = self._results_table.isSortingEnabled()
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(False)
+
         row = self._results_table.rowCount()
         self._results_table.insertRow(row)
 
         filename = result_dict.get("filename", "")
-        self._results_table.setItem(row, 0, QTableWidgetItem(filename))
+        data_idx = len(self._result_details)
+        fn_item = QTableWidgetItem(filename)
+        fn_item.setData(Qt.ItemDataRole.UserRole, data_idx)
+        self._results_table.setItem(row, 0, fn_item)
 
-        has_existing = result_dict.get("has_gps", False)
-        self._results_table.setItem(row, 1, QTableWidgetItem("有" if has_existing else "无"))
+        # GPS(前) — existing GPS before processing
+        gps_before = result_dict.get("gps_before", "")
+        before_text = gps_before if gps_before else "无"
+        self._results_table.setItem(row, 1, QTableWidgetItem(before_text))
 
+        # 计算GPS — computed GPS coordinates from matching
         lat = result_dict.get("latitude")
         lon = result_dict.get("longitude")
         if lat is not None and lon is not None:
@@ -478,9 +554,27 @@ class MainWindow(QMainWindow):
             gps_text = "—"
         self._results_table.setItem(row, 2, QTableWidgetItem(gps_text))
 
+        # GPS(后) — what GPS will be after processing
+        has_gps = result_dict.get("has_gps", False)
+        will_overwrite = has_gps and self._overwrite_gps_cb.isChecked()
+        if has_gps and not will_overwrite:
+            after_text = before_text  # no change — keep existing GPS
+        else:
+            after_text = gps_text  # new match result
+        self._results_table.setItem(row, 3, QTableWidgetItem(after_text))
+
+        # Color-code matching GPS values
+        same_brush = QBrush(QColor(220, 245, 220))  # light green
+        if before_text not in ("无", "—") and before_text == after_text:
+            self._results_table.item(row, 1).setBackground(same_brush)
+            self._results_table.item(row, 3).setBackground(same_brush)
+        if gps_text not in ("无", "—") and gps_text == after_text:
+            self._results_table.item(row, 2).setBackground(same_brush)
+            self._results_table.item(row, 3).setBackground(same_brush)
+
         method = result_dict.get("method", "")
         method_text = {"interpolated": "插值", "nearest": "就近"}.get(method, "")
-        self._results_table.setItem(row, 3, QTableWidgetItem(method_text))
+        self._results_table.setItem(row, 4, QTableWidgetItem(method_text))
 
         success = result_dict.get("success", False)
         if success:
@@ -490,7 +584,10 @@ class MainWindow(QMainWindow):
             status = {"no_gps_coverage": "无GPS覆盖", "time_diff": "时差过大",
                       "gps_distance": "距离过大", "tail_isolated": "孤立",
                       "no_track_points": "无轨迹点"}.get(reason, reason)
-        self._results_table.setItem(row, 4, QTableWidgetItem(status))
+        self._results_table.setItem(row, 5, QTableWidgetItem(status))
+
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(True)
 
         self._results_table.scrollToBottom()
         self._result_details.append(result_dict)
@@ -498,15 +595,22 @@ class MainWindow(QMainWindow):
         self._update_stats_card()
 
     def _update_stats_card(self):
-        total = len(self._result_details)
-        matched = sum(1 for d in self._result_details if d.get("success"))
-        failed = sum(1 for d in self._result_details if not d.get("success"))
-        skipped = sum(1 for d in self._result_details
-                      if d.get("has_gps") and d.get("success"))
-        overwritten = sum(1 for d in self._result_details if d.get("overwritten"))
+        details = self._result_details
+        total = len(details)
+        has_gps_total = sum(1 for d in details if d.get("has_gps"))
+        new_matched = sum(1 for d in details if not d.get("has_gps") and d.get("success"))
+        skipped_existing = sum(
+            1 for d in details
+            if d.get("has_gps") and d.get("success") and not d.get("overwritten")
+        )
+        overwritten = sum(1 for d in details if d.get("overwritten"))
+        failed = sum(1 for d in details if not d.get("success"))
+        matched = new_matched + skipped_existing + overwritten
         rate = matched / total if total > 0 else 0
         self._stats_label.setText(
-            f"总数: {total} | 成功: {matched} | 跳过: {skipped} | 失败: {failed} | 覆盖: {overwritten} | 成功率: {rate:.1%}"
+            f"总数: {total} | 已有GPS: {has_gps_total} | "
+            f"新匹配: {new_matched} | 跳过(已有): {skipped_existing} | "
+            f"覆盖: {overwritten} | 失败: {failed} | 成功率: {rate:.1%}"
         )
 
     def _on_review_ready(self, review_data: dict):
@@ -545,6 +649,30 @@ class MainWindow(QMainWindow):
             ))
 
         state = ReviewState(failed_results=failed_results, gps_segments=segments)
+
+        # Reconstruct all_results for neighbor lookup (follow-prev/next)
+        all_results = []
+        for ar in review_data.get("all_results", []):
+            photo = PhotoInfo(
+                path=Path(ar["photo_path"]),
+                filename=ar["filename"],
+                timestamp=ar.get("timestamp"),
+                has_gps=ar.get("latitude") is not None,
+            )
+            gps = None
+            if ar.get("latitude") is not None:
+                from gps_photo_tracker.core.models import GPSInfo
+                gps = GPSInfo(
+                    latitude=ar["latitude"],
+                    longitude=ar["longitude"],
+                    altitude=ar.get("altitude"),
+                )
+            result = MatchResult(
+                photo=photo, success=ar.get("success", False),
+                gps=gps, method=ar.get("method"),
+            )
+            all_results.append(result)
+        state.all_results = all_results
         dialog = ReviewDialog(state, self)
         dialog.exec()
 
@@ -564,19 +692,27 @@ class MainWindow(QMainWindow):
                 elif dec.action == ReviewAction.MANUAL_COORD:
                     dec_data["lat"] = dec.manual_lat
                     dec_data["lon"] = dec.manual_lon
+                # FOLLOW_PREV/FOLLOW_NEXT: stored as action only, resolved at write time
                 self._review_decisions[path_str] = dec_data
+
+            # Write review decisions back into result table
+            self._apply_review_to_table(reviewed_state, all_results)
 
             self._reviewed_results = failed_results
             manual_count = sum(
                 1 for d in reviewed_state.decisions.values()
                 if d.action in (ReviewAction.MANUAL_GPS, ReviewAction.MANUAL_COORD)
             )
+            follow_count = sum(
+                1 for d in reviewed_state.decisions.values()
+                if d.action in (ReviewAction.FOLLOW_PREV, ReviewAction.FOLLOW_NEXT)
+            )
             skip_count = sum(
                 1 for d in reviewed_state.decisions.values()
                 if d.action in (ReviewAction.SKIP, ReviewAction.KEEP_SKIP)
             )
             self.statusBar().showMessage(
-                f"审核完成: {manual_count} 张手动指定, {skip_count} 张跳过。点 COPY/OVERWRITE 执行写入。"
+                f"审核完成: {manual_count} 张手动指定, {follow_count} 张跟随, {skip_count} 张跳过。点 COPY/OVERWRITE 执行写入。"
             )
         else:
             self._review_decisions = {}
@@ -590,6 +726,85 @@ class MainWindow(QMainWindow):
             "total": total, "matched": matched, "failed": failed,
             "skipped": 0, "overwritten": 0, "success_rate": rate,
         })
+
+    def _apply_review_to_table(self, reviewed_state: ReviewState, all_results: list):
+        """Update result table rows with review decisions (GPS coords, method, status)."""
+        from gps_photo_tracker.core.models import GPSInfo
+
+        # Build time-ordered matched results for follow resolution
+        ordered = sorted(
+            [r for r in all_results if r.success and r.gps and r.photo.timestamp],
+            key=lambda r: r.photo.timestamp or 0,
+        )
+
+        # Resolve follow-prev/next to actual GPS for each decision
+        resolved_gps: dict[str, tuple[GPSInfo, str]] = {}  # path -> (gps, method_label)
+        for path_str, dec in reviewed_state.decisions.items():
+            if dec.action == ReviewAction.MANUAL_GPS and dec.selected_point:
+                pt = dec.selected_point
+                resolved_gps[path_str] = (GPSInfo(pt.latitude, pt.longitude, pt.altitude), "手动GPS")
+            elif dec.action == ReviewAction.MANUAL_COORD and dec.manual_lat is not None and dec.manual_lon is not None:
+                resolved_gps[path_str] = (GPSInfo(dec.manual_lat, dec.manual_lon), "手动坐标")
+            elif dec.action in (ReviewAction.FOLLOW_PREV, ReviewAction.FOLLOW_NEXT):
+                # Find the failed photo's timestamp in all_results
+                target_ts = None
+                for r in all_results:
+                    if str(r.photo.path) == path_str and r.photo.timestamp:
+                        target_ts = r.photo.timestamp
+                        break
+                if target_ts is None:
+                    continue
+                direction = -1 if dec.action == ReviewAction.FOLLOW_PREV else 1
+                label = "跟随上一个" if dec.action == ReviewAction.FOLLOW_PREV else "跟随下一个"
+                for j in range(len(ordered)):
+                    idx = j if direction > 0 else len(ordered) - 1 - j
+                    neighbor = ordered[idx]
+                    if direction > 0 and neighbor.photo.timestamp > target_ts:
+                        resolved_gps[path_str] = (neighbor.gps, label)
+                        break
+                    elif direction < 0 and neighbor.photo.timestamp < target_ts:
+                        resolved_gps[path_str] = (neighbor.gps, label)
+                        break
+
+        # Update matching rows in the result table
+        sorting_was_enabled = self._results_table.isSortingEnabled()
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(False)
+
+        for visual_row in range(self._results_table.rowCount()):
+            item = self._results_table.item(visual_row, 0)
+            if not item:
+                continue
+            data_row = item.data(Qt.ItemDataRole.UserRole)
+            if data_row is None or data_row >= len(self._result_details):
+                continue
+            detail = self._result_details[data_row]
+            path_str = detail.get("path", "")
+            if path_str not in resolved_gps:
+                continue
+
+            gps, method_label = resolved_gps[path_str]
+            gps_text = f"{gps.latitude:.4f}, {gps.longitude:.4f}"
+
+            # Update GPS(后) column — show the review-assigned GPS
+            self._results_table.setItem(visual_row, 3, QTableWidgetItem(gps_text))
+
+            # Update method column
+            self._results_table.setItem(visual_row, 4, QTableWidgetItem(method_label))
+
+            # Update status column
+            self._results_table.setItem(visual_row, 5, QTableWidgetItem("已审核"))
+
+            # Also update the detail dict so double-click shows correct info
+            detail["success"] = True
+            detail["method"] = method_label
+            detail["latitude"] = gps.latitude
+            detail["longitude"] = gps.longitude
+            detail["altitude"] = gps.altitude
+
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(True)
+        self._update_stats_card()
 
     def _on_done(self, result_dict: dict):
         self._start_btn.setEnabled(True)
@@ -626,10 +841,11 @@ class MainWindow(QMainWindow):
     def _apply_result_filter(self):
         filter_idx = self._result_filter.currentIndex()
         for row in range(self._results_table.rowCount()):
-            if row >= len(self._result_details):
+            data_row = self._get_detail_row(row)
+            if data_row < 0 or data_row >= len(self._result_details):
                 self._results_table.setRowHidden(row, False)
                 continue
-            detail = self._result_details[row]
+            detail = self._result_details[data_row]
             success = detail.get("success", False)
             has_gps = detail.get("has_gps", False)
             if filter_idx == 0:
@@ -663,9 +879,9 @@ class MainWindow(QMainWindow):
             dialog.exec()
 
     def _on_table_double_click(self, index):
-        row = index.row()
-        if 0 <= row < len(self._result_details):
-            dialog = DetailDialog(self._result_details[row], self)
+        data_row = self._get_detail_row(index.row())
+        if 0 <= data_row < len(self._result_details):
+            dialog = DetailDialog(self._result_details[data_row], self)
             dialog.exec()
 
     def _on_selection_changed(self):
@@ -673,17 +889,127 @@ class MainWindow(QMainWindow):
         if not rows:
             self._photo_preview.clear()
             return
-        row = rows[0].row()
-        if 0 <= row < len(self._result_details):
-            detail = self._result_details[row]
+        visual_row = rows[0].row()
+        data_row = self._get_detail_row(visual_row)
+        if 0 <= data_row < len(self._result_details):
+            detail = self._result_details[data_row]
             photo_path = detail.get("path", "")
             lat = detail.get("latitude")
             lon = detail.get("longitude")
             method = detail.get("method", "")
             method_text = {"interpolated": "插值", "nearest": "就近"}.get(method, "—")
             gps_str = f"{lat:.4f}, {lon:.4f}" if lat is not None and lon is not None else "—"
-            info = f"文件: {detail.get('filename', '—')}\nGPS: {gps_str}\n方式: {method_text}"
+            time_str = detail.get("capture_time") or "—"
+            info = f"文件: {detail.get('filename', '—')}\n拍摄时间: {time_str}\nGPS: {gps_str}\n方式: {method_text}"
             self._photo_preview.show_photo(photo_path, info)
+
+            # Preload adjacent thumbnails (3 before + 3 after)
+            preload_paths = []
+            for offset in range(1, 4):
+                for delta in (offset, -offset):
+                    adj_visual = visual_row + delta
+                    if 0 <= adj_visual < self._results_table.rowCount():
+                        adj_data = self._get_detail_row(adj_visual)
+                        if 0 <= adj_data < len(self._result_details):
+                            p = self._result_details[adj_data].get("path", "")
+                            if p:
+                                preload_paths.append(p)
+            self._photo_preview.preload_photos(preload_paths)
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key in (Qt.Key_Left, Qt.Key_Right) and self._results_table.hasFocus():
+            rows = self._results_table.selectionModel().selectedRows()
+            if rows:
+                self._quick_follow_gps(rows[0].row(), -1 if key == Qt.Key_Left else 1)
+                return
+        super().keyPressEvent(event)
+
+    def _quick_follow_gps(self, visual_row: int, direction: int):
+        """Assign GPS from nearest neighbor with GPS(后) in the given direction.
+
+        direction: -1 = look upward (earlier in time), +1 = look downward (later in time).
+        After assignment, auto-advance selection in the same direction.
+        """
+        data_row = self._get_detail_row(visual_row)
+        if data_row < 0 or data_row >= len(self._result_details):
+            return
+        detail = self._result_details[data_row]
+
+        # Only act on rows that lack GPS(后)
+        gps_after_item = self._results_table.item(visual_row, 3)
+        if gps_after_item and gps_after_item.text() not in ("无", "—", ""):
+            # Already has GPS — just advance selection
+            next_row = visual_row + direction
+            if 0 <= next_row < self._results_table.rowCount():
+                self._results_table.selectRow(next_row)
+            return
+
+        # Search for nearest row with GPS(后) in the given direction
+        found_visual = -1
+        found_gps_text = ""
+        found_lat = None
+        found_lon = None
+        step = direction
+        candidate = visual_row + step
+        while 0 <= candidate < self._results_table.rowCount():
+            cand_data = self._get_detail_row(candidate)
+            if 0 <= cand_data < len(self._result_details):
+                cand_detail = self._result_details[cand_data]
+                cand_gps_item = self._results_table.item(candidate, 3)
+                if cand_gps_item and cand_gps_item.text() not in ("无", "—", ""):
+                    found_visual = candidate
+                    found_gps_text = cand_gps_item.text()
+                    found_lat = cand_detail.get("latitude")
+                    found_lon = cand_detail.get("longitude")
+                    break
+            candidate += step
+
+        if found_visual < 0:
+            return
+
+        # Apply GPS to current row
+        method_label = "跟随上一个" if direction < 0 else "跟随下一个"
+        sorting_was_enabled = self._results_table.isSortingEnabled()
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(False)
+
+        self._results_table.setItem(visual_row, 3, QTableWidgetItem(found_gps_text))
+        self._results_table.setItem(visual_row, 4, QTableWidgetItem(method_label))
+        self._results_table.setItem(visual_row, 5, QTableWidgetItem("已跟随"))
+
+        # Update detail dict
+        detail["success"] = True
+        detail["method"] = method_label
+        if found_lat is not None and found_lon is not None:
+            detail["latitude"] = found_lat
+            detail["longitude"] = found_lon
+
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(True)
+        self._update_stats_card()
+
+        # Advance selection
+        next_row = visual_row + direction
+        if 0 <= next_row < self._results_table.rowCount():
+            self._results_table.selectRow(next_row)
+
+    def _get_detail_row(self, visual_row: int) -> int:
+        item = self._results_table.item(visual_row, 0)
+        data = item.data(Qt.ItemDataRole.UserRole) if item else None
+        return data if data is not None else visual_row
+
+    def _open_log_viewer(self):
+        from gps_photo_tracker.gui.log_viewer import LogViewerDialog
+        from PySide6.QtCore import QSettings
+        settings = QSettings()
+        log_dir_str = settings.value("log_dir", "")
+        if log_dir_str:
+            log_dir = Path(log_dir_str)
+        else:
+            log_dir = Path(__file__).resolve().parent.parent.parent / "logs"
+        dialog = LogViewerDialog(log_dir, self)
+        dialog.exec()
 
     def _open_settings(self):
         dialog = SettingsDialog(self)
@@ -758,6 +1084,7 @@ class MainWindow(QMainWindow):
         if photo_dir:
             self._photo_dir_edit.setCurrentText(str(photo_dir))
             self._add_path_history("photo_dir_history", str(photo_dir), self._photo_dir_edit)
+            self._clear_results()
             self._auto_scan_photos(photo_dir)
         if not gps_dir and not photo_dir:
             QMessageBox.information(self, "拖放", "无法识别拖入的内容类型")

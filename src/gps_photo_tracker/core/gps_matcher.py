@@ -4,7 +4,11 @@ Matches photos to GPS track points using time-based correlation.
 Supports interpolated matching (middle photos) and nearest-point matching (isolated).
 """
 
+import logging
+
 from geopy.distance import geodesic
+
+logger = logging.getLogger(__name__)
 
 from gps_photo_tracker.core.models import (
     GPSInfo,
@@ -44,10 +48,13 @@ class GPSMatcher:
         segments: list[GPXSegment],
     ) -> MatchResult:
         adjusted_time = photo.timestamp + self.config.time_offset
+        logger.debug("匹配 %s | timestamp=%s offset=%s adjusted=%s",
+                     photo.filename, photo.timestamp, self.config.time_offset, adjusted_time)
 
         # Step 1: find covering segment
         segment = self._find_segment(adjusted_time, segments)
         if segment is None:
+            logger.debug("  → 无覆盖段 | adjusted=%s, %d段可用", adjusted_time, len(segments))
             return MatchResult(
                 photo=photo, success=False,
                 reject_reason=RejectReason.NO_GPS_COVERAGE,
@@ -68,6 +75,7 @@ class GPSMatcher:
         next_point = self._find_next_point(adjusted_time, segment)
 
         if prev_point is None and next_point is None:
+            logger.debug("  → 无轨迹点 | segment=%s", segment.filename)
             return MatchResult(
                 photo=photo, success=False,
                 reject_reason=RejectReason.NO_TRACK_POINTS,
@@ -81,6 +89,7 @@ class GPSMatcher:
             ).meters
 
             if distance > self.config.max_gps_distance:
+                logger.debug("  → GPS距离过大 | dist=%.0fm > max=%.0fm", distance, self.config.max_gps_distance)
                 return MatchResult(
                     photo=photo, success=False,
                     reject_reason=RejectReason.GPS_DISTANCE,
@@ -96,6 +105,8 @@ class GPSMatcher:
 
             # Linear interpolation
             span = next_point.timestamp - prev_point.timestamp
+            logger.debug("  → 插值 | span=%.1fs dist=%.0fm ratio=%.3f", span, distance,
+                         (adjusted_time - prev_point.timestamp) / span if span else 0.5)
             if span == 0:
                 # Same timestamp — use midpoint
                 lat = (prev_point.latitude + next_point.latitude) / 2

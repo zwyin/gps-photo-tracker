@@ -13,8 +13,10 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
     QCheckBox,
     QRadioButton,
     QButtonGroup,
@@ -29,6 +31,7 @@ SETTINGS_KEYS = {
     "time_offset": 0,
     "overwrite_gps": False,
     "keep_structure": True,
+    "timezone_offset": 8,
     "mode": 0,  # 0=preview, 1=copy, 2=overwrite
     "log_dir": "",
     "log_retention_days": 30,
@@ -57,16 +60,37 @@ def save_settings(values: dict) -> None:
         s.setValue(k, v)
 
 
+def format_timestamp(ts: float) -> str:
+    """Format a UTC timestamp using the configured timezone offset."""
+    from datetime import datetime, timezone, timedelta
+    s = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
+    offset = int(s.value("timezone_offset", 8))
+    tz = timezone(timedelta(hours=offset))
+    try:
+        dt = datetime.fromtimestamp(ts, tz=tz)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except (OSError, ValueError):
+        return "—"
+
+
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("设置")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(520)
         self._settings = load_settings()
         self._build_ui()
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
+        outer_layout = QVBoxLayout(self)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
 
         # Profile management
         profile_row = QHBoxLayout()
@@ -162,6 +186,18 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(proc_group)
 
+        # Display settings
+        display_group = QGroupBox("显示")
+        display_layout = QFormLayout(display_group)
+        self._tz_spin = QSpinBox()
+        self._tz_spin.setRange(-12, 14)
+        self._tz_spin.setValue(int(self._settings.get("timezone_offset", 8)))
+        self._tz_spin.setPrefix("UTC")
+        self._tz_spin.setSuffix(" (东八区=8)")
+        self._tz_spin.setMinimumWidth(150)
+        display_layout.addRow("时区偏移:", self._tz_spin)
+        layout.addWidget(display_group)
+
         # Log settings
         log_group = QGroupBox("日志")
         log_layout = QFormLayout(log_group)
@@ -184,18 +220,10 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(log_group)
 
-        # About
-        about_group = QGroupBox("关于")
-        about_layout = QVBoxLayout(about_group)
-        about_text = QLabel(
-            "GPS Photo Tracker\n"
-            "Python 3.11+ / PySide6 / piexif"
-        )
-        about_text.setStyleSheet("color: #666; padding: 4px;")
-        about_layout.addWidget(about_text)
-        layout.addWidget(about_group)
+        scroll.setWidget(content)
+        outer_layout.addWidget(scroll)
 
-        # Buttons
+        # Buttons (outside scroll area so always visible)
         btn_layout = QHBoxLayout()
         reset_btn = QPushButton("恢复默认值")
         reset_btn.clicked.connect(self._reset_defaults)
@@ -204,7 +232,7 @@ class SettingsDialog(QDialog):
         btn_layout.addStretch()
         btn_layout.addWidget(reset_btn)
         btn_layout.addWidget(save_btn)
-        layout.addLayout(btn_layout)
+        outer_layout.addLayout(btn_layout)
 
     def _spin(self, label, min_val, max_val, key, suffix):
         lbl = QLabel(label)
@@ -212,6 +240,7 @@ class SettingsDialog(QDialog):
         spin.setRange(min_val, max_val)
         spin.setValue(int(self._settings.get(key, SETTINGS_KEYS[key])))
         spin.setSuffix(suffix)
+        spin.setMinimumWidth(100)
         return lbl, spin
 
     def _reset_defaults(self):
@@ -255,6 +284,7 @@ class SettingsDialog(QDialog):
             "mode": self._mode_group.checkedId(),
             "log_dir": self._log_dir_edit.text(),
             "log_retention_days": self._retention_spin.value(),
+            "timezone_offset": self._tz_spin.value(),
         }
 
     def _apply_values(self, values: dict):
@@ -288,6 +318,8 @@ class SettingsDialog(QDialog):
             self._log_dir_edit.setText(str(values["log_dir"]))
         if "log_retention_days" in values:
             self._retention_spin.setValue(int(values["log_retention_days"]))
+        if "timezone_offset" in values:
+            self._tz_spin.setValue(int(values["timezone_offset"]))
 
     def _load_profile(self):
         idx = self._profile_cb.currentIndex()
