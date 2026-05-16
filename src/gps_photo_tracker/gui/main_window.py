@@ -889,7 +889,8 @@ class MainWindow(QMainWindow):
         if not rows:
             self._photo_preview.clear()
             return
-        data_row = self._get_detail_row(rows[0].row())
+        visual_row = rows[0].row()
+        data_row = self._get_detail_row(visual_row)
         if 0 <= data_row < len(self._result_details):
             detail = self._result_details[data_row]
             photo_path = detail.get("path", "")
@@ -901,6 +902,19 @@ class MainWindow(QMainWindow):
             time_str = detail.get("capture_time") or "—"
             info = f"文件: {detail.get('filename', '—')}\n拍摄时间: {time_str}\nGPS: {gps_str}\n方式: {method_text}"
             self._photo_preview.show_photo(photo_path, info)
+
+            # Preload adjacent thumbnails (3 before + 3 after)
+            preload_paths = []
+            for offset in range(1, 4):
+                for delta in (offset, -offset):
+                    adj_visual = visual_row + delta
+                    if 0 <= adj_visual < self._results_table.rowCount():
+                        adj_data = self._get_detail_row(adj_visual)
+                        if 0 <= adj_data < len(self._result_details):
+                            p = self._result_details[adj_data].get("path", "")
+                            if p:
+                                preload_paths.append(p)
+            self._photo_preview.preload_photos(preload_paths)
 
     def _get_detail_row(self, visual_row: int) -> int:
         item = self._results_table.item(visual_row, 0)
