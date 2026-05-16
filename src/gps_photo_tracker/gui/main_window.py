@@ -3,7 +3,8 @@
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSettings
+from PySide6.QtCore import Qt, QSettings, QUrl
+from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
 
 logger = logging.getLogger("gps_tracker")
 from PySide6.QtWidgets import (
@@ -52,6 +53,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("GPS Photo Tracker")
         self.setMinimumSize(1000, 600)
+        self.setAcceptDrops(True)
 
         self._worker: Worker | None = None
         self._result_details: list[dict] = []
@@ -722,3 +724,74 @@ class MainWindow(QMainWindow):
             self._worker.wait(3000)
         QSettings("GPSPhotoTracker", "GPSPhotoTracker").setValue("window_geometry", self.saveGeometry())
         event.accept()
+
+    # ── Drag and drop ───────────────────────────────────────
+
+    _TRACK_EXT = {".gpx", ".kml", ".tcx"}
+    _IMAGE_EXT = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            if any(u.isLocalFile() for u in event.mimeData().urls()):
+                event.setDropAction(Qt.DropAction.CopyAction)
+                event.accept()
+                return
+        event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            return
+        event.ignore()
+
+    def dropEvent(self, event):
+        urls = [u for u in event.mimeData().urls() if u.isLocalFile()]
+        if not urls:
+            return
+        gps_dir, photo_dir = self._classify_drop(urls)
+        if gps_dir:
+            self._gps_dir_edit.setCurrentText(str(gps_dir))
+            self._add_path_history("gps_dir_history", str(gps_dir), self._gps_dir_edit)
+            self._auto_scan_gpx(gps_dir)
+        if photo_dir:
+            self._photo_dir_edit.setCurrentText(str(photo_dir))
+            self._add_path_history("photo_dir_history", str(photo_dir), self._photo_dir_edit)
+            self._auto_scan_photos(photo_dir)
+        if not gps_dir and not photo_dir:
+            QMessageBox.information(self, "拖放", "无法识别拖入的内容类型")
+
+    def _classify_drop(self, urls):
+        """Classify dropped URLs into GPS dir and/or photo dir."""
+        gps_dir = None
+        photo_dir = None
+        for url in urls:
+            p = Path(url.toLocalFile())
+            if p.is_file():
+                ext = p.suffix.lower()
+                if ext in self._TRACK_EXT:
+                    gps_dir = p.parent
+                elif ext in self._IMAGE_EXT:
+                    photo_dir = p.parent
+                continue
+            if not p.is_dir():
+                continue
+            has_track = any(f.suffix.lower() in self._TRACK_EXT for f in p.rglob("*") if f.is_file())
+            has_image = any(f.suffix.lower() in self._IMAGE_EXT for f in p.rglob("*") if f.is_file())
+            if has_track and has_image:
+                msg = QMessageBox(self)
+                msg.setWindowTitle("识别目录")
+                msg.setText(f"{p.name} 同时包含轨迹和照片文件。")
+                gps_btn = msg.addButton("作为 GPS 目录", QMessageBox.ButtonRole.AcceptRole)
+                photo_btn = msg.addButton("作为照片目录", QMessageBox.ButtonRole.RejectRole)
+                msg.addButton("取消", QMessageBox.ButtonRole.DestructiveRole)
+                msg.exec()
+                if msg.clickedButton() == gps_btn:
+                    gps_dir = p
+                elif msg.clickedButton() == photo_btn:
+                    photo_dir = p
+            elif has_track:
+                gps_dir = p
+            elif has_image:
+                photo_dir = p
+        return gps_dir, photo_dir
