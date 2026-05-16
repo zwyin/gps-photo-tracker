@@ -97,7 +97,9 @@ class ReviewDialog(QDialog):
             self._table.setItem(row, 4, sug_item)
 
             combo = QComboBox()
+            combo.blockSignals(True)
             combo.addItems(self._COMBO_LABELS)
+            combo.blockSignals(False)
             combo.currentIndexChanged.connect(lambda idx, r=row: self._on_action_changed(r, idx))
             self._table.setCellWidget(row, 5, combo)
             self._action_combos.append(combo)
@@ -379,7 +381,10 @@ class ReviewDialog(QDialog):
     def _reassign_combo_widgets(self):
         for visual_row in range(self._table.rowCount()):
             data_row = self._get_data_row(visual_row)
-            self._table.setCellWidget(visual_row, 5, self._action_combos[data_row])
+            combo = self._action_combos[data_row]
+            combo.blockSignals(True)
+            self._table.setCellWidget(visual_row, 5, combo)
+            combo.blockSignals(False)
 
     @staticmethod
     def _format_time(ts: float | None) -> str:

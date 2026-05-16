@@ -918,9 +918,10 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         key = event.key()
-        if key in (Qt.Key_Left, Qt.Key_Right) and self._results_table.hasFocus():
+        if key in (Qt.Key_Left, Qt.Key_Right):
             rows = self._results_table.selectionModel().selectedRows()
-            if rows:
+            if rows and self._results_table.rowCount() > 0:
+                self._results_table.setFocus()
                 self._quick_follow_gps(rows[0].row(), -1 if key == Qt.Key_Left else 1)
                 return
         super().keyPressEvent(event)
