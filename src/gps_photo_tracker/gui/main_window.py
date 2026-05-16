@@ -87,6 +87,10 @@ class MainWindow(QMainWindow):
         settings_action = file_menu.addAction("设置")
         settings_action.triggered.connect(self._open_settings)
 
+        debug_menu = menu.addMenu("调试")
+        log_action = debug_menu.addAction("查看日志")
+        log_action.triggered.connect(self._open_log_viewer)
+
         self._review_decisions: dict = {}
         self._reviewed_results: list = []
 
@@ -749,6 +753,18 @@ class MainWindow(QMainWindow):
         item = self._results_table.item(visual_row, 0)
         data = item.data(Qt.ItemDataRole.UserRole) if item else None
         return data if data is not None else visual_row
+
+    def _open_log_viewer(self):
+        from gps_photo_tracker.gui.log_viewer import LogViewerDialog
+        from PySide6.QtCore import QSettings
+        settings = QSettings()
+        log_dir_str = settings.value("log_dir", "")
+        if log_dir_str:
+            log_dir = Path(log_dir_str)
+        else:
+            log_dir = Path(__file__).resolve().parent.parent.parent / "logs"
+        dialog = LogViewerDialog(log_dir, self)
+        dialog.exec()
 
     def _open_settings(self):
         dialog = SettingsDialog(self)

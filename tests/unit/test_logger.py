@@ -136,7 +136,7 @@ class TestOperationLogger:
         assert "95" in content
 
     def test_cleanup_old_logs(self, logger, log_dir):
-        """cleanup_old_logs should remove log files older than retention_days."""
+        """cleanup should remove log files older than retention_days."""
         import time
         logger.log_operation_start({})
         assert (log_dir / "operations.log").exists()
@@ -144,11 +144,11 @@ class TestOperationLogger:
         old_time = time.time() - 60 * 86400
         import os
         os.utime(log_dir / "operations.log", (old_time, old_time))
-        logger.cleanup_old_logs(retention_days=30)
+        logger.cleanup()
         assert not (log_dir / "operations.log").exists()
 
     def test_cleanup_keeps_recent_logs(self, logger, log_dir):
-        """cleanup_old_logs should keep recent log files."""
+        """cleanup should keep recent log files."""
         logger.log_operation_start({})
-        logger.cleanup_old_logs(retention_days=30)
+        logger.cleanup()
         assert (log_dir / "operations.log").exists()
