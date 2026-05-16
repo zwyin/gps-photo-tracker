@@ -118,12 +118,24 @@ class OperationLogger:
         self._cleanup_time()
         self._cleanup_size()
 
+    def _close_handlers_for(self, path: Path):
+        """Close file handlers referencing the given path (needed on Windows)."""
+        target = str(path.resolve())
+        for name in ("gps_ops", "gps_matches", "gps_writes", "gps_errors", "gps_debug",
+                      "gps_photo_tracker"):
+            lg = logging.getLogger(name)
+            for h in lg.handlers[:]:
+                if getattr(h, "baseFilename", "") == target:
+                    h.close()
+                    lg.removeHandler(h)
+
     def _cleanup_time(self):
         """Delete rotated log files older than retention_days."""
         cutoff = time.time() - self._retention_days * 86400
         for log_file in self._log_dir.glob("*.log*"):
             try:
                 if log_file.stat().st_mtime < cutoff:
+                    self._close_handlers_for(log_file)
                     log_file.unlink()
             except OSError:
                 pass
@@ -140,6 +152,7 @@ class OperationLogger:
                 break
             size = f.stat().st_size
             try:
+                self._close_handlers_for(f)
                 f.unlink()
                 total -= size
             except OSError:
