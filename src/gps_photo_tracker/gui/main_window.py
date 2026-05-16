@@ -748,6 +748,7 @@ class MainWindow(QMainWindow):
     def dropEvent(self, event):
         urls = [u for u in event.mimeData().urls() if u.isLocalFile()]
         if not urls:
+            event.ignore()
             return
         gps_dir, photo_dir = self._classify_drop(urls)
         if gps_dir:
@@ -760,6 +761,7 @@ class MainWindow(QMainWindow):
             self._auto_scan_photos(photo_dir)
         if not gps_dir and not photo_dir:
             QMessageBox.information(self, "拖放", "无法识别拖入的内容类型")
+        event.accept()
 
     def _classify_drop(self, urls):
         """Classify dropped URLs into GPS dir and/or photo dir."""
@@ -769,15 +771,17 @@ class MainWindow(QMainWindow):
             p = Path(url.toLocalFile())
             if p.is_file():
                 ext = p.suffix.lower()
-                if ext in self._TRACK_EXT:
+                if ext in self._TRACK_EXT and gps_dir is None:
                     gps_dir = p.parent
-                elif ext in self._IMAGE_EXT:
+                elif ext in self._IMAGE_EXT and photo_dir is None:
                     photo_dir = p.parent
                 continue
             if not p.is_dir():
                 continue
-            has_track = any(f.suffix.lower() in self._TRACK_EXT for f in p.rglob("*") if f.is_file())
-            has_image = any(f.suffix.lower() in self._IMAGE_EXT for f in p.rglob("*") if f.is_file())
+            # Use iterdir (non-recursive) to avoid UI freeze on large directories
+            children = list(p.iterdir())
+            has_track = any(f.suffix.lower() in self._TRACK_EXT for f in children if f.is_file())
+            has_image = any(f.suffix.lower() in self._IMAGE_EXT for f in children if f.is_file())
             if has_track and has_image:
                 msg = QMessageBox(self)
                 msg.setWindowTitle("识别目录")

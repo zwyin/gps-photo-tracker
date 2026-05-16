@@ -150,16 +150,53 @@ class TestClassifyDrop:
         assert result_gps == gps_dir
         assert result_photo == photo_dir
 
-    def test_mixed_directory_shows_dialog(self, window, tmp_path):
+    def test_mixed_directory_choose_gps(self, window, tmp_path):
         mixed = tmp_path / "mixed"
         mixed.mkdir()
         (mixed / "track.gpx").write_text("<gpx></gpx>")
         (mixed / "photo.jpg").write_bytes(b"\xff\xd8\xff\xe0")
         urls = [QUrl.fromLocalFile(str(mixed))]
-        with patch.object(window, "_classify_drop", return_value=(None, None)):
-            # This tests the dropEvent path when classify returns nothing
-            # For the mixed case, we mock QMessageBox
-            pass
+        with patch("gps_photo_tracker.gui.main_window.QMessageBox") as MockMsgBox:
+            mock_msg = MagicMock()
+            mock_msg.clickedButton.return_value = mock_msg  # GPS button
+            MockMsgBox.return_value = mock_msg
+            # addButton returns different objects; make gps_btn match clickedButton
+            mock_msg.addButton.side_effect = [mock_msg, MagicMock(), MagicMock()]
+            gps_dir, photo_dir = window._classify_drop(urls)
+            assert gps_dir == mixed
+            assert photo_dir is None
+
+    def test_mixed_directory_choose_photo(self, window, tmp_path):
+        mixed = tmp_path / "mixed"
+        mixed.mkdir()
+        (mixed / "track.gpx").write_text("<gpx></gpx>")
+        (mixed / "photo.jpg").write_bytes(b"\xff\xd8\xff\xe0")
+        urls = [QUrl.fromLocalFile(str(mixed))]
+        with patch("gps_photo_tracker.gui.main_window.QMessageBox") as MockMsgBox:
+            mock_msg = MagicMock()
+            photo_btn = MagicMock()
+            mock_msg.addButton.side_effect = [MagicMock(), photo_btn, MagicMock()]
+            mock_msg.clickedButton.return_value = photo_btn
+            MockMsgBox.return_value = mock_msg
+            gps_dir, photo_dir = window._classify_drop(urls)
+            assert gps_dir is None
+            assert photo_dir == mixed
+
+    def test_mixed_directory_cancel(self, window, tmp_path):
+        mixed = tmp_path / "mixed"
+        mixed.mkdir()
+        (mixed / "track.gpx").write_text("<gpx></gpx>")
+        (mixed / "photo.jpg").write_bytes(b"\xff\xd8\xff\xe0")
+        urls = [QUrl.fromLocalFile(str(mixed))]
+        with patch("gps_photo_tracker.gui.main_window.QMessageBox") as MockMsgBox:
+            mock_msg = MagicMock()
+            cancel_btn = MagicMock()
+            mock_msg.addButton.side_effect = [MagicMock(), MagicMock(), cancel_btn]
+            mock_msg.clickedButton.return_value = cancel_btn
+            MockMsgBox.return_value = mock_msg
+            gps_dir, photo_dir = window._classify_drop(urls)
+            assert gps_dir is None
+            assert photo_dir is None
 
     def test_kml_file_recognized(self, window, tmp_path):
         kml = tmp_path / "track.kml"
