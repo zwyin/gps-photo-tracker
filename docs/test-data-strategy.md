@@ -61,7 +61,7 @@ safe_test_data/
 ### 2.2 工作目录结构
 
 ```
-gps-photo-tracker-claude/
+gps-photo-tracker/
 ├── test-data/                    # 原始数据（只读，从原项目复制）
 │   ├── gps_data/                 # GPX 轨迹文件
 │   ├── safe_test_data/           # 最小测试集

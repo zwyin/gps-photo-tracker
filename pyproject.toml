@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/zwyin/gps-photo-tracker-claude"
+Repository = "https://github.com/zwyin/gps-photo-tracker"
 
 [project.optional-dependencies]
 dev = [
