@@ -40,7 +40,7 @@ class PhotoBrowserDialog(QDialog):
         toolbar.addWidget(self._filter_cb)
 
         self._sort_cb = QComboBox()
-        self._sort_cb.addItems(["文件名", "拍摄时间"])
+        self._sort_cb.addItems(["文件名", "拍摄时间", "GPS状态"])
         self._sort_cb.currentIndexChanged.connect(self._apply_sort)
         toolbar.addWidget(QLabel("排序:"))
         toolbar.addWidget(self._sort_cb)
@@ -130,8 +130,10 @@ class PhotoBrowserDialog(QDialog):
         sort_idx = self._sort_cb.currentIndex()
         if sort_idx == 0:
             self._filtered.sort(key=lambda p: p.get("filename", ""))
-        else:
+        elif sort_idx == 1:
             self._filtered.sort(key=lambda p: p.get("timestamp", 0))
+        else:
+            self._filtered.sort(key=lambda p: (0 if p.get("has_gps") else 1, p.get("filename", "")))
         self._populate_table()
 
     def _on_selection(self):

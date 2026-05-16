@@ -13,8 +13,10 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
     QCheckBox,
     QRadioButton,
     QButtonGroup,
@@ -61,12 +63,20 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("设置")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(520)
         self._settings = load_settings()
         self._build_ui()
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
+        outer_layout = QVBoxLayout(self)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
 
         # Profile management
         profile_row = QHBoxLayout()
@@ -184,18 +194,10 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(log_group)
 
-        # About
-        about_group = QGroupBox("关于")
-        about_layout = QVBoxLayout(about_group)
-        about_text = QLabel(
-            "GPS Photo Tracker\n"
-            "Python 3.11+ / PySide6 / piexif"
-        )
-        about_text.setStyleSheet("color: #666; padding: 4px;")
-        about_layout.addWidget(about_text)
-        layout.addWidget(about_group)
+        scroll.setWidget(content)
+        outer_layout.addWidget(scroll)
 
-        # Buttons
+        # Buttons (outside scroll area so always visible)
         btn_layout = QHBoxLayout()
         reset_btn = QPushButton("恢复默认值")
         reset_btn.clicked.connect(self._reset_defaults)
@@ -204,7 +206,7 @@ class SettingsDialog(QDialog):
         btn_layout.addStretch()
         btn_layout.addWidget(reset_btn)
         btn_layout.addWidget(save_btn)
-        layout.addLayout(btn_layout)
+        outer_layout.addLayout(btn_layout)
 
     def _spin(self, label, min_val, max_val, key, suffix):
         lbl = QLabel(label)
@@ -212,6 +214,7 @@ class SettingsDialog(QDialog):
         spin.setRange(min_val, max_val)
         spin.setValue(int(self._settings.get(key, SETTINGS_KEYS[key])))
         spin.setSuffix(suffix)
+        spin.setMinimumWidth(100)
         return lbl, spin
 
     def _reset_defaults(self):
