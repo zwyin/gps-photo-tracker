@@ -889,7 +889,8 @@ class MainWindow(QMainWindow):
         if not rows:
             self._photo_preview.clear()
             return
-        data_row = self._get_detail_row(rows[0].row())
+        visual_row = rows[0].row()
+        data_row = self._get_detail_row(visual_row)
         if 0 <= data_row < len(self._result_details):
             detail = self._result_details[data_row]
             photo_path = detail.get("path", "")
@@ -901,6 +902,97 @@ class MainWindow(QMainWindow):
             time_str = detail.get("capture_time") or "—"
             info = f"文件: {detail.get('filename', '—')}\n拍摄时间: {time_str}\nGPS: {gps_str}\n方式: {method_text}"
             self._photo_preview.show_photo(photo_path, info)
+
+            # Preload adjacent thumbnails (3 before + 3 after)
+            preload_paths = []
+            for offset in range(1, 4):
+                for delta in (offset, -offset):
+                    adj_visual = visual_row + delta
+                    if 0 <= adj_visual < self._results_table.rowCount():
+                        adj_data = self._get_detail_row(adj_visual)
+                        if 0 <= adj_data < len(self._result_details):
+                            p = self._result_details[adj_data].get("path", "")
+                            if p:
+                                preload_paths.append(p)
+            self._photo_preview.preload_photos(preload_paths)
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key in (Qt.Key_Left, Qt.Key_Right) and self._results_table.hasFocus():
+            rows = self._results_table.selectionModel().selectedRows()
+            if rows:
+                self._quick_follow_gps(rows[0].row(), -1 if key == Qt.Key_Left else 1)
+                return
+        super().keyPressEvent(event)
+
+    def _quick_follow_gps(self, visual_row: int, direction: int):
+        """Assign GPS from nearest neighbor with GPS(后) in the given direction.
+
+        direction: -1 = look upward (earlier in time), +1 = look downward (later in time).
+        After assignment, auto-advance selection in the same direction.
+        """
+        data_row = self._get_detail_row(visual_row)
+        if data_row < 0 or data_row >= len(self._result_details):
+            return
+        detail = self._result_details[data_row]
+
+        # Only act on rows that lack GPS(后)
+        gps_after_item = self._results_table.item(visual_row, 3)
+        if gps_after_item and gps_after_item.text() not in ("无", "—", ""):
+            # Already has GPS — just advance selection
+            next_row = visual_row + direction
+            if 0 <= next_row < self._results_table.rowCount():
+                self._results_table.selectRow(next_row)
+            return
+
+        # Search for nearest row with GPS(后) in the given direction
+        found_visual = -1
+        found_gps_text = ""
+        found_lat = None
+        found_lon = None
+        step = direction
+        candidate = visual_row + step
+        while 0 <= candidate < self._results_table.rowCount():
+            cand_data = self._get_detail_row(candidate)
+            if 0 <= cand_data < len(self._result_details):
+                cand_detail = self._result_details[cand_data]
+                cand_gps_item = self._results_table.item(candidate, 3)
+                if cand_gps_item and cand_gps_item.text() not in ("无", "—", ""):
+                    found_visual = candidate
+                    found_gps_text = cand_gps_item.text()
+                    found_lat = cand_detail.get("latitude")
+                    found_lon = cand_detail.get("longitude")
+                    break
+            candidate += step
+
+        if found_visual < 0:
+            return
+
+        # Apply GPS to current row
+        method_label = "跟随上一个" if direction < 0 else "跟随下一个"
+        sorting_was_enabled = self._results_table.isSortingEnabled()
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(False)
+
+        self._results_table.setItem(visual_row, 3, QTableWidgetItem(found_gps_text))
+        self._results_table.setItem(visual_row, 4, QTableWidgetItem(method_label))
+        self._results_table.setItem(visual_row, 5, QTableWidgetItem("已跟随"))
+
+        # Update detail dict
+        detail["success"] = True
+        detail["method"] = method_label
+        if found_lat is not None and found_lon is not None:
+            detail["latitude"] = found_lat
+            detail["longitude"] = found_lon
+
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(True)
+        self._update_stats_card()
+
+        # Advance selection
+        next_row = visual_row + direction
+        if 0 <= next_row < self._results_table.rowCount():
+            self._results_table.selectRow(next_row)
 
     def _get_detail_row(self, visual_row: int) -> int:
         item = self._results_table.item(visual_row, 0)

@@ -1,5 +1,6 @@
 """Result table panel with stats card, filter, and results display."""
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -36,11 +37,17 @@ def build_result_panel() -> tuple[QWidget, QLabel, QComboBox, QTableWidget]:
     # Results table
     results_table = QTableWidget(0, 6)
     results_table.setHorizontalHeaderLabels(["文件名", "GPS(前)", "计算GPS", "GPS(后)", "方式", "状态"])
-    results_table.horizontalHeader().setStretchLastSection(True)
-    results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+    header = results_table.horizontalHeader()
+    header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+    header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+    header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+    header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+    header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+    header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
     results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
     results_table.setSortingEnabled(True)
+    results_table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
     layout.addWidget(results_table, stretch=1)
 
     return widget, stats_label, result_filter, results_table

@@ -46,6 +46,35 @@ class PhotoPreview(QWidget):
         self._thumb_label.clear()
         self._info_label.setText("选中照片查看预览")
 
+    def preload_photos(self, paths: list[str]):
+        """Load thumbnails into cache without displaying them."""
+        for i, path in enumerate(paths):
+            if not path:
+                continue
+            cache_key = f"thumb:{path}"
+            if QPixmapCache.find(cache_key):
+                continue
+            # Stagger loads so current photo loads first
+            QTimer.singleShot(50 + i * 30, lambda p=path: self._preload_one(p))
+
+    def _preload_one(self, path: str):
+        cache_key = f"thumb:{path}"
+        if QPixmapCache.find(cache_key):
+            return
+        pixmap = QPixmap(path)
+        if not pixmap.isNull():
+            from pathlib import Path
+            from gps_photo_tracker.core.orientation import OrientationReader
+            orientation = OrientationReader.get_orientation(Path(path))
+            if orientation and orientation != 1:
+                pixmap = OrientationReader.apply_orientation(pixmap, orientation)
+            scaled = pixmap.scaled(
+                200, 200,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            QPixmapCache.insert(cache_key, scaled)
+
     def _load_thumbnail(self):
         path = self._pending_thumb_path
         if not path:
