@@ -504,7 +504,10 @@ class MainWindow(QMainWindow):
         self._results_table.insertRow(row)
 
         filename = result_dict.get("filename", "")
-        self._results_table.setItem(row, 0, QTableWidgetItem(filename))
+        data_idx = len(self._result_details)
+        fn_item = QTableWidgetItem(filename)
+        fn_item.setData(Qt.ItemDataRole.UserRole, data_idx)
+        self._results_table.setItem(row, 0, fn_item)
 
         # GPS(前) — existing GPS before processing
         gps_before = result_dict.get("gps_before", "")
@@ -681,10 +684,11 @@ class MainWindow(QMainWindow):
     def _apply_result_filter(self):
         filter_idx = self._result_filter.currentIndex()
         for row in range(self._results_table.rowCount()):
-            if row >= len(self._result_details):
+            data_row = self._get_detail_row(row)
+            if data_row < 0 or data_row >= len(self._result_details):
                 self._results_table.setRowHidden(row, False)
                 continue
-            detail = self._result_details[row]
+            detail = self._result_details[data_row]
             success = detail.get("success", False)
             has_gps = detail.get("has_gps", False)
             if filter_idx == 0:
@@ -718,9 +722,9 @@ class MainWindow(QMainWindow):
             dialog.exec()
 
     def _on_table_double_click(self, index):
-        row = index.row()
-        if 0 <= row < len(self._result_details):
-            dialog = DetailDialog(self._result_details[row], self)
+        data_row = self._get_detail_row(index.row())
+        if 0 <= data_row < len(self._result_details):
+            dialog = DetailDialog(self._result_details[data_row], self)
             dialog.exec()
 
     def _on_selection_changed(self):
@@ -728,9 +732,9 @@ class MainWindow(QMainWindow):
         if not rows:
             self._photo_preview.clear()
             return
-        row = rows[0].row()
-        if 0 <= row < len(self._result_details):
-            detail = self._result_details[row]
+        data_row = self._get_detail_row(rows[0].row())
+        if 0 <= data_row < len(self._result_details):
+            detail = self._result_details[data_row]
             photo_path = detail.get("path", "")
             lat = detail.get("latitude")
             lon = detail.get("longitude")
@@ -740,6 +744,11 @@ class MainWindow(QMainWindow):
             time_str = detail.get("capture_time") or "—"
             info = f"文件: {detail.get('filename', '—')}\n拍摄时间: {time_str}\nGPS: {gps_str}\n方式: {method_text}"
             self._photo_preview.show_photo(photo_path, info)
+
+    def _get_detail_row(self, visual_row: int) -> int:
+        item = self._results_table.item(visual_row, 0)
+        data = item.data(Qt.ItemDataRole.UserRole) if item else None
+        return data if data is not None else visual_row
 
     def _open_settings(self):
         dialog = SettingsDialog(self)
