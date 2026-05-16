@@ -20,6 +20,7 @@ Repository = "https://github.com/zwyin/gps-photo-tracker-claude"
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "pytest-qt>=4.0",
 ]
 
 [project.scripts]
