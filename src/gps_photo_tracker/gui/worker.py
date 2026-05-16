@@ -1,7 +1,10 @@
 """Worker thread for GPS tagging processing."""
 
+import logging
 from pathlib import Path
 from dataclasses import asdict
+
+logger = logging.getLogger(__name__)
 
 from PySide6.QtCore import QThread, Signal
 
@@ -66,8 +69,11 @@ class Worker(QThread):
             segments = service.scan_gpx(self._gps_dir, on_progress=on_scan_progress)
             photos = service.scan_photos(self._photo_dir, on_progress=on_scan_progress)
         except Exception as e:
+            logger.error("扫描失败: %s", e)
             self.done_signal.emit({"error": str(e), "total": 0, "matched": 0})
             return
+
+        logger.info("扫描完成 | GPX: %d段, 照片: %d张", len(segments), len(photos))
 
         # Filter out excluded filenames
         if self._excluded_filenames:

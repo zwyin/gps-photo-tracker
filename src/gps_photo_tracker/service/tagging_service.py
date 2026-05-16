@@ -32,7 +32,7 @@ from gps_photo_tracker.core.models import (
 from gps_photo_tracker.logging_.logger import OperationLogger
 from gps_photo_tracker.service.cancel_token import CancellationToken
 
-logger = logging.getLogger("gps_tracker")
+logger = logging.getLogger(__name__)
 
 
 class GPSTaggingService:
@@ -197,6 +197,8 @@ class GPSTaggingService:
                     current_file=track_path.name,
                     elapsed_seconds=time.time() - start,
                 ))
+        logger.debug("scan_gpx 完成 | 目录=%s, 文件=%d, 段=%d, 耗时=%.1fs",
+                     gpx_dir, len(track_files), len(all_segments), time.time() - start)
         return all_segments
 
     def scan_photos(self, photo_dir: Path, on_progress: Callable | None = None) -> list[PhotoInfo]:
@@ -235,6 +237,8 @@ class GPSTaggingService:
                     current_file=path.name,
                     elapsed_seconds=time.time() - start,
                 ))
+        logger.debug("scan_photos 完成 | 目录=%s, 照片=%d, 耗时=%.1fs",
+                     photo_dir, len(photos), time.time() - start)
         return photos
 
     def preview(

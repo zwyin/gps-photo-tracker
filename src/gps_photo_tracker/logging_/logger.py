@@ -30,6 +30,9 @@ class OperationLogger:
         self._debug = self._make_logger("gps_debug", log_dir / "debug.log", fmt, level=logging.DEBUG)
         self._errors = self._make_logger("gps_errors", log_dir / "errors.log", fmt)
 
+        # Namespace handler: all gps_photo_tracker.* submodules → debug.log
+        self._setup_namespace_debug(log_dir / "debug.log", fmt)
+
         self.cleanup()
 
     def _make_logger(self, name: str, path: Path, fmt: logging.Formatter,
@@ -45,6 +48,20 @@ class OperationLogger:
             fh.setFormatter(fmt)
             logger.addHandler(fh)
         return logger
+
+    def _setup_namespace_debug(self, path: Path, fmt: logging.Formatter):
+        ns_logger = logging.getLogger("gps_photo_tracker")
+        ns_logger.setLevel(logging.DEBUG)
+        for h in ns_logger.handlers:
+            if getattr(h, "baseFilename", "") == str(path):
+                return
+        fh = TimedRotatingFileHandler(
+            str(path), when="D", interval=1,
+            backupCount=self._retention_days, encoding="utf-8",
+        )
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(fmt)
+        ns_logger.addHandler(fh)
 
     # ── Match logging ────────────────────────────────────────
 
