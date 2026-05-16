@@ -183,14 +183,14 @@ class MainWindow(QMainWindow):
         browser_row = QHBoxLayout()
         self._gpx_browser_label = QLabel("GPS: —")
         self._gpx_browser_label.setStyleSheet(
-            "padding: 4px; background: #e8e8e8; border-radius: 3px; cursor: pointer;"
+            "padding: 4px; background: #e8e8e8; border-radius: 3px;"
         )
         self._gpx_browser_label.mousePressEvent = lambda e: self._open_gpx_browser()
         browser_row.addWidget(self._gpx_browser_label)
 
         self._photo_browser_label = QLabel("照片: —")
         self._photo_browser_label.setStyleSheet(
-            "padding: 4px; background: #e8e8e8; border-radius: 3px; cursor: pointer;"
+            "padding: 4px; background: #e8e8e8; border-radius: 3px;"
         )
         self._photo_browser_label.mousePressEvent = lambda e: self._open_photo_browser()
         browser_row.addWidget(self._photo_browser_label)
@@ -495,15 +495,22 @@ class MainWindow(QMainWindow):
             self._elapsed_label.setText(f"已用: {elapsed:.0f}s  剩余: ~{eta_str}")
 
     def _on_photo_processed(self, result_dict: dict):
+        # Disable sorting during row insertion to prevent row displacement
+        sorting_was_enabled = self._results_table.isSortingEnabled()
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(False)
+
         row = self._results_table.rowCount()
         self._results_table.insertRow(row)
 
         filename = result_dict.get("filename", "")
         self._results_table.setItem(row, 0, QTableWidgetItem(filename))
 
-        has_existing = result_dict.get("has_gps", False)
-        self._results_table.setItem(row, 1, QTableWidgetItem("有" if has_existing else "无"))
+        # GPS(前) — existing GPS before processing
+        gps_before = result_dict.get("gps_before", "")
+        self._results_table.setItem(row, 1, QTableWidgetItem(gps_before if gps_before else "无"))
 
+        # 计算GPS — computed GPS coordinates
         lat = result_dict.get("latitude")
         lon = result_dict.get("longitude")
         if lat is not None and lon is not None:
@@ -512,9 +519,13 @@ class MainWindow(QMainWindow):
             gps_text = "—"
         self._results_table.setItem(row, 2, QTableWidgetItem(gps_text))
 
+        # GPS(后) — GPS after write (for preview same as computed)
+        gps_after = result_dict.get("gps_new", "")
+        self._results_table.setItem(row, 3, QTableWidgetItem(gps_after if gps_after else gps_text))
+
         method = result_dict.get("method", "")
         method_text = {"interpolated": "插值", "nearest": "就近"}.get(method, "")
-        self._results_table.setItem(row, 3, QTableWidgetItem(method_text))
+        self._results_table.setItem(row, 4, QTableWidgetItem(method_text))
 
         success = result_dict.get("success", False)
         if success:
@@ -524,7 +535,10 @@ class MainWindow(QMainWindow):
             status = {"no_gps_coverage": "无GPS覆盖", "time_diff": "时差过大",
                       "gps_distance": "距离过大", "tail_isolated": "孤立",
                       "no_track_points": "无轨迹点"}.get(reason, reason)
-        self._results_table.setItem(row, 4, QTableWidgetItem(status))
+        self._results_table.setItem(row, 5, QTableWidgetItem(status))
+
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(True)
 
         self._results_table.scrollToBottom()
         self._result_details.append(result_dict)

@@ -34,8 +34,8 @@ def build_result_panel() -> tuple[QWidget, QLabel, QComboBox, QTableWidget]:
     layout.addLayout(filter_row)
 
     # Results table
-    results_table = QTableWidget(0, 5)
-    results_table.setHorizontalHeaderLabels(["文件名", "GPS(前)", "GPS(后)", "方式", "状态"])
+    results_table = QTableWidget(0, 6)
+    results_table.setHorizontalHeaderLabels(["文件名", "GPS(前)", "计算GPS", "GPS(后)", "方式", "状态"])
     results_table.horizontalHeader().setStretchLastSection(True)
     results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
     results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
