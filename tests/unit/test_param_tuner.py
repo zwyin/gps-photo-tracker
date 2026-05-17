@@ -54,11 +54,11 @@ class TestParamTuner:
         config = ParamTuner.recommend(segments, photos)
         assert config.time_offset == 0
 
-    def test_match_tail_always_true(self):
+    def test_match_isolated_always_true(self):
         segments = _make_segments(10, 50)
         photos = _make_photos(10, 30)
         config = ParamTuner.recommend(segments, photos)
-        assert config.match_tail is True
+        assert config.match_isolated is True
 
     def test_returns_matcher_config_type(self):
         segments = _make_segments(10, 50)

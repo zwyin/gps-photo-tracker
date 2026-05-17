@@ -171,10 +171,10 @@ class GPSMatcher:
             )
 
         # Step 4c: isolated
-        if not self.config.match_tail:
+        if not self.config.match_isolated:
             return MatchResult(
                 photo=photo, success=False,
-                reject_reason=RejectReason.TAIL_ISOLATED,
+                reject_reason=RejectReason.ISOLATED_DISABLED,
             )
 
         # Find nearest point
@@ -200,9 +200,25 @@ class GPSMatcher:
         )
 
     def _find_segment(self, ts: float, segments: list[GPXSegment]) -> GPXSegment | None:
+        # Level 1: exact match (photo time within segment range)
         for seg in segments:
             if seg.start <= ts <= seg.end:
                 return seg
+        # Level 2: tolerance match (photo time within isolated_window of nearest segment)
+        best_seg = None
+        best_diff = float("inf")
+        for seg in segments:
+            if ts < seg.start:
+                diff = seg.start - ts
+            elif ts > seg.end:
+                diff = ts - seg.end
+            else:
+                continue
+            if diff < best_diff:
+                best_diff = diff
+                best_seg = seg
+        if best_seg is not None and best_diff <= self.config.isolated_window:
+            return best_seg
         return None
 
     def _find_prev_point(self, ts: float, segment: GPXSegment) -> TrackPoint | None:

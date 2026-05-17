@@ -31,7 +31,7 @@ class ParamTuner:
             middle_time_window=middle,
             context_window=context,
             max_gps_distance=distance,
-            match_tail=True,
+            match_isolated=True,
             time_offset=0,
         )
 

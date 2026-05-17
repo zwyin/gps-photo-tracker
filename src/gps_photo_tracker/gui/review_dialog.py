@@ -20,6 +20,7 @@ _REASON_LABELS = {
     "time_diff": "时间差过大",
     "gps_distance": "距离过大",
     "tail_isolated": "孤立照片",
+    "isolated_disabled": "孤立照片",
     "no_track_points": "无轨迹点",
 }
 

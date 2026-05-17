@@ -27,7 +27,7 @@ SETTINGS_KEYS = {
     "middle_time_window": 3600,
     "context_window": 300,
     "max_gps_distance": 200,
-    "match_tail": True,
+    "match_isolated": True,
     "time_offset": 0,
     "overwrite_gps": False,
     "keep_structure": True,
@@ -129,9 +129,9 @@ class SettingsDialog(QDialog):
         self._offset = self._spin("时间偏移:", -3600, 3600, "time_offset", " 秒")
         match_layout.addRow(self._offset[0], self._offset[1])
 
-        self._match_tail = QCheckBox("匹配首尾孤立照片")
-        self._match_tail.setChecked(self._settings.get("match_tail", True))
-        match_layout.addRow(self._match_tail)
+        self._match_isolated = QCheckBox("匹配孤立照片（头部/尾部/中间）")
+        self._match_isolated.setChecked(self._settings.get("match_isolated", self._settings.get("match_tail", True)))
+        match_layout.addRow(self._match_isolated)
 
         layout.addWidget(match_group)
 
@@ -275,7 +275,7 @@ class SettingsDialog(QDialog):
             "context_window": self._context[1].value(),
             "max_gps_distance": self._distance[1].value(),
             "time_offset": self._offset[1].value(),
-            "match_tail": self._match_tail.isChecked(),
+            "match_isolated": self._match_isolated.isChecked(),
             "overwrite_gps": self._overwrite.isChecked(),
             "keep_structure": self._keep_structure.isChecked(),
             "resume": self._resume.isChecked(),
@@ -298,8 +298,10 @@ class SettingsDialog(QDialog):
             self._distance[1].setValue(int(values["max_gps_distance"]))
         if "time_offset" in values:
             self._offset[1].setValue(int(values["time_offset"]))
-        if "match_tail" in values:
-            self._match_tail.setChecked(bool(values["match_tail"]))
+        if "match_isolated" in values:
+            self._match_isolated.setChecked(bool(values["match_isolated"]))
+        elif "match_tail" in values:
+            self._match_isolated.setChecked(bool(values["match_tail"]))
         if "overwrite_gps" in values:
             self._overwrite.setChecked(bool(values["overwrite_gps"]))
         if "keep_structure" in values:

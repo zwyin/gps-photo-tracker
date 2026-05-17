@@ -62,7 +62,7 @@ class ReportBuilder:
 <tr><td>Middle Time Window</td><td>{config.middle_time_window}s</td></tr>
 <tr><td>Context Window</td><td>{config.context_window}s</td></tr>
 <tr><td>Max GPS Distance</td><td>{config.max_gps_distance}m</td></tr>
-<tr><td>Match Tail</td><td>{config.match_tail}</td></tr>
+<tr><td>Match Isolated</td><td>{config.match_isolated}</td></tr>
 <tr><td>Time Offset</td><td>{config.time_offset}s</td></tr>
 <tr><td>Photos</td><td>{result.total}</td></tr>
 <tr><td>Segments</td><td>{len(segments)}</td></tr>

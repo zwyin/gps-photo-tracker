@@ -70,7 +70,8 @@ class ProgressPhase(Enum):
 class RejectReason:
     NO_GPS_COVERAGE = "no_gps_coverage"
     GPS_DISTANCE = "gps_distance"
-    TAIL_ISOLATED = "tail_isolated"
+    TAIL_ISOLATED = "tail_isolated"  # legacy alias
+    ISOLATED_DISABLED = "isolated_disabled"
     TIME_DIFF = "time_diff"
     NO_TRACK_POINTS = "no_track_points"
 
@@ -171,7 +172,8 @@ class MatcherConfig:
     middle_time_window: int = 3600  # seconds
     context_window: int = 300  # seconds
     max_gps_distance: int = 200  # meters
-    match_tail: bool = True
+    match_tail: bool = True  # legacy alias
+    match_isolated: bool = True
     time_offset: int = 0  # seconds, positive = photo time + offset
 
 

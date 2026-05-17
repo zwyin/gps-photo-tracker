@@ -81,11 +81,11 @@ def build_params_group() -> tuple[QGroupBox, dict]:
     widgets["offset_spin"] = spin5
 
     # Checkboxes
-    match_tail_cb = QCheckBox("匹配首尾孤立照片")
-    match_tail_cb.setChecked(True)
-    match_tail_cb.setToolTip("允许匹配轨迹开头/结尾处的孤立照片。\n开启后，轨迹边缘的照片会使用最近的轨迹点。")
-    layout.addWidget(match_tail_cb)
-    widgets["match_tail_cb"] = match_tail_cb
+    match_isolated_cb = QCheckBox("匹配孤立照片（头部/尾部/中间）")
+    match_isolated_cb.setChecked(True)
+    match_isolated_cb.setToolTip("允许匹配轨迹开头/结尾/中间的孤立照片。\n开启后，这些照片会使用最近的轨迹点。")
+    layout.addWidget(match_isolated_cb)
+    widgets["match_isolated_cb"] = match_isolated_cb
 
     overwrite_gps_cb = QCheckBox("覆盖已有 GPS")
     overwrite_gps_cb.setChecked(False)

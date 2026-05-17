@@ -49,6 +49,15 @@ from gps_photo_tracker.gui.worker import Worker
 
 
 class MainWindow(QMainWindow):
+    _METHOD_COLORS = {
+        "就近": QBrush(QColor(220, 245, 220)),
+        "插值": QBrush(QColor(220, 235, 255)),
+        "跟随上一个": QBrush(QColor(255, 220, 220)),
+        "跟随下一个": QBrush(QColor(255, 245, 200)),
+        "手动GPS": QBrush(QColor(230, 220, 255)),
+        "手动坐标": QBrush(QColor(230, 220, 255)),
+    }
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("GPS Photo Tracker")
@@ -139,7 +148,7 @@ class MainWindow(QMainWindow):
         self._context_spin = params_w["context_spin"]
         self._distance_spin = params_w["distance_spin"]
         self._offset_spin = params_w["offset_spin"]
-        self._match_tail_cb = params_w["match_tail_cb"]
+        self._match_isolated_cb = params_w["match_isolated_cb"]
         self._overwrite_gps_cb = params_w["overwrite_gps_cb"]
         self._keep_struct_cb = params_w["keep_struct_cb"]
         self._auto_tune_btn = params_w["auto_tune_btn"]
@@ -391,7 +400,7 @@ class MainWindow(QMainWindow):
             middle_time_window=self._middle_spin.value(),
             context_window=self._context_spin.value(),
             max_gps_distance=self._distance_spin.value(),
-            match_tail=self._match_tail_cb.isChecked(),
+            match_isolated=self._match_isolated_cb.isChecked(),
             time_offset=self._offset_spin.value(),
         )
 
@@ -441,7 +450,7 @@ class MainWindow(QMainWindow):
         self._context_spin.setValue(config.context_window)
         self._distance_spin.setValue(config.max_gps_distance)
         self._offset_spin.setValue(config.time_offset)
-        self._match_tail_cb.setChecked(config.match_tail)
+        self._match_isolated_cb.setChecked(config.match_isolated)
         self.statusBar().showMessage("参数已根据数据自动推荐")
 
     # ── Processing ──────────────────────────────────────────
@@ -588,7 +597,10 @@ class MainWindow(QMainWindow):
 
         method = result_dict.get("method", "")
         method_text = {"interpolated": "插值", "nearest": "就近"}.get(method, "")
-        self._results_table.setItem(row, 5, QTableWidgetItem(method_text))
+        method_item = QTableWidgetItem(method_text)
+        if method_text in self._METHOD_COLORS:
+            method_item.setBackground(self._METHOD_COLORS[method_text])
+        self._results_table.setItem(row, 5, method_item)
 
         success = result_dict.get("success", False)
         if success:
@@ -596,7 +608,8 @@ class MainWindow(QMainWindow):
         else:
             reason = result_dict.get("reject_reason", "失败")
             status = {"no_gps_coverage": "无GPS覆盖", "time_diff": "时差过大",
-                      "gps_distance": "距离过大", "tail_isolated": "孤立",
+                      "gps_distance": "距离过大", "isolated_disabled": "孤立(已禁用)",
+                      "tail_isolated": "孤立(已禁用)",
                       "no_track_points": "无轨迹点"}.get(reason, reason)
         self._results_table.setItem(row, 6, QTableWidgetItem(status))
 
@@ -818,7 +831,10 @@ class MainWindow(QMainWindow):
                 self._results_table.item(visual_row, 4).setBackground(review_brush)
 
             # Update method column
-            self._results_table.setItem(visual_row, 5, QTableWidgetItem(method_label))
+            method_item = QTableWidgetItem(method_label)
+            if method_label in self._METHOD_COLORS:
+                method_item.setBackground(self._METHOD_COLORS[method_label])
+            self._results_table.setItem(visual_row, 5, method_item)
 
             # Update status column
             self._results_table.setItem(visual_row, 6, QTableWidgetItem("已审核"))
@@ -1010,7 +1026,10 @@ class MainWindow(QMainWindow):
             self._results_table.setSortingEnabled(False)
 
         self._results_table.setItem(visual_row, 4, QTableWidgetItem(found_gps_text))
-        self._results_table.setItem(visual_row, 5, QTableWidgetItem(method_label))
+        method_item = QTableWidgetItem(method_label)
+        if method_label in self._METHOD_COLORS:
+            method_item.setBackground(self._METHOD_COLORS[method_label])
+        self._results_table.setItem(visual_row, 5, method_item)
         self._results_table.setItem(visual_row, 6, QTableWidgetItem("已跟随"))
 
         # Color-code GPS(后) column
@@ -1068,7 +1087,7 @@ class MainWindow(QMainWindow):
         self._context_spin.setValue(int(s.get("context_window", 300)))
         self._distance_spin.setValue(int(s.get("max_gps_distance", 200)))
         self._offset_spin.setValue(int(s.get("time_offset", 0)))
-        self._match_tail_cb.setChecked(bool(s.get("match_tail", True)))
+        self._match_isolated_cb.setChecked(bool(s.get("match_isolated", s.get("match_tail", True))))
         self._overwrite_gps_cb.setChecked(bool(s.get("overwrite_gps", False)))
         self._workers_spin.setValue(int(s.get("workers", 1)))
         self._keep_struct_cb.setChecked(bool(s.get("keep_structure", True)))

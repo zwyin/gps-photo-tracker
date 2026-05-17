@@ -48,7 +48,7 @@ class TestMainWindow:
         assert main_window._middle_spin.value() == 3600
         assert main_window._context_spin.value() == 300
         assert main_window._distance_spin.value() == 200
-        assert main_window._match_tail_cb.isChecked()
+        assert main_window._match_isolated_cb.isChecked()
 
     def test_default_mode_preview(self, main_window):
         assert main_window._preview_rb.isChecked()
@@ -191,7 +191,7 @@ class TestSettingsDialog:
         from gps_photo_tracker.gui.settings_dialog import SettingsDialog
         dialog = SettingsDialog()
         assert dialog._isolated is not None
-        assert dialog._match_tail is not None
+        assert dialog._match_isolated is not None
         assert dialog._overwrite is not None
 
     def test_settings_dialog_has_mode_radio_buttons(self, qapp):

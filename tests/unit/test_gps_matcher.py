@@ -117,8 +117,8 @@ class TestNearestMatch:
         assert mid.success
         assert mid.method == "nearest"
 
-    def test_isolated_match_tail_true(self):
-        matcher = GPSMatcher(MatcherConfig(match_tail=True, isolated_window=300))
+    def test_isolated_match_enabled(self):
+        matcher = GPSMatcher(MatcherConfig(match_isolated=True, isolated_window=300))
         seg = make_segment([make_point(25.0, 100.0, utc(8, 0)), make_point(25.0, 100.0, utc(8, 5))])
         photos = [make_photo("iso.jpg", utc(8, 1))]  # 60s away
         results = matcher.match(photos, [seg])
@@ -126,12 +126,80 @@ class TestNearestMatch:
         assert results[0].method == "nearest"
 
     def test_isolated_reject_tail_false(self):
-        matcher = GPSMatcher(MatcherConfig(match_tail=False))
+        matcher = GPSMatcher(MatcherConfig(match_isolated=False))
         seg = make_segment([make_point(25.0, 100.0, utc(8, 0)), make_point(25.0, 100.0, utc(8, 5))])
         photos = [make_photo("iso.jpg", utc(8, 1))]
         results = matcher.match(photos, [seg])
         assert not results[0].success
-        assert results[0].reject_reason == RejectReason.TAIL_ISOLATED
+        assert results[0].reject_reason == RejectReason.ISOLATED_DISABLED
+
+    def test_head_isolated_within_tolerance(self):
+        """Photo before segment start but within isolated_window → matched as isolated."""
+        matcher = GPSMatcher(MatcherConfig(match_isolated=True, isolated_window=300, context_window=60))
+        seg = make_segment([make_point(25.0, 100.0, utc(8, 5)), make_point(25.0, 100.0, utc(8, 10))])
+        photos = [make_photo("head.jpg", utc(8, 3))]  # 120s before segment start
+        results = matcher.match(photos, [seg])
+        assert results[0].success
+        assert results[0].method == "nearest"
+
+    def test_tail_isolated_within_tolerance(self):
+        """Photo after segment end but within isolated_window → matched as isolated."""
+        matcher = GPSMatcher(MatcherConfig(match_isolated=True, isolated_window=300, context_window=60))
+        seg = make_segment([make_point(25.0, 100.0, utc(8, 0)), make_point(25.0, 100.0, utc(8, 5))])
+        photos = [make_photo("tail.jpg", utc(8, 7))]  # 120s after segment end
+        results = matcher.match(photos, [seg])
+        assert results[0].success
+        assert results[0].method == "nearest"
+
+    def test_head_isolated_beyond_tolerance(self):
+        """Photo before segment start and beyond isolated_window → NO_GPS_COVERAGE."""
+        matcher = GPSMatcher(MatcherConfig(match_isolated=True, isolated_window=300))
+        seg = make_segment([make_point(25.0, 100.0, utc(8, 5)), make_point(25.0, 100.0, utc(8, 10))])
+        photos = [make_photo("far_head.jpg", utc(7, 59))]  # 361s before, beyond tolerance
+        results = matcher.match(photos, [seg])
+        assert not results[0].success
+        assert results[0].reject_reason == RejectReason.NO_GPS_COVERAGE
+
+    def test_middle_isolated_still_works(self):
+        """Photo within segment range but neighbors far apart → isolated match."""
+        matcher = GPSMatcher(MatcherConfig(match_isolated=True, isolated_window=300, context_window=60))
+        seg = make_segment([make_point(25.0, 100.0, utc(8, 0)), make_point(25.0, 100.0, utc(8, 5))])
+        # Single photo in segment → no neighbors → isolated
+        photos = [make_photo("middle_iso.jpg", utc(8, 2))]
+        results = matcher.match(photos, [seg])
+        assert results[0].success
+        assert results[0].method == "nearest"
+
+    def test_head_tail_middle_isolated_consistency(self):
+        """All three isolated types should produce the same result when match_isolated=True."""
+        matcher = GPSMatcher(MatcherConfig(match_isolated=True, isolated_window=300, context_window=60))
+        seg = make_segment([make_point(25.0, 100.0, utc(8, 5)), make_point(25.0, 100.0, utc(8, 10))])
+        # Head: 60s before start, middle: at 8:07, tail: 60s after end
+        photos = [
+            make_photo("head.jpg", utc(8, 4)),    # 60s before seg.start
+            make_photo("middle.jpg", utc(8, 7)),   # within segment
+            make_photo("tail.jpg", utc(8, 11)),    # 60s after seg.end
+        ]
+        results = matcher.match(photos, [seg])
+        for r in results:
+            assert r.success, f"{r.photo.filename} should succeed"
+            assert r.method == "nearest"
+
+    def test_all_isolated_rejected_when_disabled(self):
+        """All three isolated types rejected when match_isolated=False."""
+        matcher = GPSMatcher(MatcherConfig(match_isolated=False, isolated_window=300, context_window=60))
+        seg = make_segment([make_point(25.0, 100.0, utc(8, 5)), make_point(25.0, 100.0, utc(8, 10))])
+        photos = [
+            make_photo("head.jpg", utc(8, 4)),
+            make_photo("middle.jpg", utc(8, 7)),
+            make_photo("tail.jpg", utc(8, 11)),
+        ]
+        results = matcher.match(photos, [seg])
+        for r in results:
+            assert not r.success, f"{r.photo.filename} should fail"
+            # Head/tail fail at _find_segment → NO_GPS_COVERAGE
+            # Middle fails at isolated check → ISOLATED_DISABLED
+            assert r.reject_reason in (RejectReason.NO_GPS_COVERAGE, RejectReason.ISOLATED_DISABLED)
 
 
 # ── Rejection tests ────────────────────────────────────────
@@ -362,7 +430,7 @@ class TestBoundaryConditions:
         results = default_matcher.match(photos, [seg])
         # first.jpg: prev=None → isolated (context_window check fails for prev)
         first = results[0]
-        assert first.success  # match_tail=True by default
+        assert first.success  # match_isolated=True by default
         assert first.method == "nearest"  # isolated → nearest
 
     def test_last_photo_next_none(self, default_matcher):

@@ -106,7 +106,7 @@ class TestLoadProfile:
         s.setValue("profile/hiking", {
             "isolated_window": 900,
             "max_gps_distance": 500,
-            "match_tail": False,
+            "match_isolated": False,
             "mode": 2,
             "workers": 4,
             "log_dir": "/tmp/logs",
@@ -117,7 +117,7 @@ class TestLoadProfile:
         dialog._load_profile()
         assert dialog._isolated[1].value() == 900
         assert dialog._distance[1].value() == 500
-        assert dialog._match_tail.isChecked() is False
+        assert dialog._match_isolated.isChecked() is False
         assert dialog._mode_overwrite_rb.isChecked() is True
         assert dialog._workers_spin.value() == 4
         assert dialog._log_dir_edit.text() == "/tmp/logs"
@@ -168,10 +168,10 @@ class TestResetDefaults:
 
     def test_reset_restores_defaults(self, dialog):
         dialog._isolated[1].setValue(999)
-        dialog._match_tail.setChecked(False)
+        dialog._match_isolated.setChecked(False)
         dialog._reset_defaults()
         assert dialog._isolated[1].value() == SETTINGS_KEYS["isolated_window"]
-        assert dialog._match_tail.isChecked() == SETTINGS_KEYS["match_tail"]
+        assert dialog._match_isolated.isChecked() == SETTINGS_KEYS["match_isolated"]
         assert dialog._log_dir_edit.text() == ""
         assert dialog._retention_spin.value() == SETTINGS_KEYS["log_retention_days"]
 
@@ -186,7 +186,7 @@ class TestFullRoundTrip:
             "context_window": 600,
             "max_gps_distance": 800,
             "time_offset": 300,
-            "match_tail": False,
+            "match_isolated": False,
             "overwrite_gps": True,
             "keep_structure": False,
             "resume": True,
@@ -211,7 +211,7 @@ class TestFullRoundTrip:
         assert dialog._context[1].value() == 600
         assert dialog._distance[1].value() == 800
         assert dialog._offset[1].value() == 300
-        assert dialog._match_tail.isChecked() is False
+        assert dialog._match_isolated.isChecked() is False
         assert dialog._overwrite.isChecked() is True
         assert dialog._keep_structure.isChecked() is False
         assert dialog._resume.isChecked() is True
