@@ -32,6 +32,10 @@ def build_result_panel() -> tuple[QWidget, QLabel, QComboBox, QTableWidget]:
     result_filter.addItems(["全部", "成功", "失败", "跳过"])
     filter_row.addWidget(result_filter)
     filter_row.addStretch()
+
+    shortcut_hint = QLabel("← → 快速跟随相邻GPS")
+    shortcut_hint.setStyleSheet("color: #888; font-size: 11px;")
+    filter_row.addWidget(shortcut_hint)
     layout.addLayout(filter_row)
 
     # Results table

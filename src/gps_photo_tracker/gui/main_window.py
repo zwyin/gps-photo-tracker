@@ -831,7 +831,9 @@ class MainWindow(QMainWindow):
             f"总数: {total} | 成功: {matched} | 跳过: {skipped} | 失败: {failed} | 成功率: {rate:.1%}"
         )
         self._progress_label.setText("完成")
-        self.statusBar().showMessage(f"处理完成: {matched}/{total} 成功")
+        self.statusBar().showMessage(
+            f"处理完成: {matched}/{total} 成功 | 选中行后按 ← → 快速跟随相邻GPS"
+        )
 
         QMessageBox.information(
             self, "处理完成",
