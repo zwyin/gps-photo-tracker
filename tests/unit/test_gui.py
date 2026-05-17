@@ -1363,3 +1363,72 @@ class TestWorkerRun:
 
         # Should not emit error, should not crash
         assert r["done"] is None or "error" not in (r["done"] or {})
+
+
+# ── Export tests ──────────────────────────────────────────────
+
+class TestExportResults:
+
+    def test_export_button_exists(self, main_window):
+        assert main_window._export_btn is not None
+        assert not main_window._export_btn.isEnabled()
+
+    def test_export_button_initially_disabled(self, main_window):
+        assert not main_window._export_btn.isEnabled()
+
+    def test_collect_visible_table_data(self, main_window):
+        table = main_window._results_table
+        table.setRowCount(2)
+        for col in range(table.columnCount()):
+            table.setItem(0, col, QTableWidgetItem(f"r0c{col}"))
+            table.setItem(1, col, QTableWidgetItem(f"r1c{col}"))
+
+        headers, rows = main_window._collect_visible_table_data()
+        assert len(headers) == 8
+        assert headers[0] == "文件名"
+        assert len(rows) == 2
+        assert rows[0][0] == "r0c0"
+
+    def test_collect_skips_hidden_rows(self, main_window):
+        table = main_window._results_table
+        table.setRowCount(3)
+        for col in range(table.columnCount()):
+            table.setItem(0, col, QTableWidgetItem(f"a{col}"))
+            table.setItem(1, col, QTableWidgetItem(f"b{col}"))
+            table.setItem(2, col, QTableWidgetItem(f"c{col}"))
+        table.setRowHidden(1, True)
+
+        _, rows = main_window._collect_visible_table_data()
+        assert len(rows) == 2
+        assert rows[0][0] == "a0"
+        assert rows[1][0] == "c0"
+
+    def test_write_csv(self, main_window, tmp_path):
+        headers = ["文件名", "状态"]
+        rows = [["photo.jpg", "成功"]]
+        path = str(tmp_path / "out.csv")
+        main_window._write_csv(path, headers, rows)
+
+        content = Path(path).read_text(encoding="utf-8-sig")
+        assert "文件名" in content
+        assert "photo.jpg" in content
+
+    def test_write_markdown(self, main_window, tmp_path):
+        headers = ["文件名", "状态"]
+        rows = [["photo.jpg", "成功"]]
+        path = str(tmp_path / "out.md")
+        main_window._write_markdown(path, headers, rows)
+
+        content = Path(path).read_text(encoding="utf-8")
+        assert "| 文件名 | 状态 |" in content
+        assert "| photo.jpg | 成功 |" in content
+        assert "| --- |" in content
+
+    def test_write_markdown_escapes_pipe(self, main_window, tmp_path):
+        headers = ["文件名", "备注"]
+        rows = [["photo.jpg", "GPS(前) | GPS(后)"]]
+        path = str(tmp_path / "out.md")
+        main_window._write_markdown(path, headers, rows)
+
+        content = Path(path).read_text(encoding="utf-8")
+        assert r"GPS(前) \| GPS(后)" in content

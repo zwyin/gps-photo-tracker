@@ -213,12 +213,12 @@ class TestRejection:
         assert not results[0].success
         assert results[0].reject_reason == RejectReason.NO_GPS_COVERAGE
 
-    def test_gps_distance_exceeded(self):
-        """prev and next GPS points > 200m apart → GPS_DISTANCE."""
+    def test_gps_distance_degrades_to_nearest(self):
+        """prev and next GPS points > max_gps_distance → degrade to nearest-point."""
         matcher = GPSMatcher(MatcherConfig(max_gps_distance=200))
         points = [
             make_point(25.0, 100.0, utc(8, 0)),
-            make_point(25.0, 100.0, utc(8, 5)),  # same location, same segment
+            make_point(25.0, 100.0, utc(8, 5)),  # same location as first
             make_point(26.0, 101.0, utc(8, 10)),  # ~157km away!
         ]
         seg = make_segment(points)
@@ -228,10 +228,12 @@ class TestRejection:
             make_photo("p2.jpg", utc(8, 9)),
         ]
         results = matcher.match(photos, [seg])
-        # mid at 08:05: prev=08:05 point, next=08:10 point → huge distance
+        # mid at 08:05: prev=08:00 (300s), next=08:10 (300s) → picks prev (<=)
+        # distance too large → degrade to nearest
         mid = results[1]
-        assert not mid.success
-        assert mid.reject_reason == RejectReason.GPS_DISTANCE
+        assert mid.success
+        assert mid.method == "nearest"
+        assert mid.time_diff == 300
 
     def test_time_diff_exceeded_middle(self):
         matcher = GPSMatcher(MatcherConfig(middle_time_window=60))
@@ -254,6 +256,45 @@ class TestRejection:
         results = matcher.match(photos, [seg])
         assert not results[0].success
         assert results[0].reject_reason == RejectReason.TIME_DIFF
+
+    def test_middle_degradation_nearest_too_far(self):
+        """Distance too large + nearest point also beyond middle_time_window → TIME_DIFF."""
+        matcher = GPSMatcher(MatcherConfig(max_gps_distance=200, middle_time_window=60))
+        points = [
+            make_point(25.0, 100.0, utc(8, 0)),
+            make_point(26.0, 101.0, utc(8, 10)),  # ~157km, 600s away
+        ]
+        seg = make_segment(points)
+        photos = [
+            make_photo("p0.jpg", utc(8, 1)),
+            make_photo("mid.jpg", utc(8, 5)),  # prev_td=300s, next_td=300s, both > 60s
+            make_photo("p2.jpg", utc(8, 9)),
+        ]
+        results = matcher.match(photos, [seg])
+        mid = results[1]
+        assert not mid.success
+        assert mid.reject_reason == RejectReason.TIME_DIFF
+
+    def test_middle_degradation_picks_closer_point(self):
+        """Distance too large → picks the closer GPS point by time_diff."""
+        matcher = GPSMatcher(MatcherConfig(max_gps_distance=200, middle_time_window=3600))
+        points = [
+            make_point(25.0, 100.0, utc(8, 0)),
+            make_point(26.0, 101.0, utc(8, 10)),
+        ]
+        seg = make_segment(points)
+        photos = [
+            make_photo("p0.jpg", utc(8, 1)),
+            make_photo("mid.jpg", utc(8, 2)),  # prev_td=120s, next_td=480s → picks prev
+            make_photo("p2.jpg", utc(8, 3)),
+        ]
+        results = matcher.match(photos, [seg])
+        mid = results[1]
+        assert mid.success
+        assert mid.method == "nearest"
+        assert mid.time_diff == 120
+        assert mid.gps.latitude == 25.0
+        assert mid.gps.longitude == 100.0
 
     def test_no_track_points(self, default_matcher):
         seg = GPXSegment(filename="empty.gpx", start=utc(8, 0), end=utc(8, 10), points=[])
@@ -370,8 +411,14 @@ class TestParameterEffects:
         m_wide = GPSMatcher(MatcherConfig(max_gps_distance=2000))
         m_narrow = GPSMatcher(MatcherConfig(max_gps_distance=200))
 
-        assert m_wide.match(photos, [seg])[1].success
-        assert not m_narrow.match(photos, [seg])[1].success
+        wide_result = m_wide.match(photos, [seg])[1]
+        narrow_result = m_narrow.match(photos, [seg])[1]
+        # wide: distance OK → interpolated
+        assert wide_result.success
+        assert wide_result.method == "interpolated"
+        # narrow: distance too large → degrade to nearest (300s < middle_time_window)
+        assert narrow_result.success
+        assert narrow_result.method == "nearest"
 
 
 # ── Altitude edge cases ────────────────────────────────────

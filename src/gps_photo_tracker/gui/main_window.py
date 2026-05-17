@@ -251,12 +251,13 @@ class MainWindow(QMainWindow):
 
     def _build_right_panel(self) -> QWidget:
         # Result table (from result_table module)
-        result_widget, self._pre_stats_label, self._stats_label, self._result_filter, self._results_table, self._review_btn = build_result_panel()
+        result_widget, self._pre_stats_label, self._stats_label, self._result_filter, self._results_table, self._review_btn, self._export_btn = build_result_panel()
         self._result_filter.currentIndexChanged.connect(self._apply_result_filter)
         self._results_table.doubleClicked.connect(self._on_table_double_click)
         self._results_table.selectionModel().selectionChanged.connect(self._on_selection_changed)
         self._results_table.installEventFilter(self)  # BUG-1: capture arrow keys from table
         self._review_btn.clicked.connect(self._reopen_review_dialog)
+        self._export_btn.clicked.connect(self._on_export_results)
 
         layout = result_widget.layout()
 
@@ -476,6 +477,7 @@ class MainWindow(QMainWindow):
         self._results_table.setRowCount(0)
         self._result_details.clear()
         self._original_details.clear()
+        self._export_btn.setEnabled(False)
 
         config = self._get_matcher_config()
         options = self._get_process_options()
@@ -1101,11 +1103,71 @@ class MainWindow(QMainWindow):
         self._step3_copy_btn.setEnabled(True)
         self._step3_overwrite_btn.setEnabled(True)
         self._review_btn.setEnabled(has_failures)
+        self._export_btn.setEnabled(total > 0)
 
         QMessageBox.information(
             self, "处理完成",
             f"处理完成！\n\n总数: {total}\n成功: {matched}\n失败: {failed}\n跳过: {skipped}\n成功率: {rate:.1%}"
         )
+
+    def _on_export_results(self):
+        headers, rows = self._collect_visible_table_data()
+        if not rows:
+            QMessageBox.information(self, "导出", "没有可导出的数据")
+            return
+
+        path, filter_idx = QFileDialog.getSaveFileName(
+            self, "导出结果",
+            "gps_results.csv",
+            "CSV (*.csv);;Markdown (*.md)",
+        )
+        if not path:
+            return
+
+        try:
+            if filter_idx == 1 or path.endswith(".md"):
+                self._write_markdown(path, headers, rows)
+            else:
+                self._write_csv(path, headers, rows)
+            self.statusBar().showMessage(f"已导出到 {path}")
+        except Exception as e:
+            logger.error("导出失败: %s", e)
+            QMessageBox.warning(self, "导出失败", str(e))
+
+    def _collect_visible_table_data(self) -> tuple[list[str], list[list[str]]]:
+        headers = []
+        table = self._results_table
+        for col in range(table.columnCount()):
+            headers.append(table.horizontalHeaderItem(col).text())
+
+        rows = []
+        for row in range(table.rowCount()):
+            if table.isRowHidden(row):
+                continue
+            cells = []
+            for col in range(table.columnCount()):
+                item = table.item(row, col)
+                cells.append(item.text() if item else "")
+            rows.append(cells)
+        return headers, rows
+
+    def _write_csv(self, path: str, headers: list[str], rows: list[list[str]]):
+        import csv
+        with open(path, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            writer.writerows(rows)
+
+    def _write_markdown(self, path: str, headers: list[str], rows: list[list[str]]):
+        def esc(s: str) -> str:
+            return s.replace("|", "\\|")
+        lines = []
+        lines.append("| " + " | ".join(esc(h) for h in headers) + " |")
+        lines.append("| " + " | ".join("---" for _ in headers) + " |")
+        for row in rows:
+            lines.append("| " + " | ".join(esc(c) for c in row) + " |")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
 
     def _apply_result_filter(self):
         filter_idx = self._result_filter.currentIndex()

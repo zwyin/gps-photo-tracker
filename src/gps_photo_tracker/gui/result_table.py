@@ -13,10 +13,10 @@ from PySide6.QtWidgets import (
 )
 
 
-def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidget, QPushButton]:
+def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidget, QPushButton, QPushButton]:
     """Build right-side result panel.
 
-    Returns (widget, pre_stats_label, stats_label, result_filter, results_table, review_btn).
+    Returns (widget, pre_stats_label, stats_label, result_filter, results_table, review_btn, export_btn).
     """
     widget = QWidget()
     layout = QVBoxLayout(widget)
@@ -47,6 +47,11 @@ def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidg
     review_btn.setFixedWidth(60)
     review_btn.setEnabled(False)
     filter_row.addWidget(review_btn)
+
+    export_btn = QPushButton("导出")
+    export_btn.setFixedWidth(60)
+    export_btn.setEnabled(False)
+    filter_row.addWidget(export_btn)
     layout.addLayout(filter_row)
 
     # Results table
@@ -67,4 +72,4 @@ def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidg
     results_table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
     layout.addWidget(results_table, stretch=1)
 
-    return widget, pre_stats_label, stats_label, result_filter, results_table, review_btn
+    return widget, pre_stats_label, stats_label, result_filter, results_table, review_btn, export_btn
