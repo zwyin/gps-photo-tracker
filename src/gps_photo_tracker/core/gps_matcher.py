@@ -51,27 +51,26 @@ class GPSMatcher:
         return results
 
     def _second_pass_neighbor_follow(self, results: list[MatchResult]):
-        """Second pass: failed photos try to follow nearest successful neighbor."""
-        # Build time-ordered list of successful results with GPS
-        succeeded = [(i, r) for i, r in enumerate(results) if r.success and r.gps and r.photo.timestamp]
+        """Second pass: failed photos try to follow nearest successful neighbor.
 
-        if not succeeded:
-            return
-
+        Scans results on each iteration so newly-rescued photos cascade
+        to their neighbors (fixes chain-breaking bug where pre-built list
+        missed photos rescued earlier in the same pass).
+        """
         for i, result in enumerate(results):
             if result.success or result.photo.timestamp is None:
                 continue
 
             target_ts = result.photo.timestamp
 
-            # Find nearest prev and next successful neighbor by time
+            # Scan results directly (includes photos rescued earlier in this loop)
             prev_neighbor = None
             next_neighbor = None
             prev_diff = float("inf")
             next_diff = float("inf")
 
-            for _, sr in succeeded:
-                if sr.photo.timestamp is None:
+            for sr in results:
+                if not sr.success or sr.gps is None or sr.photo.timestamp is None:
                     continue
                 diff = sr.photo.timestamp - target_ts
                 if diff < 0 and abs(diff) < prev_diff:

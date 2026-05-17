@@ -884,3 +884,44 @@ class TestRealDataRegression:
         # CRITICAL: GPS must come from NEXT (00984), not PREV (00973)
         assert abs(results[1].gps.latitude - 23.0873) < 0.0001, \
             "auto_follow_next should give next neighbor's GPS, not prev's"
+
+    def test_case_02622_cascade_chain(self):
+        """v0.16.0 chain bug: rescued photos must cascade to neighbors.
+
+        Real case from 02622-02641: 02606 (has GPS, skipped) was the only seed.
+        02608-02616 were within 300s of 02606 → rescued. But 02622 was 310s
+        from 02606 and only 26s from 02616 (just rescued). With pre-built list,
+        02622 couldn't see 02616 and failed. With dynamic scan, it cascades.
+
+        Setup: track point far away (no first-pass matches), seed with has_gps,
+        chain of photos each 180s apart.
+        """
+        matcher = GPSMatcher(MatcherConfig(isolated_window=300))
+        # Track point at 20:00 — too far from 21:xx photos for first pass
+        seg = make_segment([make_point(25.0, 100.0, utc(20, 0))])
+
+        photos = [
+            make_photo("seed.jpg", utc(21, 6, 0), has_gps=True,
+                       lat=25.0554, lon=102.7028),  # skipped → seed
+            make_photo("anchor.jpg", utc(21, 9, 0)),    # 180s from seed → auto_follow
+            make_photo("far.jpg", utc(21, 12, 0)),      # 180s from anchor → cascade
+            make_photo("beyond.jpg", utc(21, 18, 0)),   # 360s from far → FAIL
+        ]
+        results = matcher.match(photos, [seg])
+
+        # seed: skipped
+        assert results[0].success
+        assert results[0].method == "skipped"
+
+        # anchor: auto_follow from seed (180s)
+        assert results[1].success
+        assert results[1].method == "auto_follow_prev"
+        assert results[1].time_diff == 180
+
+        # far: must cascade from anchor (180s), NOT from seed (360s > 300s)
+        assert results[2].success
+        assert results[2].method == "auto_follow_prev"
+        assert results[2].time_diff == 180
+
+        # beyond: 360s from far → exceeds window
+        assert not results[3].success
