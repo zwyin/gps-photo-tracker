@@ -575,6 +575,7 @@ class GPSTaggingService:
         """Write GPS data to photo based on process mode. Returns destination path for COPY, None otherwise."""
         if options.mode == ProcessMode.COPY and options.output_dir:
             dst = self._copy_destination(result.photo.path, options, photo_dir)
+            dst.parent.mkdir(parents=True, exist_ok=True)
             EXIFWriter.write_gps(result.photo.path, dst, result.gps)
             return dst
         elif options.mode == ProcessMode.OVERWRITE:
@@ -586,7 +587,10 @@ class GPSTaggingService:
         if options.keep_structure and options.output_dir and photo_dir:
             try:
                 rel = src_path.relative_to(photo_dir)
+                # For flat photo directories (no subdirs), use photo_dir.name as wrapper
+                if rel.parent == Path("."):
+                    return options.output_dir / photo_dir.name / rel
                 return options.output_dir / rel
             except ValueError:
-                return options.output_dir / src_path.name
+                return options.output_dir / photo_dir.name / src_path.name
         return options.output_dir / src_path.name

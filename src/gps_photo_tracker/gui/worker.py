@@ -2,20 +2,16 @@
 
 import logging
 from pathlib import Path
-from dataclasses import asdict
 
 logger = logging.getLogger(__name__)
 
 from PySide6.QtCore import QThread, Signal
 
 from gps_photo_tracker.core.models import (
-    BatchResult,
-    MatcherConfig,
+    MatchResult,
     OperationCancelledError,
     ProcessMode,
     ProcessOptions,
-    ProgressPhase,
-    ReviewState,
 )
 from gps_photo_tracker.service.cancel_token import CancellationToken
 from gps_photo_tracker.service.tagging_service import GPSTaggingService
@@ -35,11 +31,11 @@ class Worker(QThread):
         self,
         gps_dir: Path,
         photo_dir: Path,
-        config: MatcherConfig,
+        config,
         options: ProcessOptions,
         log_dir: Path | None = None,
         excluded_filenames: set[str] | None = None,
-        review_decisions: dict | None = None,
+        pre_computed_results: list[MatchResult] | None = None,
     ):
         super().__init__()
         self._gps_dir = gps_dir
@@ -49,14 +45,18 @@ class Worker(QThread):
         self._log_dir = log_dir
         self._excluded_filenames = excluded_filenames or set()
         self._token = CancellationToken()
-        self._review_decisions = review_decisions or {}
+        self._pre_computed_results = pre_computed_results
 
     def cancel(self):
         self._token.cancel()
 
     def run(self):
-        import time as _time
         service = GPSTaggingService(log_dir=self._log_dir)
+
+        # Direct write path: skip scan+match, use pre-computed results
+        if self._pre_computed_results is not None:
+            self._run_direct_write(service)
+            return
 
         # Scan with progress
         def on_scan_progress(update):
@@ -117,7 +117,6 @@ class Worker(QThread):
             )
 
         def on_photo(result):
-            from datetime import datetime, timezone
             from gps_photo_tracker.gui.settings_dialog import format_timestamp
             capture_time = ""
             if result.photo.timestamp is not None:
@@ -173,37 +172,16 @@ class Worker(QThread):
             self.photo_signal.emit(detail)
 
         try:
-            if self._options.mode == ProcessMode.PREVIEW:
-                result = service.preview(
-                    segments, photos, self._config,
-                    on_progress=on_progress,
-                    on_photo_processed=on_photo,
-                    cancel=self._token,
-                )
-            elif self._review_decisions:
-                # COPY/OVERWRITE with stored review decisions:
-                # match → apply review → write
-                match_result = service.preview(
-                    segments, photos, self._config,
-                    on_progress=on_progress,
-                    on_photo_processed=on_photo,
-                    cancel=self._token,
-                )
-                result = self._apply_stored_review(
-                    service, match_result.results, segments, on_photo,
-                )
-            else:
-                result = service.process(
-                    segments, photos, self._config, self._options,
-                    photo_dir=self._photo_dir,
-                    on_progress=on_progress,
-                    on_photo_processed=on_photo,
-                    cancel=self._token,
-                )
+            result = service.preview(
+                segments, photos, self._config,
+                on_progress=on_progress,
+                on_photo_processed=on_photo,
+                cancel=self._token,
+            )
 
-            # Check for failures needing review (PREVIEW mode only)
+            # Check for failures needing review
             failed_results = [r for r in result.results if not r.success]
-            if failed_results and self._options.mode == ProcessMode.PREVIEW:
+            if failed_results:
                 review_state = service.prepare_review(result.results, segments)
                 self.review_ready_signal.emit({
                     "failed_results": [
@@ -246,7 +224,6 @@ class Worker(QThread):
                     "matched": result.matched,
                     "failed": result.failed,
                 })
-                # Don't emit done_signal — MainWindow handles it after review
                 return
 
             self.done_signal.emit({
@@ -266,46 +243,60 @@ class Worker(QThread):
                 "skipped": 0, "overwritten": 0, "success_rate": 0.0,
             })
 
-    def _apply_stored_review(self, service, results, segments, on_photo):
-        """Apply stored review decisions then run write phase."""
-        from gps_photo_tracker.core.models import (
-            GPSInfo, ReviewAction, ReviewDecision, ReviewState, TrackPoint,
-        )
-        decisions = {}
-        for path_str, dec_data in self._review_decisions.items():
-            action = ReviewAction(dec_data["action"])
-            decision = ReviewDecision(photo_path=path_str, action=action)
-            if action == ReviewAction.MANUAL_GPS and dec_data.get("point"):
-                p = dec_data["point"]
-                decision.selected_point = TrackPoint(
-                    timestamp=p["timestamp"],
-                    latitude=p["latitude"],
-                    longitude=p["longitude"],
-                    altitude=p.get("altitude"),
-                )
-            elif action == ReviewAction.MANUAL_COORD:
-                decision.manual_lat = dec_data.get("lat")
-                decision.manual_lon = dec_data.get("lon")
-            decisions[path_str] = decision
-
-        state = ReviewState(
-            failed_results=[r for r in results if not r.success],
-            decisions=decisions,
-            gps_segments=segments,
-            all_results=results,
-        )
-        modified = service.apply_review(results, state)
-
-        def on_write_progress(update):
+    def _run_direct_write(self, service):
+        """Write pre-computed results directly (WYSIWYG execution)."""
+        def on_progress(update):
             self.progress_signal.emit(
                 update.phase.value, update.current, update.total,
                 update.current_file, update.elapsed_seconds,
             )
 
-        return service.write_phase(
-            modified, self._options,
-            photo_dir=self._photo_dir,
-            on_progress=on_write_progress,
-            on_photo_processed=on_photo,
-            cancel=self._token,
-        )
+        def on_photo(result):
+            from gps_photo_tracker.gui.settings_dialog import format_timestamp
+            capture_time = ""
+            if result.photo.timestamp is not None:
+                capture_time = format_timestamp(result.photo.timestamp)
+            gps_before = ""
+            if result.photo.existing_gps:
+                g = result.photo.existing_gps
+                gps_before = f"{g.latitude:.4f}, {g.longitude:.4f}"
+            detail = {
+                "filename": result.photo.filename,
+                "path": str(result.photo.path),
+                "success": result.success,
+                "method": result.method,
+                "reject_reason": result.reject_reason,
+                "has_gps": result.photo.has_gps,
+                "overwritten": result.photo.has_gps and result.success and result.gps is not None,
+                "latitude": result.gps.latitude if result.gps else None,
+                "longitude": result.gps.longitude if result.gps else None,
+                "altitude": result.gps.altitude if result.gps else None,
+                "capture_time": capture_time,
+                "gps_before": gps_before,
+            }
+            self.photo_signal.emit(detail)
+
+        try:
+            result = service.write_phase(
+                self._pre_computed_results, self._options,
+                photo_dir=self._photo_dir,
+                on_progress=on_progress,
+                on_photo_processed=on_photo,
+                cancel=self._token,
+            )
+            self.done_signal.emit({
+                "total": result.total,
+                "matched": result.matched,
+                "failed": result.failed,
+                "skipped": result.skipped,
+                "overwritten": result.overwritten,
+                "success_rate": result.success_rate,
+            })
+        except OperationCancelledError:
+            self.done_signal.emit({"cancelled": True})
+        except Exception as e:
+            self.done_signal.emit({
+                "error": str(e),
+                "total": 0, "matched": 0, "failed": 0,
+                "skipped": 0, "overwritten": 0, "success_rate": 0.0,
+            })

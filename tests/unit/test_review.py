@@ -234,8 +234,8 @@ class TestWorkerReviewSignal:
         assert len(signals[0]["failed_results"]) > 0
 
 
-class TestWorkerApplyStoredReview:
-    """Test Worker._apply_stored_review: COPY mode with stored review decisions."""
+class TestWorkerDirectWrite:
+    """Test Worker direct-write path with pre_computed_results (step ③)."""
 
     def _setup_files(self, tmp_path):
         import textwrap
@@ -258,24 +258,24 @@ class TestWorkerApplyStoredReview:
         img.save(tmp_path / "photo.jpg", "JPEG", exif=piexif.dump(exif))
         return tmp_path / "photo.jpg"
 
-    def test_copy_with_manual_coord_decision(self, qtbot, tmp_path):
+    def test_direct_write_with_gps(self, qtbot, tmp_path):
+        """Step ③: Write pre-computed GPS to file."""
         from gps_photo_tracker.gui.worker import Worker
+        from gps_photo_tracker.core.models import MatchResult, GPSInfo, PhotoInfo
         photo_path = self._setup_files(tmp_path)
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
 
-        review_decisions = {
-            str(photo_path): {
-                "action": "manual_coord",
-                "lat": 39.9,
-                "lon": 116.4,
-            }
-        }
-
-        options = ProcessOptions(mode=ProcessMode.COPY)
-        config = MatcherConfig()
+        photo = PhotoInfo(path=photo_path, filename="photo.jpg",
+                          timestamp=1739789100.0, has_gps=False)
+        pre_computed = [
+            MatchResult(photo=photo, success=True, gps=GPSInfo(39.9, 116.4), method="manual_coord"),
+        ]
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output_dir)
         worker = Worker(
             gps_dir=tmp_path, photo_dir=tmp_path,
-            config=config, options=options,
-            review_decisions=review_decisions,
+            config=MatcherConfig(), options=options,
+            pre_computed_results=pre_computed,
         )
 
         done_results = []
@@ -287,84 +287,3 @@ class TestWorkerApplyStoredReview:
         assert len(done_results) == 1
         assert done_results[0]["matched"] >= 1
         assert done_results[0]["failed"] == 0
-
-    def test_copy_with_manual_gps_decision(self, qtbot, tmp_path):
-        from gps_photo_tracker.gui.worker import Worker
-        photo_path = self._setup_files(tmp_path)
-
-        review_decisions = {
-            str(photo_path): {
-                "action": "manual_gps",
-                "point": {
-                    "timestamp": 1739789100.0,
-                    "latitude": 25.0005,
-                    "longitude": 100.0005,
-                    "altitude": 105,
-                },
-            }
-        }
-
-        options = ProcessOptions(mode=ProcessMode.COPY)
-        config = MatcherConfig()
-        worker = Worker(
-            gps_dir=tmp_path, photo_dir=tmp_path,
-            config=config, options=options,
-            review_decisions=review_decisions,
-        )
-
-        done_results = []
-        worker.done_signal.connect(lambda d: done_results.append(d))
-
-        with qtbot.waitSignal(worker.done_signal, timeout=15000):
-            worker.run()
-
-        assert len(done_results) == 1
-        assert done_results[0]["matched"] >= 1
-
-    def test_copy_with_skip_decision_stays_failed(self, qtbot, tmp_path):
-        from gps_photo_tracker.gui.worker import Worker
-        photo_path = self._setup_files(tmp_path)
-
-        review_decisions = {
-            str(photo_path): {
-                "action": "skip",
-            }
-        }
-
-        options = ProcessOptions(mode=ProcessMode.COPY)
-        config = MatcherConfig()
-        worker = Worker(
-            gps_dir=tmp_path, photo_dir=tmp_path,
-            config=config, options=options,
-            review_decisions=review_decisions,
-        )
-
-        done_results = []
-        worker.done_signal.connect(lambda d: done_results.append(d))
-
-        with qtbot.waitSignal(worker.done_signal, timeout=15000):
-            worker.run()
-
-        assert len(done_results) == 1
-        assert done_results[0]["failed"] >= 1
-
-    def test_copy_without_decisions_uses_normal_pipeline(self, qtbot, tmp_path):
-        from gps_photo_tracker.gui.worker import Worker
-        self._setup_files(tmp_path)
-
-        options = ProcessOptions(mode=ProcessMode.COPY)
-        config = MatcherConfig()
-        worker = Worker(
-            gps_dir=tmp_path, photo_dir=tmp_path,
-            config=config, options=options,
-            review_decisions={},
-        )
-
-        done_results = []
-        worker.done_signal.connect(lambda d: done_results.append(d))
-
-        with qtbot.waitSignal(worker.done_signal, timeout=15000):
-            worker.run()
-
-        assert len(done_results) == 1
-        assert done_results[0]["failed"] >= 1

@@ -161,9 +161,9 @@ class TestCopyDestination:
     def test_keep_structure_fallback_on_value_error(self):
         opts = ProcessOptions(mode=ProcessMode.COPY, output_dir=Path("/out"),
                               keep_structure=True)
-        # Path not relative to photo_dir → fallback to filename only
+        # Path not relative to photo_dir → fallback to photo_dir.name / filename
         result = _copy_destination(Path("/other/a.jpg"), opts, Path("/photos"))
-        assert result == Path("/out/a.jpg")
+        assert result == Path("/out/photos/a.jpg")
 
     def test_no_keep_structure_ignores_photo_dir(self):
         opts = ProcessOptions(mode=ProcessMode.COPY, output_dir=Path("/out"),

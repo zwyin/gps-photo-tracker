@@ -82,7 +82,7 @@ class TestReviewFlow:
 
         # Verify the output photo has GPS data
         from gps_photo_tracker.core.exif_writer import EXIFWriter
-        output_photo = output_dir / "photo.jpg"
+        output_photo = output_dir / tmp_path.name / "photo.jpg"
         assert output_photo.exists()
         written_gps = EXIFWriter.read_gps(output_photo)
         assert written_gps is not None
@@ -115,4 +115,4 @@ class TestReviewFlow:
         batch = service.write_phase(modified, options, photo_dir=tmp_path)
         assert batch.matched == 0
         assert batch.failed >= 1
-        assert (output_dir / "photo.jpg").exists()
+        assert (output_dir / tmp_path.name / "photo.jpg").exists()

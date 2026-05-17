@@ -17,6 +17,8 @@ Batch process photos with GPS tracks (GPX/KML/TCX) to automatically write EXIF G
 - **Parallel write** — Multi-threaded EXIF writing for faster processing
 - **EXIF orientation** — Correctly displays thumbnails with orientation transforms
 - **Interactive review** — Review failed GPS matches after preview, manually assign coordinates or pick nearby track points
+- **WYSIWYG workflow** — Step-based guided flow: preview → review → execute. All table edits carry forward to write
+- **Arrow-key GPS follow** — Use ← → keys to quickly assign GPS from adjacent matched photos
 
 ## Quick Start
 
@@ -67,10 +69,13 @@ The program will automatically check dependencies on startup. If anything is mis
 
 ### Basic Workflow
 
-1. Select a directory containing GPS track files (GPX/KML/TCX)
-2. Select a directory containing photos (JPEG)
-3. Adjust matching parameters or use "Smart Recommend"
-4. Preview results, then run in copy or overwrite mode
+The app uses a step-based guided workflow:
+
+1. **① Preview** — Select GPS track and photo directories, auto-match photos to GPS positions
+2. **② Review** — For unmatched photos, manually assign coordinates or pick nearby track points
+3. **③ Execute** — Write GPS data to photos (copy to output or overwrite in-place)
+
+What you see in the preview table is exactly what gets written — all manual corrections (arrow-key follows, review edits, resets) carry forward to execution.
 
 ## Development
 

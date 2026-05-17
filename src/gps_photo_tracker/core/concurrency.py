@@ -30,9 +30,11 @@ def _copy_destination(src_path: Path, options: ProcessOptions, photo_dir: Path |
     if options.keep_structure and options.output_dir and photo_dir:
         try:
             rel = src_path.relative_to(photo_dir)
+            if rel.parent == Path("."):
+                return options.output_dir / photo_dir.name / rel
             return options.output_dir / rel
         except ValueError:
-            return options.output_dir / src_path.name
+            return options.output_dir / photo_dir.name / src_path.name
     return options.output_dir / src_path.name
 
 
@@ -47,6 +49,7 @@ def execute_task(task: WriteTask) -> WriteResult:
 
         if opts.mode == ProcessMode.COPY and opts.output_dir:
             dst = _copy_destination(result.photo.path, opts, task.photo_dir)
+            dst.parent.mkdir(parents=True, exist_ok=True)
             EXIFWriter.write_gps(result.photo.path, dst, result.gps)
             return WriteResult(success=True, filename=result.photo.filename, dest_path=dst)
         elif opts.mode == ProcessMode.OVERWRITE:

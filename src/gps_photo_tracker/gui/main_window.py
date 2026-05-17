@@ -37,7 +37,7 @@ from gps_photo_tracker.core.models import (
     TrackPoint,
 )
 from gps_photo_tracker.gui.review_dialog import ReviewDialog
-from gps_photo_tracker.gui.config_panel import build_params_group, build_mode_group
+from gps_photo_tracker.gui.config_panel import build_params_group, build_step_group
 from gps_photo_tracker.gui.detail_dialog import DetailDialog
 from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
 from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
@@ -67,6 +67,7 @@ class MainWindow(QMainWindow):
 
         self._worker: Worker | None = None
         self._result_details: list[dict] = []
+        self._original_details: list[dict] = []
         self._cached_segments = []
         self._cached_photos = []
         self._excluded_filenames: set[str] = set()
@@ -126,8 +127,7 @@ class MainWindow(QMainWindow):
         log_action = debug_menu.addAction("查看日志")
         log_action.triggered.connect(self._open_log_viewer)
 
-        self._review_decisions: dict = {}
-        self._reviewed_results: list = []
+
 
         # Load saved settings
         self._apply_saved_settings()
@@ -157,16 +157,21 @@ class MainWindow(QMainWindow):
         self._auto_tune_btn.clicked.connect(self._on_auto_tune)
         layout.addWidget(params_group)
 
-        # Process mode (from config_panel)
-        mode_group, mode_btn_group, mode_radios = build_mode_group()
-        self._mode_group = mode_btn_group
-        self._preview_rb = mode_radios["preview_rb"]
-        self._copy_rb = mode_radios["copy_rb"]
-        self._overwrite_rb = mode_radios["overwrite_rb"]
-        layout.addWidget(mode_group)
+        # Step-based workflow (from config_panel)
+        step_group, self._step1_btn, self._step2_btn, self._step3_copy_btn, self._step3_overwrite_btn = build_step_group()
+        self._step1_btn.clicked.connect(self._on_step1_preview)
+        self._step2_btn.clicked.connect(self._on_step2_review)
+        self._step3_copy_btn.clicked.connect(lambda: self._on_step3_execute("copy"))
+        self._step3_overwrite_btn.clicked.connect(lambda: self._on_step3_execute("overwrite"))
+        layout.addWidget(step_group)
 
-        # Buttons
-        layout.addWidget(self._build_buttons())
+        # Cancel button
+        cancel_row = QHBoxLayout()
+        self._cancel_btn = QPushButton("取消")
+        self._cancel_btn.setEnabled(False)
+        self._cancel_btn.clicked.connect(self._on_cancel)
+        cancel_row.addWidget(self._cancel_btn)
+        layout.addLayout(cancel_row)
 
         # Progress (from progress_panel)
         progress_group, phase_bars, progress_label, elapsed_label = build_progress_group()
@@ -241,19 +246,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._scan_summary)
 
         return group
-
-    def _build_buttons(self) -> QWidget:
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        self._start_btn = QPushButton("开始处理")
-        self._start_btn.clicked.connect(self._on_start)
-        self._cancel_btn = QPushButton("取消")
-        self._cancel_btn.setEnabled(False)
-        self._cancel_btn.clicked.connect(self._on_cancel)
-        layout.addWidget(self._start_btn)
-        layout.addWidget(self._cancel_btn)
-        return widget
 
     # ── Right panel ─────────────────────────────────────────
 
@@ -330,6 +322,7 @@ class MainWindow(QMainWindow):
     def _clear_results(self):
         self._results_table.setRowCount(0)
         self._result_details.clear()
+        self._original_details.clear()
         self._stats_label.setText("")
         self._photo_preview.clear()
 
@@ -409,12 +402,10 @@ class MainWindow(QMainWindow):
         )
 
     def _get_process_options(self) -> ProcessOptions:
-        mode_id = max(0, self._mode_group.checkedId())
-        mode = [ProcessMode.PREVIEW, ProcessMode.COPY, ProcessMode.OVERWRITE][mode_id]
         output_dir = Path(self._output_dir_edit.currentText()) if self._output_dir_edit.currentText() else None
         settings = QSettings()
         return ProcessOptions(
-            mode=mode,
+            mode=ProcessMode.PREVIEW,
             output_dir=output_dir,
             overwrite_gps=self._overwrite_gps_cb.isChecked(),
             keep_structure=self._keep_struct_cb.isChecked(),
@@ -459,53 +450,42 @@ class MainWindow(QMainWindow):
 
     # ── Processing ──────────────────────────────────────────
 
-    def _on_start(self):
+    def _set_processing(self, active: bool):
+        """Toggle step buttons / cancel button during processing."""
+        self._step1_btn.setEnabled(not active)
+        self._step2_btn.setEnabled(not active and self._has_preview_results())
+        self._step3_copy_btn.setEnabled(not active and self._has_preview_results())
+        self._step3_overwrite_btn.setEnabled(not active and self._has_preview_results())
+        self._cancel_btn.setEnabled(active)
+
+    def _has_preview_results(self) -> bool:
+        return len(self._result_details) > 0
+
+    def _on_step1_preview(self):
+        """Step ①: Scan + match (preview only, no writing)."""
         gps_dir = self._gps_dir_edit.currentText()
         photo_dir = self._photo_dir_edit.currentText()
         if not gps_dir or not photo_dir:
             QMessageBox.warning(self, "提示", "请先选择 GPS 轨迹目录和照片目录")
             return
 
-        mode_id = self._mode_group.checkedId()
-        if mode_id == 1 and not self._output_dir_edit.currentText():
-            QMessageBox.warning(self, "提示", "拷贝模式需要指定输出目录")
-            return
-
-        # Overwrite mode confirmation (spec CF-05)
-        if mode_id == 2:
-            reply = QMessageBox.question(
-                self, "确认覆盖",
-                "覆盖模式将直接修改原始照片文件。\n\n"
-                "建议先使用预览模式确认匹配结果，再使用拷贝模式。\n\n"
-                "确定要使用覆盖模式吗？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-
-        self._start_btn.setEnabled(False)
-        self._cancel_btn.setEnabled(True)
         for bar in self._phase_bars:
             bar.setValue(0)
             bar.setMaximum(100)
         self._progress_label.setText("扫描中...")
         self._results_table.setRowCount(0)
         self._result_details.clear()
+        self._original_details.clear()
 
         config = self._get_matcher_config()
         options = self._get_process_options()
+        options.mode = ProcessMode.PREVIEW
 
         settings = QSettings()
         log_dir_str = settings.value("log_dir", "")
         log_dir = Path(log_dir_str) if log_dir_str else None
 
-        # Pass stored review decisions to Worker for COPY/OVERWRITE
-        review_decisions = self._review_decisions if mode_id != 0 else None
-        # Clear stale decisions when starting a new Preview run
-        if mode_id == 0:
-            self._review_decisions = {}
-
+        self._set_processing(True)
         self._worker = Worker(
             gps_dir=Path(gps_dir),
             photo_dir=Path(photo_dir),
@@ -513,7 +493,6 @@ class MainWindow(QMainWindow):
             options=options,
             log_dir=log_dir,
             excluded_filenames=self._excluded_filenames,
-            review_decisions=review_decisions,
         )
         self._worker.progress_signal.connect(self._on_progress)
         self._worker.photo_signal.connect(self._on_photo_processed)
@@ -521,6 +500,128 @@ class MainWindow(QMainWindow):
         self._worker.scan_done_signal.connect(self._on_scan_done)
         self._worker.photos_scanned_signal.connect(self._on_photos_scanned)
         self._worker.review_ready_signal.connect(self._on_review_ready)
+        self._worker.start()
+
+    def _on_step2_review(self):
+        """Step ②: Open review dialog for failed matches."""
+        self._reopen_review_dialog()
+
+    def _collect_table_results(self) -> list[MatchResult]:
+        """Build MatchResult list from current table state (WYSIWYG)."""
+        from gps_photo_tracker.core.models import GPSInfo, PhotoInfo
+        results = []
+        for visual_row in range(self._results_table.rowCount()):
+            item = self._results_table.item(visual_row, 0)
+            if not item:
+                continue
+            data_row = item.data(Qt.ItemDataRole.UserRole)
+            if data_row is None or data_row >= len(self._result_details):
+                continue
+            detail = self._result_details[data_row]
+
+            # Read GPS(后) column — what the user sees is what gets written
+            gps_after_item = self._results_table.item(visual_row, 4)
+            gps_text = gps_after_item.text() if gps_after_item else "—"
+            lat, lon = None, None
+            if gps_text not in ("无", "—", ""):
+                try:
+                    parts = gps_text.split(", ")
+                    lat, lon = float(parts[0]), float(parts[1])
+                except (ValueError, IndexError):
+                    pass
+
+            # Read method/status columns
+            method_item = self._results_table.item(visual_row, 5)
+            method_text = method_item.text() if method_item else ""
+            method_map = {
+                "插值": "interpolated", "就近": "nearest", "已跳过": "skipped",
+                "跟随上一个": "follow_prev", "跟随下一个": "follow_next",
+                "手动GPS": "manual_gps", "手动坐标": "manual_coord",
+            }
+            method = method_map.get(method_text, method_text)
+
+            status_item = self._results_table.item(visual_row, 6)
+            status_text = status_item.text() if status_item else ""
+            success = status_text == "成功"
+
+            # Build GPS info
+            gps = GPSInfo(lat, lon, detail.get("altitude")) if lat is not None and lon is not None else None
+
+            # Build PhotoInfo
+            photo = PhotoInfo(
+                path=Path(detail["path"]),
+                filename=detail.get("filename", ""),
+                timestamp=None,  # raw timestamp not stored in detail dict
+                has_gps=detail.get("has_gps", False),
+                existing_gps=None,
+            )
+            if detail.get("has_gps") and detail.get("gps_before"):
+                try:
+                    parts = detail["gps_before"].split(", ")
+                    photo.existing_gps = GPSInfo(float(parts[0]), float(parts[1]))
+                except (ValueError, IndexError):
+                    pass
+
+            results.append(MatchResult(
+                photo=photo,
+                success=success,
+                gps=gps,
+                method=method,
+                reject_reason=detail.get("reject_reason") if not success else None,
+            ))
+        return results
+
+    def _on_step3_execute(self, mode_str: str = "copy"):
+        """Step ③: Write GPS to files using current table state (WYSIWYG)."""
+        mode = ProcessMode.COPY if mode_str == "copy" else ProcessMode.OVERWRITE
+
+        if mode == ProcessMode.COPY and not self._output_dir_edit.currentText():
+            QMessageBox.warning(self, "提示", "拷贝模式需要指定输出目录")
+            return
+
+        if mode == ProcessMode.OVERWRITE:
+            reply = QMessageBox.question(
+                self, "确认覆盖",
+                "覆盖模式将直接修改原始照片文件。\n\n"
+                "建议先使用拷贝模式确认结果。\n\n"
+                "确定要使用覆盖模式吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        results = self._collect_table_results()
+        if not results:
+            QMessageBox.information(self, "提示", "没有可处理的结果")
+            return
+
+        config = self._get_matcher_config()
+        options = self._get_process_options()
+        options.mode = mode
+
+        settings = QSettings()
+        log_dir_str = settings.value("log_dir", "")
+        log_dir = Path(log_dir_str) if log_dir_str else None
+
+        for bar in self._phase_bars:
+            bar.setValue(0)
+            bar.setMaximum(100)
+        self._progress_label.setText("写入中...")
+        self._set_processing(True)
+
+        self._worker = Worker(
+            gps_dir=Path(self._gps_dir_edit.currentText()),
+            photo_dir=Path(self._photo_dir_edit.currentText()),
+            config=config,
+            options=options,
+            log_dir=log_dir,
+            excluded_filenames=self._excluded_filenames,
+            pre_computed_results=results,
+        )
+        self._worker.progress_signal.connect(self._on_progress)
+        self._worker.photo_signal.connect(self._on_photo_processed)
+        self._worker.done_signal.connect(self._on_done)
         self._worker.start()
 
     def _on_cancel(self):
@@ -627,6 +728,7 @@ class MainWindow(QMainWindow):
 
         self._results_table.scrollToBottom()
         self._result_details.append(result_dict)
+        self._original_details.append(dict(result_dict))  # deep copy for reset
         self._apply_result_filter()
         self._update_stats_card()
 
@@ -741,27 +843,9 @@ class MainWindow(QMainWindow):
 
         reviewed_state = dialog.get_state()
         if reviewed_state.decisions:
-            # Store as serializable dict for Worker to consume on COPY/OVERWRITE
-            self._review_decisions = {}
-            for path_str, dec in reviewed_state.decisions.items():
-                dec_data = {"action": dec.action.value}
-                if dec.action == ReviewAction.MANUAL_GPS and dec.selected_point:
-                    dec_data["point"] = {
-                        "timestamp": dec.selected_point.timestamp,
-                        "latitude": dec.selected_point.latitude,
-                        "longitude": dec.selected_point.longitude,
-                        "altitude": dec.selected_point.altitude,
-                    }
-                elif dec.action == ReviewAction.MANUAL_COORD:
-                    dec_data["lat"] = dec.manual_lat
-                    dec_data["lon"] = dec.manual_lon
-                # FOLLOW_PREV/FOLLOW_NEXT: stored as action only, resolved at write time
-                self._review_decisions[path_str] = dec_data
-
             # Write review decisions back into result table
             self._apply_review_to_table(reviewed_state, all_results)
 
-            self._reviewed_results = failed_results
             manual_count = sum(
                 1 for d in reviewed_state.decisions.values()
                 if d.action in (ReviewAction.MANUAL_GPS, ReviewAction.MANUAL_COORD)
@@ -777,8 +861,6 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"审核完成: {manual_count} 张手动指定, {follow_count} 张跟随, {skip_count} 张跳过。点 COPY/OVERWRITE 执行写入。"
             )
-        else:
-            self._review_decisions = {}
 
         # Manually trigger UI completion since Worker didn't emit done_signal
         total = review_data.get("total", 0)
@@ -878,22 +960,6 @@ class MainWindow(QMainWindow):
 
         reviewed_state = dialog.get_state()
         if reviewed_state.decisions:
-            if not hasattr(self, '_review_decisions') or self._review_decisions is None:
-                self._review_decisions = {}
-            for path_str, dec in reviewed_state.decisions.items():
-                dec_data = {"action": dec.action.value}
-                if dec.action == ReviewAction.MANUAL_GPS and dec.selected_point:
-                    dec_data["point"] = {
-                        "timestamp": dec.selected_point.timestamp,
-                        "latitude": dec.selected_point.latitude,
-                        "longitude": dec.selected_point.longitude,
-                        "altitude": dec.selected_point.altitude,
-                    }
-                elif dec.action == ReviewAction.MANUAL_COORD:
-                    dec_data["lat"] = dec.manual_lat
-                    dec_data["lon"] = dec.manual_lon
-                self._review_decisions[path_str] = dec_data
-
             self._apply_review_to_table(reviewed_state, all_results)
             self.statusBar().showMessage("审核完成 | 选中行后按 ← → 快速跟随相邻GPS")
 
@@ -1004,8 +1070,7 @@ class MainWindow(QMainWindow):
         self._update_stats_card()
 
     def _on_done(self, result_dict: dict):
-        self._start_btn.setEnabled(True)
-        self._cancel_btn.setEnabled(False)
+        self._set_processing(False)
 
         if result_dict.get("cancelled"):
             self._progress_label.setText("已取消")
@@ -1029,6 +1094,13 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"处理完成: {matched}/{total} 成功 | 选中行后按 ← → 快速跟随相邻GPS"
         )
+
+        # Enable step buttons based on results
+        has_failures = any(not d.get("success") for d in self._result_details)
+        self._step2_btn.setEnabled(has_failures)
+        self._step3_copy_btn.setEnabled(True)
+        self._step3_overwrite_btn.setEnabled(True)
+        self._review_btn.setEnabled(has_failures)
 
         QMessageBox.information(
             self, "处理完成",
@@ -1230,23 +1302,22 @@ class MainWindow(QMainWindow):
     def _reset_row_gps(self, visual_row: int):
         """Reset current row to original auto-matched result (clear manual intervention)."""
         data_row = self._get_detail_row(visual_row)
-        if data_row < 0 or data_row >= len(self._result_details):
+        if data_row < 0 or data_row >= len(self._original_details):
             return
-        detail = self._result_details[data_row]
+        original = self._original_details[data_row]
 
-        # Restore original values from detail dict
+        # Restore original values from snapshot dict
         sorting_was_enabled = self._results_table.isSortingEnabled()
         if sorting_was_enabled:
             self._results_table.setSortingEnabled(False)
 
         # Restore GPS(后) — original computed GPS or empty
-        lat = detail.get("latitude")
-        lon = detail.get("longitude")
-        has_gps = detail.get("has_gps", False)
-        success = detail.get("success", False)
+        lat = original.get("latitude")
+        lon = original.get("longitude")
+        has_gps = original.get("has_gps", False)
+        success = original.get("success", False)
 
         if has_gps and not success:
-            # Original had GPS but matching failed — keep existing GPS
             before_item = self._results_table.item(visual_row, 2)
             after_text = before_item.text() if before_item else "无"
         elif lat is not None and lon is not None:
@@ -1259,7 +1330,7 @@ class MainWindow(QMainWindow):
         self._results_table.setItem(visual_row, 4, QTableWidgetItem(after_text))
 
         # Restore method column
-        original_method = detail.get("method", "")
+        original_method = original.get("method", "")
         method_text = {"interpolated": "插值", "nearest": "就近", "skipped": "已跳过"}.get(original_method, "")
         method_item = QTableWidgetItem(method_text)
         if method_text in self._METHOD_COLORS:
@@ -1272,7 +1343,7 @@ class MainWindow(QMainWindow):
         elif success:
             status = "成功"
         else:
-            reason = detail.get("reject_reason", "失败")
+            reason = original.get("reject_reason", "失败")
             status = {"no_gps_coverage": "无GPS覆盖", "time_diff": "时差过大",
                       "gps_distance": "距离过大", "isolated_disabled": "孤立(已禁用)",
                       "tail_isolated": "孤立(已禁用)",
@@ -1281,6 +1352,9 @@ class MainWindow(QMainWindow):
 
         # Clear remark
         self._results_table.setItem(visual_row, 7, QTableWidgetItem(""))
+
+        # Sync _result_details back to original values
+        self._result_details[data_row] = dict(original)
 
         if sorting_was_enabled:
             self._results_table.setSortingEnabled(True)
@@ -1319,12 +1393,6 @@ class MainWindow(QMainWindow):
         self._overwrite_gps_cb.setChecked(bool(s.get("overwrite_gps", False)))
         self._workers_spin.setValue(int(s.get("workers", 1)))
         self._keep_struct_cb.setChecked(bool(s.get("keep_structure", True)))
-
-        mode_id = max(0, int(s.get("mode", 0)))
-        for rb, mid in [(self._preview_rb, 0), (self._copy_rb, 1), (self._overwrite_rb, 2)]:
-            if mid == mode_id:
-                rb.setChecked(True)
-                break
 
         geo = QSettings("GPSPhotoTracker", "GPSPhotoTracker").value("window_geometry")
         if geo:

@@ -36,9 +36,12 @@ class TestMainWindow:
     def test_window_title(self, main_window):
         assert main_window.windowTitle() == "GPS Photo Tracker"
 
-    def test_start_button_exists(self, main_window):
-        assert main_window._start_btn is not None
-        assert main_window._start_btn.isEnabled()
+    def test_step_buttons_exist(self, main_window):
+        assert main_window._step1_btn is not None
+        assert main_window._step1_btn.isEnabled()
+        assert not main_window._step2_btn.isEnabled()
+        assert not main_window._step3_copy_btn.isEnabled()
+        assert not main_window._step3_overwrite_btn.isEnabled()
 
     def test_cancel_button_disabled(self, main_window):
         assert not main_window._cancel_btn.isEnabled()
@@ -51,7 +54,8 @@ class TestMainWindow:
         assert main_window._match_isolated_cb.isChecked()
 
     def test_default_mode_preview(self, main_window):
-        assert main_window._preview_rb.isChecked()
+        # Step-based workflow: step1 is always preview
+        assert main_window._step1_btn.isEnabled()
 
     def test_get_matcher_config(self, main_window):
         config = main_window._get_matcher_config()
@@ -59,19 +63,9 @@ class TestMainWindow:
         assert config.isolated_window == 300
         assert config.max_gps_distance == 200
 
-    def test_get_process_options_preview(self, main_window):
+    def test_get_process_options_defaults(self, main_window):
         options = main_window._get_process_options()
         assert options.mode == ProcessMode.PREVIEW
-
-    def test_get_process_options_copy(self, main_window):
-        main_window._copy_rb.setChecked(True)
-        options = main_window._get_process_options()
-        assert options.mode == ProcessMode.COPY
-
-    def test_get_process_options_overwrite(self, main_window):
-        main_window._overwrite_rb.setChecked(True)
-        options = main_window._get_process_options()
-        assert options.mode == ProcessMode.OVERWRITE
         assert not options.overwrite_gps
 
     def test_start_without_dirs_shows_warning(self, main_window, monkeypatch):
@@ -84,7 +78,7 @@ class TestMainWindow:
             "PySide6.QtWidgets.QMessageBox.warning",
             lambda *a, **kw: warned.append(True),
         )
-        main_window._on_start()
+        main_window._on_step1_preview()
         assert warned
 
 
@@ -204,9 +198,10 @@ class TestSettingsDialog:
         assert dialog._mode_group is not None
 
     def test_settings_dialog_default_mode_preview(self, qapp):
-        """Fix #5: Default mode should be preview (index 0)."""
+        """Fix #5: Reset defaults should set mode to preview."""
         from gps_photo_tracker.gui.settings_dialog import SettingsDialog
         dialog = SettingsDialog()
+        dialog._reset_defaults()
         assert dialog._mode_preview_rb.isChecked()
         assert not dialog._mode_copy_rb.isChecked()
         assert not dialog._mode_overwrite_rb.isChecked()
@@ -365,7 +360,7 @@ class TestPhaseProgress:
         for bar in main_window._phase_bars:
             assert bar.value() == 0
 
-    def test_on_start_resets_all_bars(self, main_window, monkeypatch):
+    def test_on_step1_resets_all_bars(self, main_window, monkeypatch):
         for bar in main_window._phase_bars:
             bar.setValue(50)
         main_window._gps_dir_edit.setCurrentText("/tmp")
@@ -376,7 +371,7 @@ class TestPhaseProgress:
         )
         # Don't actually run worker
         monkeypatch.setattr(Worker, "start", lambda self: None)
-        main_window._on_start()
+        main_window._on_step1_preview()
         for bar in main_window._phase_bars:
             assert bar.value() == 0
 
@@ -736,17 +731,18 @@ class TestCompletionNotification:
         assert "失败: 1" in msg
 
     def test_on_done_reenables_buttons(self, main_window, monkeypatch):
-        """Fix #3: _on_done should re-enable start button, disable cancel."""
+        """Fix #3: _on_done should re-enable step buttons, disable cancel."""
         monkeypatch.setattr(
             "PySide6.QtWidgets.QMessageBox.information",
             lambda *a, **kw: None,
         )
-        main_window._start_btn.setEnabled(False)
-        main_window._cancel_btn.setEnabled(True)
+        main_window._set_processing(True)
+        assert not main_window._step1_btn.isEnabled()
+        assert main_window._cancel_btn.isEnabled()
         main_window._on_done({
             "total": 1, "matched": 1, "failed": 0, "skipped": 0, "success_rate": 1.0,
         })
-        assert main_window._start_btn.isEnabled()
+        assert main_window._step1_btn.isEnabled()
         assert not main_window._cancel_btn.isEnabled()
 
 
@@ -771,51 +767,31 @@ class TestThumbnailSize:
 class TestSettingsModePersistence:
 
     def test_apply_saved_settings_restores_mode(self, main_window, monkeypatch):
-        """Fix #5: _apply_saved_settings should restore saved processing mode."""
+        """Fix #5: _apply_saved_settings should restore saved processing mode in settings dialog."""
         from gps_photo_tracker.gui import settings_dialog as sd
-        original_load = sd.load_settings
-
-        def mock_load():
-            s = original_load()
-            s["mode"] = 1  # copy mode
-            return s
-
-        # Patch in the main_window module namespace where load_settings is used
-        import gps_photo_tracker.gui.main_window as mw_module
-        monkeypatch.setattr(mw_module, "load_settings", mock_load)
-        main_window._apply_saved_settings()
-        assert main_window._copy_rb.isChecked()
-        assert not main_window._preview_rb.isChecked()
+        dialog = sd.SettingsDialog()
+        dialog._mode_copy_rb.setChecked(True)
+        dialog._save()
+        loaded = sd.load_settings()
+        assert loaded.get("mode") == 1
 
     def test_apply_saved_settings_overwrite_mode(self, main_window, monkeypatch):
-        """Fix #5: _apply_saved_settings should restore overwrite mode."""
+        """Fix #5: Settings dialog should save overwrite mode."""
         from gps_photo_tracker.gui import settings_dialog as sd
-        original_load = sd.load_settings
-
-        def mock_load():
-            s = original_load()
-            s["mode"] = 2  # overwrite mode
-            return s
-
-        import gps_photo_tracker.gui.main_window as mw_module
-        monkeypatch.setattr(mw_module, "load_settings", mock_load)
-        main_window._apply_saved_settings()
-        assert main_window._overwrite_rb.isChecked()
+        dialog = sd.SettingsDialog()
+        dialog._mode_overwrite_rb.setChecked(True)
+        dialog._save()
+        loaded = sd.load_settings()
+        assert loaded.get("mode") == 2
 
     def test_apply_saved_settings_preview_mode(self, main_window, monkeypatch):
-        """Fix #5: _apply_saved_settings should restore preview mode (default)."""
+        """Fix #5: Settings dialog should save preview mode (default)."""
         from gps_photo_tracker.gui import settings_dialog as sd
-        original_load = sd.load_settings
-
-        def mock_load():
-            s = original_load()
-            s["mode"] = 0  # preview mode
-            return s
-
-        import gps_photo_tracker.gui.main_window as mw_module
-        monkeypatch.setattr(mw_module, "load_settings", mock_load)
-        main_window._apply_saved_settings()
-        assert main_window._preview_rb.isChecked()
+        dialog = sd.SettingsDialog()
+        dialog._mode_preview_rb.setChecked(True)
+        dialog._save()
+        loaded = sd.load_settings()
+        assert loaded.get("mode") == 0
 
 
 class TestPathHistory:
@@ -1193,25 +1169,29 @@ class TestWorkerRun:
         mock_svc.process.assert_not_called()
 
     @patch("gps_photo_tracker.gui.worker.GPSTaggingService")
-    def test_copy_run(self, MockService, qapp):
-        from gps_photo_tracker.core.models import BatchResult
-        segments = self._make_segments()
+    def test_direct_write_run(self, MockService, qapp):
+        """Step ③: Worker with pre_computed_results calls write_phase directly."""
+        from gps_photo_tracker.core.models import BatchResult, MatchResult, GPSInfo
         photos = self._make_photos()
+        pre_computed = [
+            MatchResult(photo=photos[0], success=True, gps=GPSInfo(25.01, 102.01), method="interpolated"),
+            MatchResult(photo=photos[1], success=True, gps=GPSInfo(25.0, 102.0), method="skipped"),
+        ]
         mock_svc = MockService.return_value
-        mock_svc.scan_gpx.return_value = segments
-        mock_svc.scan_photos.return_value = photos
-        mock_svc.process.return_value = BatchResult(
-            total=2, matched=2, skipped=0, failed=0, overwritten=0,
+        mock_svc.write_phase.return_value = BatchResult(
+            total=2, matched=2, skipped=1, failed=0, overwritten=0,
             success_rate=1.0, results=[], reject_groups={},
         )
 
         w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
-                   ProcessOptions(mode=ProcessMode.COPY, output_dir=Path("/out")))
+                   ProcessOptions(mode=ProcessMode.COPY, output_dir=Path("/out")),
+                   pre_computed_results=pre_computed)
         r = self._run_worker(w)
 
         assert r["done"]["matched"] == 2
-        mock_svc.process.assert_called_once()
+        mock_svc.write_phase.assert_called_once()
         mock_svc.preview.assert_not_called()
+        mock_svc.scan_gpx.assert_not_called()
 
     @patch("gps_photo_tracker.gui.worker.GPSTaggingService")
     def test_scan_error(self, MockService, qapp):
