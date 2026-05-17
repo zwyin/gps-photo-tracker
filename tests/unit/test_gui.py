@@ -1432,3 +1432,157 @@ class TestExportResults:
 
         content = Path(path).read_text(encoding="utf-8")
         assert r"GPS(前) \| GPS(后)" in content
+
+
+# ── v0.18.0: Undo + Source column menu tests ──────────────────
+
+class TestUndoRow:
+    """BUG-2 (v0.18.0): Esc undo restores original match state."""
+
+    @staticmethod
+    def _populate_rows(main_window, rows_data):
+        """Populate table via _on_photo_processed and return list of data_rows."""
+        data_rows = []
+        for rd in rows_data:
+            main_window._on_photo_processed(rd)
+            # data_row = index into _result_details (no sorting disruption in tests)
+            data_rows.append(len(main_window._result_details) - 1)
+        return data_rows
+
+    def test_undo_after_follow_restores_original(self, main_window):
+        """Follow a neighbor, then undo — GPS(后), source, status all revert."""
+        rows = self._populate_rows(main_window, [
+            {"filename": "a.jpg", "success": True, "method": "interpolated",
+             "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+             "capture_time": "2024-01-01 10:00:00", "capture_time_ts": 1704112800.0},
+            {"filename": "b.jpg", "success": False, "method": "",
+             "has_gps": False, "reject_reason": "no_gps_coverage",
+             "capture_time": "2024-01-01 10:05:00", "capture_time_ts": 1704113100.0},
+        ])
+        assert len(main_window._result_details) == 2
+        assert len(main_window._original_details) == 2
+
+        # Follow: row 1 (visual=1) follows previous
+        main_window._quick_follow_gps(1, -1)
+
+        # Verify follow changed state
+        detail_after_follow = dict(main_window._result_details[rows[1]])
+        assert detail_after_follow["success"] is True
+        assert "follow" in detail_after_follow.get("method", "")
+
+        # Undo
+        main_window._undo_row(1)
+
+        # Verify restored to original
+        detail_after_undo = main_window._result_details[rows[1]]
+        original = main_window._original_details[rows[1]]
+        assert detail_after_undo["success"] == original["success"]
+        assert detail_after_undo["method"] == original["method"]
+        assert detail_after_undo.get("latitude") == original.get("latitude")
+
+        # Table columns restored
+        status_item = main_window._results_table.item(1, 6)
+        assert status_item is not None
+        assert "无GPS覆盖" in status_item.text()
+
+    def test_undo_after_protection_restores_original(self, main_window):
+        """Protect a row, then undo — restores pre-protection state."""
+        rows = self._populate_rows(main_window, [
+            {"filename": "a.jpg", "success": True, "method": "interpolated",
+             "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+             "capture_time": "2024-01-01 10:00:00"},
+        ])
+        original_method = main_window._original_details[rows[0]]["method"]
+
+        # Protect
+        main_window._reset_row_gps(0)
+        assert main_window._result_details[rows[0]]["method"] == "protected"
+
+        # Undo (Esc)
+        main_window._undo_row(0)
+
+        # Restored to original
+        assert main_window._result_details[rows[0]]["method"] == original_method
+        method_item = main_window._results_table.item(0, 5)
+        assert method_item.data(Qt.ItemDataRole.UserRole) == original_method
+
+        # Protection snapshot cleared
+        assert rows[0] not in main_window._protection_snapshots
+
+    def test_undo_idempotent(self, main_window):
+        """Undo on an already-original row is a no-op."""
+        self._populate_rows(main_window, [
+            {"filename": "a.jpg", "success": True, "method": "nearest",
+             "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+             "capture_time": "2024-01-01 10:00:00"},
+        ])
+        detail_before = dict(main_window._result_details[0])
+
+        main_window._undo_row(0)
+
+        assert main_window._result_details[0] == detail_before
+
+    def test_undo_clears_protection_snapshot(self, main_window):
+        """Undo after follow+protect clears protection snapshot entirely."""
+        self._populate_rows(main_window, [
+            {"filename": "a.jpg", "success": True, "method": "interpolated",
+             "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+             "capture_time": "2024-01-01 10:00:00", "capture_time_ts": 1704112800.0},
+            {"filename": "b.jpg", "success": False, "method": "",
+             "has_gps": False, "reject_reason": "no_gps_coverage",
+             "capture_time": "2024-01-01 10:05:00", "capture_time_ts": 1704113100.0},
+        ])
+        # Follow then protect
+        main_window._quick_follow_gps(1, -1)
+        main_window._reset_row_gps(1)  # protect the followed row
+        assert 1 in main_window._protection_snapshots
+
+        # Undo clears everything
+        main_window._undo_row(1)
+        assert 1 not in main_window._protection_snapshots
+        assert main_window._result_details[1]["method"] == ""
+
+
+class TestSourceColumnMenu:
+    """FEAT-2 (v0.18.0): Double-click source column shows context menu."""
+
+    def test_source_column_double_click_opens_menu(self, main_window, monkeypatch):
+        """Double-clicking column 5 (source) triggers _show_source_menu instead of detail dialog."""
+        main_window._on_photo_processed({
+            "filename": "a.jpg", "success": True, "method": "interpolated",
+            "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+        })
+        menu_called = []
+        monkeypatch.setattr(
+            main_window, "_show_source_menu",
+            lambda vr, dr: menu_called.append((vr, dr)),
+        )
+        index = main_window._results_table.model().index(0, 5)
+        main_window._on_table_double_click(index)
+        assert menu_called, "Source column double-click should call _show_source_menu"
+
+    def test_other_column_double_click_opens_detail(self, main_window, monkeypatch):
+        """Double-clicking a non-source column still opens detail dialog."""
+        main_window._on_photo_processed({
+            "filename": "a.jpg", "success": True, "method": "interpolated",
+            "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+        })
+        dialogs = []
+        monkeypatch.setattr(
+            "gps_photo_tracker.gui.main_window.DetailDialog",
+            type("FakeDialog", (), {"__init__": lambda s, d, p: None, "exec": lambda s: dialogs.append(True)}),
+        )
+        index = main_window._results_table.model().index(0, 0)
+        main_window._on_table_double_click(index)
+        assert dialogs, "Non-source column double-click should open detail dialog"
+
+    def test_shortcut_hint_includes_esc(self, main_window):
+        """Shortcut hint bar mentions Esc undo."""
+        from gps_photo_tracker.gui.result_table import build_result_panel
+        widget, *_ = build_result_panel()
+        hint = widget.findChild(object)
+        # Find QLabel children
+        from PySide6.QtWidgets import QLabel
+        labels = widget.findChildren(QLabel)
+        hint_texts = [l.text() for l in labels]
+        assert any("Esc" in t for t in hint_texts), f"No Esc in hints: {hint_texts}"

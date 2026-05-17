@@ -39,7 +39,7 @@ def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidg
     filter_row.addWidget(result_filter)
     filter_row.addStretch()
 
-    shortcut_hint = QLabel("←→ 跟随GPS | . 保护 | ↑↓ 导航")
+    shortcut_hint = QLabel("←→ 跟随GPS | . 保护/取消 | Esc 撤销 | ↑↓ 导航")
     shortcut_hint.setStyleSheet("color: #888; font-size: 11px;")
     filter_row.addWidget(shortcut_hint)
 
@@ -69,7 +69,7 @@ def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidg
     results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
     results_table.setSortingEnabled(True)
-    results_table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+    results_table.sortByColumn(1, Qt.SortOrder.AscendingOrder)
     layout.addWidget(results_table, stretch=1)
 
     return widget, pre_stats_label, stats_label, result_filter, results_table, review_btn, export_btn

@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QSettings, QUrl
-from PySide6.QtGui import QBrush, QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PySide6.QtGui import QBrush, QColor, QCursor, QDragEnterEvent, QDragMoveEvent, QDropEvent
 
 logger = logging.getLogger("gps_tracker")
 from PySide6.QtWidgets import (
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -779,10 +780,11 @@ class MainWindow(QMainWindow):
         final_rate = matched / total if total > 0 else 0
 
         # GPS coverage: pre (existing GPS) vs post (all with GPS after processing)
+        # Skipped photos have latitude=None but GPS(后) shows their existing GPS
         gps_with_result = sum(
             1 for d in details
-            if d.get("success") and d.get("method") != "protected"
-            and d.get("latitude") is not None
+            if d.get("method") != "protected"
+            and (d.get("latitude") is not None or d.get("method") == "skipped")
         )
         pre_rate = has_gps_total / total if total > 0 else 0
         post_rate = gps_with_result / total if total > 0 else 0
@@ -1282,10 +1284,48 @@ class MainWindow(QMainWindow):
             dialog.exec()
 
     def _on_table_double_click(self, index):
-        data_row = self._get_detail_row(index.row())
+        visual_row = index.row()
+        column = index.column()
+        data_row = self._get_detail_row(visual_row)
+
+        if column == 5:
+            # Source column — show context menu
+            self._show_source_menu(visual_row, data_row)
+            return
+
         if 0 <= data_row < len(self._result_details):
             dialog = DetailDialog(self._result_details[data_row], self)
             dialog.exec()
+
+    def _show_source_menu(self, visual_row: int, data_row: int):
+        """Show context menu on source column double-click."""
+        if data_row < 0 or data_row >= len(self._result_details):
+            return
+        detail = self._result_details[data_row]
+        method = detail.get("method", "")
+
+        menu = QMenu(self)
+
+        # Protect / Unprotect
+        if method == "protected":
+            menu.addAction("取消保护", lambda: self._undo_row(visual_row))
+        else:
+            menu.addAction("保护", lambda: self._reset_row_gps(visual_row))
+
+        # Follow options when GPS(后) is empty
+        gps_after_item = self._results_table.item(visual_row, 4)
+        gps_after_text = gps_after_item.text() if gps_after_item else ""
+        if gps_after_text in ("无", "—", ""):
+            menu.addAction("跟随上一个", lambda: self._quick_follow_gps(visual_row, -1))
+            menu.addAction("跟随下一个", lambda: self._quick_follow_gps(visual_row, 1))
+
+        # Undo when current state differs from original
+        original = self._original_details[data_row] if data_row < len(self._original_details) else None
+        if original and detail != original:
+            menu.addSeparator()
+            menu.addAction("撤销", lambda: self._undo_row(visual_row))
+
+        menu.exec(QCursor.pos())
 
     def _on_selection_changed(self):
         rows = self._results_table.selectionModel().selectedRows()
@@ -1321,25 +1361,29 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         key = event.key()
-        if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Period):
+        if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Period, Qt.Key_Escape):
             rows = self._results_table.selectionModel().selectedRows()
             if rows and self._results_table.rowCount() > 0:
                 if key == Qt.Key_Period:
                     self._reset_row_gps(rows[0].row())
+                elif key == Qt.Key_Escape:
+                    self._undo_row(rows[0].row())
                 else:
                     self._quick_follow_gps(rows[0].row(), -1 if key == Qt.Key_Left else 1)
                 return
         super().keyPressEvent(event)
 
     def eventFilter(self, obj, event):
-        # BUG-1: capture arrow keys and period from QTableWidget
+        # Capture special keys from QTableWidget
         if obj is self._results_table and event.type() == event.Type.KeyPress:
             key = event.key()
-            if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Period):
+            if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Period, Qt.Key_Escape):
                 rows = self._results_table.selectionModel().selectedRows()
                 if rows and self._results_table.rowCount() > 0:
                     if key == Qt.Key_Period:
                         self._reset_row_gps(rows[0].row())
+                    elif key == Qt.Key_Escape:
+                        self._undo_row(rows[0].row())
                     else:
                         self._quick_follow_gps(rows[0].row(), -1 if key == Qt.Key_Left else 1)
                     return True  # consumed
@@ -1532,6 +1576,71 @@ class MainWindow(QMainWindow):
 
             detail["method"] = "protected"
             detail["success"] = True  # protected photos have GPS, just locked
+
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(True)
+        self._update_stats_card()
+
+    def _undo_row(self, visual_row: int):
+        """Undo all operations on a row — restore to original match result."""
+        data_row = self._get_detail_row(visual_row)
+        if data_row < 0 or data_row >= len(self._original_details):
+            return
+
+        original = self._original_details[data_row]
+
+        sorting_was_enabled = self._results_table.isSortingEnabled()
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(False)
+
+        # Clear protection snapshot if exists
+        self._protection_snapshots.pop(data_row, None)
+
+        # Restore GPS(后)
+        lat = original.get("latitude")
+        lon = original.get("longitude")
+        has_gps = original.get("has_gps", False)
+        if has_gps and original.get("method") != "skipped":
+            before_text = f"{lat:.4f}, {lon:.4f}" if lat is not None and lon is not None else "无"
+        else:
+            before_text = "无"
+        if has_gps and not original.get("overwritten"):
+            after_text = before_text
+        elif lat is not None and lon is not None:
+            after_text = f"{lat:.4f}, {lon:.4f}"
+        else:
+            after_text = "—"
+        self._results_table.setItem(visual_row, 4, QTableWidgetItem(after_text))
+
+        # Restore source column with UserRole
+        method = original.get("method", "")
+        method_text = self._METHOD_LABELS.get(method, "")
+        method_item = QTableWidgetItem(method_text)
+        method_item.setData(Qt.ItemDataRole.UserRole, method)
+        if method_text in self._METHOD_COLORS:
+            method_item.setBackground(self._METHOD_COLORS[method_text])
+        self._results_table.setItem(visual_row, 5, method_item)
+
+        # Restore status
+        success = original.get("success", False)
+        if method == "skipped":
+            status = "已跳过"
+        elif success:
+            status = "成功"
+        else:
+            reason = original.get("reject_reason", "失败")
+            status = {"no_gps_coverage": "无GPS覆盖", "time_diff": "时差过大",
+                      "gps_distance": "距离过大", "isolated_disabled": "孤立(已禁用)",
+                      "tail_isolated": "孤立(已禁用)",
+                      "no_track_points": "无轨迹点"}.get(reason, reason)
+        self._results_table.setItem(visual_row, 6, QTableWidgetItem(status))
+
+        # Restore remark
+        remark = self._METHOD_REMARKS.get(method, "")
+        self._results_table.setItem(visual_row, 7, QTableWidgetItem(remark))
+
+        # Sync detail dict back to original
+        self._result_details[data_row] = dict(original)
 
         if sorting_was_enabled:
             self._results_table.setSortingEnabled(True)
