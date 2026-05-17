@@ -60,6 +60,15 @@ class MainWindow(QMainWindow):
         "手动坐标": QBrush(QColor(230, 220, 255)),
         "已跳过": QBrush(QColor(230, 230, 230)),
     }
+    # English code → Chinese display label
+    _METHOD_LABELS = {
+        "interpolated": "插值", "nearest": "就近", "skipped": "已跳过",
+        "follow_prev": "跟随上一个", "follow_next": "跟随下一个",
+        "auto_follow_prev": "自动跟随上一个", "auto_follow_next": "自动跟随下一个",
+        "manual_gps": "手动GPS", "manual_coord": "手动坐标",
+    }
+    # Chinese display label → English code (reverse)
+    _METHOD_CODES = {v: k for k, v in _METHOD_LABELS.items()}
 
     def __init__(self):
         super().__init__()
@@ -551,11 +560,7 @@ class MainWindow(QMainWindow):
             # Read method/status columns
             method_item = self._results_table.item(visual_row, 5)
             method_text = method_item.text() if method_item else ""
-            method_map = {
-                "插值": "interpolated", "就近": "nearest", "已跳过": "skipped",
-                "跟随上一个": "follow_prev", "跟随下一个": "follow_next",
-                "手动GPS": "manual_gps", "手动坐标": "manual_coord",
-            }
+            method_map = self._METHOD_CODES
             method = method_map.get(method_text, method_text)
 
             status_item = self._results_table.item(visual_row, 6)
@@ -719,7 +724,7 @@ class MainWindow(QMainWindow):
             self._results_table.item(row, 4).setBackground(same_brush)
 
         method = result_dict.get("method", "")
-        method_text = {"interpolated": "插值", "nearest": "就近", "skipped": "已跳过", "auto_follow_prev": "自动跟随上一个", "auto_follow_next": "自动跟随下一个"}.get(method, "")
+        method_text = self._METHOD_LABELS.get(method, "")
         method_item = QTableWidgetItem(method_text)
         if method_text in self._METHOD_COLORS:
             method_item.setBackground(self._METHOD_COLORS[method_text])
@@ -1265,7 +1270,7 @@ class MainWindow(QMainWindow):
             lat = detail.get("latitude")
             lon = detail.get("longitude")
             method = detail.get("method", "")
-            method_text = {"interpolated": "插值", "nearest": "就近", "auto_follow_prev": "自动跟随上一个", "auto_follow_next": "自动跟随下一个"}.get(method, "—")
+            method_text = self._METHOD_LABELS.get(method, "—")
             gps_str = f"{lat:.4f}, {lon:.4f}" if lat is not None and lon is not None else "—"
             time_str = detail.get("capture_time") or "—"
             info = f"文件: {detail.get('filename', '—')}\n拍摄时间: {time_str}\nGPS: {gps_str}\n方式: {method_text}"
@@ -1446,7 +1451,7 @@ class MainWindow(QMainWindow):
 
         # Restore method column
         original_method = original.get("method", "")
-        method_text = {"interpolated": "插值", "nearest": "就近", "skipped": "已跳过", "auto_follow_prev": "自动跟随上一个", "auto_follow_next": "自动跟随下一个"}.get(original_method, "")
+        method_text = self._METHOD_LABELS.get(original_method, "")
         method_item = QTableWidgetItem(method_text)
         if method_text in self._METHOD_COLORS:
             method_item.setBackground(self._METHOD_COLORS[method_text])
