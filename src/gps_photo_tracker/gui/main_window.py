@@ -65,8 +65,6 @@ class MainWindow(QMainWindow):
         "auto_follow_prev": "② 跟随", "auto_follow_next": "② 跟随",
         "manual_gps": "③ 手动", "manual_coord": "③ 手动",
     }
-    # Chinese display label → English code (reverse)
-    _METHOD_CODES = {v: k for k, v in _METHOD_LABELS.items()}
     # English code → default remark (for auto-follow and arrow-key follow)
     _METHOD_REMARKS = {
         "auto_follow_prev": "跟随上一张", "auto_follow_next": "跟随下一张",
@@ -776,7 +774,7 @@ class MainWindow(QMainWindow):
         )
         protected = sum(1 for d in details if d.get("method") == "protected")
         overwritten = sum(1 for d in details if d.get("overwritten"))
-        failed = sum(1 for d in details if not d.get("success"))
+        failed = sum(1 for d in details if not d.get("success") and d.get("method") != "protected")
         matched = new_matched + skipped_existing + overwritten
         final_rate = matched / total if total > 0 else 0
 
@@ -1533,6 +1531,7 @@ class MainWindow(QMainWindow):
             self._results_table.setItem(visual_row, 7, QTableWidgetItem(""))
 
             detail["method"] = "protected"
+            detail["success"] = True  # protected photos have GPS, just locked
 
         if sorting_was_enabled:
             self._results_table.setSortingEnabled(True)
