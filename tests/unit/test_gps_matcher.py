@@ -991,3 +991,336 @@ class TestRealDataRegression:
         assert results[2].time_diff == 240
         # GPS from track point (via track_matched), not from skipped photo
         assert results[2].gps.latitude == pytest.approx(25.0, abs=0.001)
+
+
+class TestParameterCombinations:
+    """Cross-parameter combination tests — verify interactions between multiple parameters."""
+
+    def test_tight_distance_and_time_both_reject(self):
+        """max_gps_distance=100 + middle_time_window=600: both constraints tighten."""
+        points = [
+            make_point(25.0, 100.0, utc(8, 0)),
+            make_point(25.005, 100.005, utc(8, 10)),  # ~555m apart
+        ]
+        seg = make_segment(points)
+        photos = [
+            make_photo("p0.jpg", utc(8, 2)),
+            make_photo("mid.jpg", utc(8, 5)),
+            make_photo("p2.jpg", utc(8, 8)),
+        ]
+        m = GPSMatcher(MatcherConfig(max_gps_distance=100, middle_time_window=600))
+        mid = m.match(photos, [seg])[1]
+        # distance=555m > 100 → degrade to nearest, nearest_td=300s < 600 → nearest
+        assert mid.success
+        assert mid.method == "nearest"
+
+    def test_tight_distance_tight_time_reject_both(self):
+        """Both distance and time tight → nearest fallback also fails."""
+        points = [
+            make_point(25.0, 100.0, utc(8, 0)),
+            make_point(25.005, 100.005, utc(8, 10)),  # ~555m apart
+        ]
+        seg = make_segment(points)
+        photos = [
+            make_photo("p0.jpg", utc(8, 2)),
+            make_photo("mid.jpg", utc(8, 5)),
+            make_photo("p2.jpg", utc(8, 8)),
+        ]
+        m = GPSMatcher(MatcherConfig(max_gps_distance=100, middle_time_window=60))
+        mid = m.match(photos, [seg])[1]
+        # degrade to nearest, nearest_td=300s > 60 → TIME_DIFF
+        assert not mid.success
+        assert mid.reject_reason == RejectReason.TIME_DIFF
+
+    def test_isolated_narrow_context_wide(self):
+        """isolated_window=60 + context_window=600: photo is isolated but window too small."""
+        seg = _uniform_segment()
+        photos = [
+            make_photo("p0.jpg", utc(8, 0)),
+            make_photo("mid.jpg", utc(8, 5)),
+            make_photo("p2.jpg", utc(8, 10)),
+        ]
+        m = GPSMatcher(MatcherConfig(isolated_window=60, context_window=600))
+        mid = m.match(photos, [seg])[1]
+        # context=600 → middle, prev/next GPS within range → interpolated
+        assert mid.success
+        assert mid.method == "interpolated"
+
+    def test_isolated_narrow_context_narrow(self):
+        """isolated_window=60 + context_window=60: photo becomes isolated, window rejects."""
+        # Use sparse segment so nearest GPS is far from photo
+        points = [
+            make_point(25.0, 100.0, utc(8, 0)),
+            make_point(25.001, 100.001, utc(8, 10)),  # only 2 points, 10min apart
+        ]
+        seg = make_segment(points)
+        photos = [
+            make_photo("p0.jpg", utc(8, 2)),
+            make_photo("mid.jpg", utc(8, 5)),  # 300s from neighbors
+            make_photo("p2.jpg", utc(8, 8)),
+        ]
+        m = GPSMatcher(MatcherConfig(isolated_window=60, context_window=60))
+        mid = m.match(photos, [seg])[1]
+        # context=60 → isolated, nearest GPS at 08:00 is 300s away > isolated_window=60 → TIME_DIFF
+        assert not mid.success
+        assert mid.reject_reason == RejectReason.TIME_DIFF
+
+    def test_time_offset_with_distance_constraint(self):
+        """time_offset shifts into a region where distance is too large."""
+        points = [
+            make_point(25.0, 100.0, utc(8, 0)),
+            make_point(25.005, 100.005, utc(8, 5)),  # ~555m from 08:00 point
+            make_point(25.01, 100.01, utc(8, 10)),  # ~555m from 08:05 point
+        ]
+        seg = make_segment(points)
+        photos = [
+            make_photo("p0.jpg", utc(8, 2)),
+            make_photo("mid.jpg", utc(8, 5)),
+            make_photo("p2.jpg", utc(8, 8)),
+        ]
+        # offset=0: mid at 08:05 → prev=08:05, next=08:10, distance=~555m > 200 → degrade
+        m_no_offset = GPSMatcher(MatcherConfig(max_gps_distance=200))
+        mid_no = m_no_offset.match(photos, [seg])[1]
+        assert mid_no.success
+        assert mid_no.method == "nearest"
+
+        # offset=-180: mid adjusted to 08:02 → prev=08:00, next=08:05, distance=~555m > 200
+        # degrade to nearest (08:00, 120s away → within middle_time_window)
+        m_offset = GPSMatcher(MatcherConfig(max_gps_distance=200, time_offset=-180))
+        mid_off = m_offset.match(photos, [seg])[1]
+        assert mid_off.success
+        assert mid_off.method == "nearest"
+
+    def test_time_offset_extreme_positive(self):
+        """Large time_offset pushes photo beyond all segments."""
+        seg = _uniform_segment()  # 08:00–08:10
+        photos = [make_photo("p.jpg", utc(8, 5))]
+        m = GPSMatcher(MatcherConfig(time_offset=3600))  # pushes to 09:05
+        result = m.match(photos, [seg])[0]
+        assert not result.success
+        assert result.reject_reason == RejectReason.NO_GPS_COVERAGE
+
+    def test_time_offset_extreme_negative(self):
+        """Large negative time_offset pushes photo before all segments."""
+        seg = _uniform_segment()
+        photos = [make_photo("p.jpg", utc(8, 5))]
+        m = GPSMatcher(MatcherConfig(time_offset=-3600))
+        result = m.match(photos, [seg])[0]
+        assert not result.success
+        assert result.reject_reason == RejectReason.NO_GPS_COVERAGE
+
+    def test_all_params_tight_middle_succeeds_via_nearest(self):
+        """Tight distance + tight middle_time but wide enough for nearest fallback."""
+        points = [
+            make_point(25.0, 100.0, utc(8, 0)),
+            make_point(25.001, 100.001, utc(8, 5)),  # ~130m apart
+        ]
+        seg = make_segment(points)
+        photos = [
+            make_photo("p0.jpg", utc(8, 1)),
+            make_photo("mid.jpg", utc(8, 2, 30)),
+            make_photo("p2.jpg", utc(8, 4)),
+        ]
+        m = GPSMatcher(MatcherConfig(
+            max_gps_distance=100,  # 130m > 100 → degrade
+            middle_time_window=400,  # nearest_td=150s < 400 → nearest OK
+            context_window=300,
+        ))
+        mid = m.match(photos, [seg])[1]
+        assert mid.success
+        assert mid.method == "nearest"
+
+    def test_overwrite_gps_with_offset(self):
+        """overwrite_gps=True + time_offset: GPS photos matched normally with offset."""
+        seg = _uniform_segment()
+        photos = [
+            make_photo("gps.jpg", utc(8, 5), has_gps=True, lat=30.0, lon=120.0),
+        ]
+        m = GPSMatcher(MatcherConfig(overwrite_gps=True, time_offset=60))
+        result = m.match(photos, [seg])[0]
+        assert result.success
+        # GPS from interpolated position at 08:06, not from existing 30.0/120.0
+        assert abs(result.gps.latitude - 25.0006) < 0.001
+
+    def test_match_isolated_false_with_middle_context(self):
+        """match_isolated=False but photo is middle → still interpolated (isolated only affects non-middle)."""
+        seg = _uniform_segment()
+        photos = [
+            make_photo("p0.jpg", utc(8, 0)),
+            make_photo("mid.jpg", utc(8, 5)),
+            make_photo("p2.jpg", utc(8, 10)),
+        ]
+        m = GPSMatcher(MatcherConfig(match_isolated=False, context_window=400))
+        mid = m.match(photos, [seg])[1]
+        assert mid.success
+        assert mid.method == "interpolated"
+
+        # But head/tail photos (isolated) are rejected
+        head = m.match(photos, [seg])[0]
+        tail = m.match(photos, [seg])[2]
+        assert not head.success  # match_isolated=False blocks first/last
+        assert not tail.success
+
+
+class TestHypothesisProperties:
+    """Property-based tests using Hypothesis for GPS matcher invariants."""
+
+    @pytest.fixture
+    def matcher(self):
+        return GPSMatcher(MatcherConfig())
+
+    @staticmethod
+    def _build_segment_and_photos(num_points, num_photos, point_ts, photo_ts, lats, lons):
+        points = [make_point(lats[i], lons[i], point_ts[i]) for i in range(num_points)]
+        seg = make_segment(points)
+        photos = [make_photo(f"p{i}.jpg", photo_ts[i]) for i in range(num_photos)]
+        return seg, photos
+
+    def test_result_count_equals_photo_count(self, matcher):
+        """match() always returns exactly len(photos) results."""
+        from hypothesis import given, settings
+        from hypothesis import strategies as st
+
+        @given(
+            num_points=st.integers(min_value=1, max_value=5),
+            num_photos=st.integers(min_value=1, max_value=10),
+        )
+        @settings(max_examples=30, deadline=None)
+        def check(num_points, num_photos):
+            base = utc(8, 0)
+            point_ts = sorted([base + i * 300 for i in range(num_points)])
+            photo_ts = sorted([base + i * 150 for i in range(num_photos)])
+            lats = [25.0 + i * 0.001 for i in range(num_points)]
+            lons = [100.0 + i * 0.001 for i in range(num_points)]
+            seg, photos = self._build_segment_and_photos(
+                num_points, num_photos, point_ts, photo_ts, lats, lons,
+            )
+            results = matcher.match(photos, [seg])
+            assert len(results) == len(photos)
+
+        check()
+
+    def test_all_methods_valid(self, matcher):
+        """Every result's method is in the valid set or None."""
+        from hypothesis import given, settings
+        from hypothesis import strategies as st
+
+        valid_methods = {"interpolated", "nearest", "auto_follow_prev", "auto_follow_next", "skipped"}
+
+        @given(
+            num_points=st.integers(min_value=1, max_value=5),
+            num_photos=st.integers(min_value=1, max_value=10),
+        )
+        @settings(max_examples=30, deadline=None)
+        def check(num_points, num_photos):
+            base = utc(8, 0)
+            point_ts = sorted([base + i * 300 for i in range(num_points)])
+            photo_ts = sorted([base + i * 150 for i in range(num_photos)])
+            lats = [25.0 + i * 0.001 for i in range(num_points)]
+            lons = [100.0 + i * 0.001 for i in range(num_points)]
+            seg, photos = self._build_segment_and_photos(
+                num_points, num_photos, point_ts, photo_ts, lats, lons,
+            )
+            results = matcher.match(photos, [seg])
+            for r in results:
+                if r.method is not None:
+                    assert r.method in valid_methods, f"Invalid method: {r.method}"
+
+        check()
+
+    def test_successful_photos_have_gps(self, matcher):
+        """Every successful result has a non-None GPS."""
+        from hypothesis import given, settings
+        from hypothesis import strategies as st
+
+        @given(
+            num_points=st.integers(min_value=1, max_value=5),
+            num_photos=st.integers(min_value=1, max_value=10),
+        )
+        @settings(max_examples=30, deadline=None)
+        def check(num_points, num_photos):
+            base = utc(8, 0)
+            point_ts = sorted([base + i * 300 for i in range(num_points)])
+            photo_ts = sorted([base + i * 150 for i in range(num_photos)])
+            lats = [25.0 + i * 0.001 for i in range(num_points)]
+            lons = [100.0 + i * 0.001 for i in range(num_points)]
+            seg, photos = self._build_segment_and_photos(
+                num_points, num_photos, point_ts, photo_ts, lats, lons,
+            )
+            results = matcher.match(photos, [seg])
+            for r in results:
+                if r.success:
+                    assert r.gps is not None
+                    assert r.gps.latitude is not None
+                    assert r.gps.longitude is not None
+
+        check()
+
+    def test_gps_coords_within_track_bounds(self, matcher):
+        """Matched GPS coordinates fall within the bounding box of the track."""
+        from hypothesis import given, settings
+        from hypothesis import strategies as st
+
+        @given(
+            num_points=st.integers(min_value=2, max_value=5),
+            num_photos=st.integers(min_value=1, max_value=8),
+        )
+        @settings(max_examples=30, deadline=None)
+        def check(num_points, num_photos):
+            base = utc(8, 0)
+            point_ts = sorted([base + i * 300 for i in range(num_points)])
+            lats = [25.0 + i * 0.001 for i in range(num_points)]
+            lons = [100.0 + i * 0.001 for i in range(num_points)]
+            photo_ts = sorted([base + i * 150 for i in range(num_photos)])
+            seg, photos = self._build_segment_and_photos(
+                num_points, num_photos, point_ts, photo_ts, lats, lons,
+            )
+            results = matcher.match(photos, [seg])
+            min_lat = min(p.latitude for p in seg.points)
+            max_lat = max(p.latitude for p in seg.points)
+            min_lon = min(p.longitude for p in seg.points)
+            max_lon = max(p.longitude for p in seg.points)
+            for r in results:
+                if r.success and r.method == "interpolated":
+                    assert min_lat - 0.0001 <= r.gps.latitude <= max_lat + 0.0001
+                    assert min_lon - 0.0001 <= r.gps.longitude <= max_lon + 0.0001
+
+        check()
+
+    def test_matching_order_independent(self, matcher):
+        """Same photos in different order produce the same results (when re-sorted by filename)."""
+        from hypothesis import given, settings, assume
+        from hypothesis import strategies as st
+        import random
+
+        @given(
+            seed=st.integers(min_value=0, max_value=9999),
+            num_photos=st.integers(min_value=3, max_value=8),
+        )
+        @settings(max_examples=20, deadline=None)
+        def check(seed, num_photos):
+            assume(num_photos >= 3)
+            base = utc(8, 0)
+            points = [make_point(25.0 + i * 0.001, 100.0 + i * 0.001, base + i * 300)
+                      for i in range(5)]
+            seg = make_segment(points)
+            photos = [make_photo(f"p{i:02d}.jpg", base + i * 200) for i in range(num_photos)]
+
+            results_original = matcher.match(photos, [seg])
+
+            rng = random.Random(seed)
+            indices = list(range(num_photos))
+            rng.shuffle(indices)
+            shuffled = [photos[i] for i in indices]
+            results_shuffled = matcher.match(shuffled, [seg])
+
+            # Sort both by filename and compare success + method
+            orig_by_name = {r.photo.filename: r for r in results_original}
+            shuf_by_name = {r.photo.filename: r for r in results_shuffled}
+            for name in orig_by_name:
+                assert orig_by_name[name].success == shuf_by_name[name].success, \
+                    f"Order mismatch for {name}: {orig_by_name[name].success} vs {shuf_by_name[name].success}"
+                assert orig_by_name[name].method == shuf_by_name[name].method, \
+                    f"Method mismatch for {name}: {orig_by_name[name].method} vs {shuf_by_name[name].method}"
+
+        check()

@@ -115,7 +115,7 @@ src/gps_photo_tracker/
 ├── gui/            # PySide6 GUI: main window, panels, dialogs
 └── logging_/       # Structured logging
 tests/
-├── unit/           # 510+ unit tests
+├── unit/           # 538+ unit tests
 ├── integration/    # End-to-end tests
 └── batch/          # Large-scale batch tests
 ```
