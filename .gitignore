@@ -16,5 +16,8 @@ dist/
 venv/
 test-data/
 docs/superpowers/
+docs/dev-notes/
 .claude/
 .superpowers/
+.next/
+tests/unit/test_generic_source.py
