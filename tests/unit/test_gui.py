@@ -534,7 +534,7 @@ class TestResultFilter:
 
     def test_result_filter_exists(self, main_window):
         assert main_window._result_filter is not None
-        assert main_window._result_filter.count() == 4
+        assert main_window._result_filter.count() == 5
 
     def test_apply_result_filter_shows_all(self, main_window):
         main_window._result_details = [

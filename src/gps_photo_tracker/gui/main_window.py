@@ -50,25 +50,28 @@ from gps_photo_tracker.gui.worker import Worker
 
 class MainWindow(QMainWindow):
     _METHOD_COLORS = {
-        "就近": QBrush(QColor(220, 245, 220)),
-        "插值": QBrush(QColor(220, 235, 255)),
-        "跟随上一个": QBrush(QColor(255, 220, 220)),
-        "跟随下一个": QBrush(QColor(255, 245, 200)),
-        "自动跟随上一个": QBrush(QColor(255, 230, 230)),
-        "自动跟随下一个": QBrush(QColor(255, 250, 210)),
-        "手动GPS": QBrush(QColor(230, 220, 255)),
-        "手动坐标": QBrush(QColor(230, 220, 255)),
-        "已跳过": QBrush(QColor(230, 230, 230)),
+        "① 就近": QBrush(QColor(220, 245, 220)),
+        "① 插值": QBrush(QColor(220, 235, 255)),
+        "② 跟随": QBrush(QColor(255, 230, 230)),
+        "③ 跟随": QBrush(QColor(255, 220, 220)),
+        "③ 手动": QBrush(QColor(230, 220, 255)),
+        "—": QBrush(QColor(230, 230, 230)),
     }
-    # English code → Chinese display label
+    # English code → Chinese display label (with ①②③ prefix)
     _METHOD_LABELS = {
-        "interpolated": "插值", "nearest": "就近", "skipped": "已跳过",
-        "follow_prev": "跟随上一个", "follow_next": "跟随下一个",
-        "auto_follow_prev": "自动跟随上一个", "auto_follow_next": "自动跟随下一个",
-        "manual_gps": "手动GPS", "manual_coord": "手动坐标",
+        "interpolated": "① 插值", "nearest": "① 就近",
+        "skipped": "—", "protected": "—",
+        "follow_prev": "③ 跟随", "follow_next": "③ 跟随",
+        "auto_follow_prev": "② 跟随", "auto_follow_next": "② 跟随",
+        "manual_gps": "③ 手动", "manual_coord": "③ 手动",
     }
     # Chinese display label → English code (reverse)
     _METHOD_CODES = {v: k for k, v in _METHOD_LABELS.items()}
+    # English code → default remark (for auto-follow and arrow-key follow)
+    _METHOD_REMARKS = {
+        "auto_follow_prev": "跟随上一张", "auto_follow_next": "跟随下一张",
+        "follow_prev": "跟随上一行", "follow_next": "跟随下一行",
+    }
 
     def __init__(self):
         super().__init__()
@@ -79,6 +82,7 @@ class MainWindow(QMainWindow):
         self._worker: Worker | None = None
         self._result_details: list[dict] = []
         self._original_details: list[dict] = []
+        self._protection_snapshots: dict[int, dict] = {}
         self._cached_segments = []
         self._cached_photos = []
         self._excluded_filenames: set[str] = set()
@@ -502,6 +506,7 @@ class MainWindow(QMainWindow):
         self._results_table.setRowCount(0)
         self._result_details.clear()
         self._original_details.clear()
+        self._protection_snapshots.clear()
         self._export_btn.setEnabled(False)
 
         config = self._get_matcher_config()
@@ -557,11 +562,11 @@ class MainWindow(QMainWindow):
                 except (ValueError, IndexError):
                     pass
 
-            # Read method/status columns
+            # Read method from UserRole (internal code, not display text)
             method_item = self._results_table.item(visual_row, 5)
-            method_text = method_item.text() if method_item else ""
-            method_map = self._METHOD_CODES
-            method = method_map.get(method_text, method_text)
+            method = method_item.data(Qt.ItemDataRole.UserRole) if method_item else ""
+            if method is None:
+                method = ""
 
             status_item = self._results_table.item(visual_row, 6)
             status_text = status_item.text() if status_item else ""
@@ -726,6 +731,7 @@ class MainWindow(QMainWindow):
         method = result_dict.get("method", "")
         method_text = self._METHOD_LABELS.get(method, "")
         method_item = QTableWidgetItem(method_text)
+        method_item.setData(Qt.ItemDataRole.UserRole, method)
         if method_text in self._METHOD_COLORS:
             method_item.setBackground(self._METHOD_COLORS[method_text])
         self._results_table.setItem(row, 5, method_item)
@@ -733,6 +739,8 @@ class MainWindow(QMainWindow):
         success = result_dict.get("success", False)
         if method == "skipped":
             status = "已跳过"
+        elif method == "protected":
+            status = "已保护"
         elif success:
             status = "成功"
         else:
@@ -743,8 +751,9 @@ class MainWindow(QMainWindow):
                       "no_track_points": "无轨迹点"}.get(reason, reason)
         self._results_table.setItem(row, 6, QTableWidgetItem(status))
 
-        # 备注 — empty for auto-matched results
-        self._results_table.setItem(row, 7, QTableWidgetItem(""))
+        # 备注 — auto-follow directions get remark text
+        remark = self._METHOD_REMARKS.get(method, "")
+        self._results_table.setItem(row, 7, QTableWidgetItem(remark))
 
         if sorting_was_enabled:
             self._results_table.setSortingEnabled(True)
@@ -759,11 +768,13 @@ class MainWindow(QMainWindow):
         details = self._result_details
         total = len(details)
         has_gps_total = sum(1 for d in details if d.get("has_gps"))
-        new_matched = sum(1 for d in details if not d.get("has_gps") and d.get("success"))
+        new_matched = sum(1 for d in details if not d.get("has_gps") and d.get("success")
+                         and d.get("method") != "protected")
         skipped_existing = sum(
             1 for d in details
-            if d.get("has_gps") and d.get("success") and not d.get("overwritten")
+            if d.get("method") == "skipped"
         )
+        protected = sum(1 for d in details if d.get("method") == "protected")
         overwritten = sum(1 for d in details if d.get("overwritten"))
         failed = sum(1 for d in details if not d.get("success"))
         matched = new_matched + skipped_existing + overwritten
@@ -772,18 +783,20 @@ class MainWindow(QMainWindow):
         # GPS coverage: pre (existing GPS) vs post (all with GPS after processing)
         gps_with_result = sum(
             1 for d in details
-            if d.get("success") and d.get("latitude") is not None
+            if d.get("success") and d.get("method") != "protected"
+            and d.get("latitude") is not None
         )
         pre_rate = has_gps_total / total if total > 0 else 0
         post_rate = gps_with_result / total if total > 0 else 0
         delta = post_rate - pre_rate
         delta_str = f"+{delta:.1%}" if delta >= 0 else f"{delta:.1%}"
 
-        # BUG-6: initial vs final success rate
-        review_methods = {"跟随上一个", "跟随下一个", "手动GPS", "手动坐标"}
+        # initial vs final success rate
+        review_methods = {"follow_prev", "follow_next", "manual_gps", "manual_coord"}
         initial_matched = sum(
             1 for d in details
             if d.get("success") and d.get("method", "") not in review_methods
+            and d.get("method") != "protected"
         )
         initial_rate = initial_matched / total if total > 0 else 0
 
@@ -794,9 +807,10 @@ class MainWindow(QMainWindow):
         else:
             success_line = f"成功率: {matched}/{total} ({final_rate:.1%})"
 
+        protected_part = f" | 已保护: {protected}" if protected > 0 else ""
         self._stats_label.setText(
             f"总数: {total} | 新匹配: {new_matched} | 跳过(已有): {skipped_existing} | "
-            f"覆盖: {overwritten} | 失败: {failed} | {success_line} | {coverage_line}"
+            f"覆盖: {overwritten} | 失败: {failed}{protected_part} | {success_line} | {coverage_line}"
         )
 
     def _on_review_ready(self, review_data: dict):
@@ -990,22 +1004,23 @@ class MainWindow(QMainWindow):
         """Update result table rows with review decisions (GPS coords, method, status)."""
         from gps_photo_tracker.core.models import GPSInfo
 
-        # Build time-ordered matched results for follow resolution
+        # Build time-ordered matched results for follow resolution (exclude untrusted)
         ordered = sorted(
-            [r for r in all_results if r.success and r.gps and r.photo.timestamp],
+            [r for r in all_results
+             if r.success and r.gps and r.photo.timestamp
+             and r.method not in ("skipped", "protected")],
             key=lambda r: r.photo.timestamp or 0,
         )
 
         # Resolve follow-prev/next to actual GPS for each decision
-        resolved_gps: dict[str, tuple[GPSInfo, str]] = {}  # path -> (gps, method_label)
+        resolved_gps: dict[str, tuple[GPSInfo, str]] = {}  # path -> (gps, method_code)
         for path_str, dec in reviewed_state.decisions.items():
             if dec.action == ReviewAction.MANUAL_GPS and dec.selected_point:
                 pt = dec.selected_point
-                resolved_gps[path_str] = (GPSInfo(pt.latitude, pt.longitude, pt.altitude), "手动GPS")
+                resolved_gps[path_str] = (GPSInfo(pt.latitude, pt.longitude, pt.altitude), "manual_gps")
             elif dec.action == ReviewAction.MANUAL_COORD and dec.manual_lat is not None and dec.manual_lon is not None:
-                resolved_gps[path_str] = (GPSInfo(dec.manual_lat, dec.manual_lon), "手动坐标")
+                resolved_gps[path_str] = (GPSInfo(dec.manual_lat, dec.manual_lon), "manual_coord")
             elif dec.action in (ReviewAction.FOLLOW_PREV, ReviewAction.FOLLOW_NEXT):
-                # Find the failed photo's timestamp in all_results
                 target_ts = None
                 for r in all_results:
                     if str(r.photo.path) == path_str and r.photo.timestamp:
@@ -1014,15 +1029,15 @@ class MainWindow(QMainWindow):
                 if target_ts is None:
                     continue
                 direction = -1 if dec.action == ReviewAction.FOLLOW_PREV else 1
-                label = "跟随上一个" if dec.action == ReviewAction.FOLLOW_PREV else "跟随下一个"
+                method_code = "follow_prev" if dec.action == ReviewAction.FOLLOW_PREV else "follow_next"
                 for j in range(len(ordered)):
                     idx = j if direction > 0 else len(ordered) - 1 - j
                     neighbor = ordered[idx]
                     if direction > 0 and neighbor.photo.timestamp > target_ts:
-                        resolved_gps[path_str] = (neighbor.gps, label)
+                        resolved_gps[path_str] = (neighbor.gps, method_code)
                         break
                     elif direction < 0 and neighbor.photo.timestamp < target_ts:
-                        resolved_gps[path_str] = (neighbor.gps, label)
+                        resolved_gps[path_str] = (neighbor.gps, method_code)
                         break
 
         # Update matching rows in the result table
@@ -1042,8 +1057,9 @@ class MainWindow(QMainWindow):
             if path_str not in resolved_gps:
                 continue
 
-            gps, method_label = resolved_gps[path_str]
+            gps, method_code = resolved_gps[path_str]
             gps_text = f"{gps.latitude:.4f}, {gps.longitude:.4f}"
+            method_label = self._METHOD_LABELS.get(method_code, method_code)
 
             # Update GPS(后) column — show the review-assigned GPS
             self._results_table.setItem(visual_row, 4, QTableWidgetItem(gps_text))
@@ -1059,11 +1075,12 @@ class MainWindow(QMainWindow):
                 self._results_table.item(visual_row, 4).setBackground(same_brush)
                 calc_item.setBackground(same_brush)
             else:
-                review_brush = QBrush(QColor(200, 230, 255))  # light blue for review-assigned
+                review_brush = QBrush(QColor(200, 230, 255))
                 self._results_table.item(visual_row, 4).setBackground(review_brush)
 
-            # Update method column
+            # Update method column (with UserRole for internal code)
             method_item = QTableWidgetItem(method_label)
+            method_item.setData(Qt.ItemDataRole.UserRole, method_code)
             if method_label in self._METHOD_COLORS:
                 method_item.setBackground(self._METHOD_COLORS[method_label])
             self._results_table.setItem(visual_row, 5, method_item)
@@ -1073,17 +1090,17 @@ class MainWindow(QMainWindow):
 
             # Update remark column — record the review action
             remark_map = {
-                "手动GPS": "手动选点",
-                "手动坐标": "手动输入坐标",
-                "跟随上一个": "Review: 跟随上一个",
-                "跟随下一个": "Review: 跟随下一个",
+                "manual_gps": "手动选点",
+                "manual_coord": "手动输入坐标",
+                "follow_prev": "Review: 跟随上一行",
+                "follow_next": "Review: 跟随下一行",
             }
-            remark_text = remark_map.get(method_label, method_label)
+            remark_text = remark_map.get(method_code, "")
             self._results_table.setItem(visual_row, 7, QTableWidgetItem(remark_text))
 
-            # Also update the detail dict so double-click shows correct info
+            # Also update the detail dict (store internal code, not display label)
             detail["success"] = True
-            detail["method"] = method_label
+            detail["method"] = method_code
             detail["latitude"] = gps.latitude
             detail["longitude"] = gps.longitude
             detail["altitude"] = gps.altitude
@@ -1228,14 +1245,17 @@ class MainWindow(QMainWindow):
             detail = self._result_details[data_row]
             success = detail.get("success", False)
             has_gps = detail.get("has_gps", False)
-            if filter_idx == 0:
+            method = detail.get("method", "")
+            if filter_idx == 0:   # 全部
                 self._results_table.setRowHidden(row, False)
-            elif filter_idx == 1:
-                self._results_table.setRowHidden(row, not success)
-            elif filter_idx == 2:
+            elif filter_idx == 1:  # 成功
+                self._results_table.setRowHidden(row, not success or method == "protected")
+            elif filter_idx == 2:  # 失败
                 self._results_table.setRowHidden(row, success)
-            elif filter_idx == 3:
-                self._results_table.setRowHidden(row, not (has_gps and success))
+            elif filter_idx == 3:  # 跳过
+                self._results_table.setRowHidden(row, method != "skipped")
+            elif filter_idx == 4:  # 已保护
+                self._results_table.setRowHidden(row, method != "protected")
 
     def _on_scan_done(self, segments: list[dict]):
         self._cached_segments = segments
@@ -1339,6 +1359,10 @@ class MainWindow(QMainWindow):
             return
         detail = self._result_details[data_row]
 
+        # Target check: protected rows cannot receive follow operations
+        if detail.get("method") == "protected":
+            return
+
         # Only act on rows that lack GPS(后)
         gps_after_item = self._results_table.item(visual_row, 4)
         if gps_after_item and gps_after_item.text() not in ("无", "—", ""):
@@ -1366,6 +1390,11 @@ class MainWindow(QMainWindow):
             if cand_ts is None:
                 continue
 
+            # Source check: skip untrusted records
+            cand_method = cand_detail.get("method", "")
+            if cand_method in ("skipped", "protected"):
+                continue
+
             if direction > 0 and cand_ts <= target_ts:
                 continue
             if direction < 0 and cand_ts >= target_ts:
@@ -1387,21 +1416,23 @@ class MainWindow(QMainWindow):
             return
 
         # Apply GPS to current row
-        method_label = "跟随上一个" if direction < 0 else "跟随下一个"
+        method_code = "follow_prev" if direction < 0 else "follow_next"
+        method_label = self._METHOD_LABELS[method_code]
         sorting_was_enabled = self._results_table.isSortingEnabled()
         if sorting_was_enabled:
             self._results_table.setSortingEnabled(False)
 
         self._results_table.setItem(visual_row, 4, QTableWidgetItem(found_gps_text))
         method_item = QTableWidgetItem(method_label)
+        method_item.setData(Qt.ItemDataRole.UserRole, method_code)
         if method_label in self._METHOD_COLORS:
             method_item.setBackground(self._METHOD_COLORS[method_label])
         self._results_table.setItem(visual_row, 5, method_item)
         self._results_table.setItem(visual_row, 6, QTableWidgetItem("成功"))
 
-        # Remark — record arrow key follow
-        arrow_remark = "← 跟随上一个" if direction < 0 else "→ 跟随下一个"
-        self._results_table.setItem(visual_row, 7, QTableWidgetItem(arrow_remark))
+        # Remark — record arrow key follow direction
+        remark = self._METHOD_REMARKS.get(method_code, "")
+        self._results_table.setItem(visual_row, 7, QTableWidgetItem(remark))
 
         # Color-code GPS(后) column
         same_brush = QBrush(QColor(220, 245, 220))
@@ -1413,9 +1444,9 @@ class MainWindow(QMainWindow):
         else:
             self._results_table.item(visual_row, 4).setBackground(follow_brush)
 
-        # Update detail dict
+        # Update detail dict (store internal method code, not display label)
         detail["success"] = True
-        detail["method"] = method_label
+        detail["method"] = method_code
         if found_lat is not None and found_lon is not None:
             detail["latitude"] = found_lat
             detail["longitude"] = found_lon
@@ -1432,61 +1463,76 @@ class MainWindow(QMainWindow):
             self._results_table.selectRow(next_row)
 
     def _reset_row_gps(self, visual_row: int):
-        """Reset current row to original auto-matched result (clear manual intervention)."""
-        data_row = self._get_detail_row(visual_row)
-        if data_row < 0 or data_row >= len(self._original_details):
-            return
-        original = self._original_details[data_row]
+        """Toggle protection on current row (replaces old reset-to-original behavior).
 
-        # Restore original values from snapshot dict
+        First press: protect — save current state to row-level snapshot, freeze GPS(后).
+        Second press: unprotect — restore from snapshot.
+        """
+        data_row = self._get_detail_row(visual_row)
+        if data_row < 0 or data_row >= len(self._result_details):
+            return
+        detail = self._result_details[data_row]
+
         sorting_was_enabled = self._results_table.isSortingEnabled()
         if sorting_was_enabled:
             self._results_table.setSortingEnabled(False)
 
-        # Restore GPS(后) — original computed GPS or empty
-        lat = original.get("latitude")
-        lon = original.get("longitude")
-        has_gps = original.get("has_gps", False)
-        success = original.get("success", False)
+        if data_row in self._protection_snapshots:
+            # --- Unprotect: restore from snapshot ---
+            snap = self._protection_snapshots.pop(data_row)
 
-        if has_gps and not success:
-            before_item = self._results_table.item(visual_row, 2)
-            after_text = before_item.text() if before_item else "无"
-        elif lat is not None and lon is not None:
-            after_text = f"{lat:.4f}, {lon:.4f}"
-        elif success:
-            after_text = "—"
+            self._results_table.setItem(visual_row, 4, QTableWidgetItem(snap["gps_after"]))
+
+            method_item = QTableWidgetItem(snap["method_label"])
+            method_item.setData(Qt.ItemDataRole.UserRole, snap["method_code"])
+            if snap["method_label"] in self._METHOD_COLORS:
+                method_item.setBackground(self._METHOD_COLORS[snap["method_label"]])
+            self._results_table.setItem(visual_row, 5, method_item)
+
+            self._results_table.setItem(visual_row, 6, QTableWidgetItem(snap["status"]))
+            self._results_table.setItem(visual_row, 7, QTableWidgetItem(snap["remark"]))
+
+            # Restore detail dict
+            detail["success"] = snap["success"]
+            detail["method"] = snap["method_code"]
+            detail["latitude"] = snap.get("latitude")
+            detail["longitude"] = snap.get("longitude")
+            detail["altitude"] = snap.get("altitude")
         else:
-            after_text = "—"
+            # --- Protect: save snapshot, freeze current GPS(后) ---
+            gps_after_item = self._results_table.item(visual_row, 4)
+            gps_after = gps_after_item.text() if gps_after_item else "—"
+            method_item_cur = self._results_table.item(visual_row, 5)
+            method_label = method_item_cur.text() if method_item_cur else "—"
+            method_code = method_item_cur.data(Qt.ItemDataRole.UserRole) if method_item_cur else ""
+            status_item = self._results_table.item(visual_row, 6)
+            status_text = status_item.text() if status_item else ""
+            remark_item = self._results_table.item(visual_row, 7)
+            remark_text = remark_item.text() if remark_item else ""
 
-        self._results_table.setItem(visual_row, 4, QTableWidgetItem(after_text))
+            self._protection_snapshots[data_row] = {
+                "gps_after": gps_after,
+                "method_label": method_label,
+                "method_code": method_code or detail.get("method", ""),
+                "status": status_text,
+                "remark": remark_text,
+                "success": detail.get("success", False),
+                "latitude": detail.get("latitude"),
+                "longitude": detail.get("longitude"),
+                "altitude": detail.get("altitude"),
+            }
 
-        # Restore method column
-        original_method = original.get("method", "")
-        method_text = self._METHOD_LABELS.get(original_method, "")
-        method_item = QTableWidgetItem(method_text)
-        if method_text in self._METHOD_COLORS:
-            method_item.setBackground(self._METHOD_COLORS[method_text])
-        self._results_table.setItem(visual_row, 5, method_item)
+            # Set protected display state (GPS(后) stays frozen, not reset to GPS(前))
+            method_text = "—"
+            m_item = QTableWidgetItem(method_text)
+            m_item.setData(Qt.ItemDataRole.UserRole, "protected")
+            if method_text in self._METHOD_COLORS:
+                m_item.setBackground(self._METHOD_COLORS[method_text])
+            self._results_table.setItem(visual_row, 5, m_item)
+            self._results_table.setItem(visual_row, 6, QTableWidgetItem("已保护"))
+            self._results_table.setItem(visual_row, 7, QTableWidgetItem(""))
 
-        # Restore status column
-        if original_method == "skipped":
-            status = "已跳过"
-        elif success:
-            status = "成功"
-        else:
-            reason = original.get("reject_reason", "失败")
-            status = {"no_gps_coverage": "无GPS覆盖", "time_diff": "时差过大",
-                      "gps_distance": "距离过大", "isolated_disabled": "孤立(已禁用)",
-                      "tail_isolated": "孤立(已禁用)",
-                      "no_track_points": "无轨迹点"}.get(reason, reason)
-        self._results_table.setItem(visual_row, 6, QTableWidgetItem(status))
-
-        # Clear remark
-        self._results_table.setItem(visual_row, 7, QTableWidgetItem(""))
-
-        # Sync _result_details back to original values
-        self._result_details[data_row] = dict(original)
+            detail["method"] = "protected"
 
         if sorting_was_enabled:
             self._results_table.setSortingEnabled(True)

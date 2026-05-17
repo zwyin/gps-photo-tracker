@@ -724,6 +724,7 @@ class TestSecondPassNeighborFollow:
             make_photo("fail.jpg", utc(8, 2)),
         ]
         results = matcher.match(photos, [seg])
+        matcher.auto_follow(results)
         assert results[0].success
         assert results[1].success
         assert results[1].method == "auto_follow_prev"
@@ -739,6 +740,7 @@ class TestSecondPassNeighborFollow:
             make_photo("p1.jpg", utc(8, 3, 20)),
         ]
         results = matcher.match(photos, [seg])
+        matcher.auto_follow(results)
         assert results[0].success
         assert results[0].method == "auto_follow_next"
 
@@ -754,6 +756,7 @@ class TestSecondPassNeighborFollow:
             make_photo("next.jpg", utc(8, 3, 50)),    # 70s from seg_b → matches
         ]
         results = matcher.match(photos, [seg_a, seg_b])
+        matcher.auto_follow(results)
         # prev=80s, next=60s → next closer → auto_follow_next
         assert results[1].success
         assert results[1].method == "auto_follow_next"
@@ -767,6 +770,7 @@ class TestSecondPassNeighborFollow:
             make_photo("fail.jpg", utc(8, 3)),       # 180s from seg → NO_GPS_COVERAGE
         ]
         results = matcher.match(photos, [seg])
+        matcher.auto_follow(results)
         assert not results[1].success  # 150s from p0 > 60
 
     def test_case_00975_far_neighbors(self):
@@ -780,6 +784,7 @@ class TestSecondPassNeighborFollow:
             make_photo("00984.jpg", utc(15, 14, 30)),
         ]
         results = matcher.match(photos, [seg_a, seg_b])
+        matcher.auto_follow(results)
         assert results[0].success
         assert not results[1].success
         assert results[2].success
@@ -867,6 +872,7 @@ class TestRealDataRegression:
             make_photo("00984.jpg", utc(14, 14, 30)),
         ]
         results = matcher.match(photos, [seg_a, seg_b])
+        matcher.auto_follow(results)
 
         # 00973: nearest match from seg_a
         assert results[0].success
@@ -903,6 +909,7 @@ class TestRealDataRegression:
             make_photo("beyond.jpg", utc(21, 18, 0)),   # 360s from far → FAIL
         ]
         results = matcher.match(photos, [seg])
+        matcher.auto_follow(results)
 
         # seed: nearest from track (240s)
         assert results[0].success
@@ -939,6 +946,7 @@ class TestRealDataRegression:
             make_photo("no_gps_2.jpg", utc(21, 5, 0)),   # 200s from skipped
         ]
         results = matcher.match(photos, [seg])
+        matcher.auto_follow(results)
 
         # skipped: has existing GPS, preserved
         assert results[0].success
@@ -967,6 +975,7 @@ class TestRealDataRegression:
             make_photo("follower.jpg", utc(21, 6, 0)),        # 240s from track_matched → auto_follow
         ]
         results = matcher.match(photos, [seg])
+        matcher.auto_follow(results)
 
         # track_matched: nearest from track (120s)
         assert results[0].success

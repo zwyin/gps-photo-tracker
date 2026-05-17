@@ -205,9 +205,11 @@ class ReviewDialog(QDialog):
         if not self._state.all_results:
             return suggestions
 
-        # Build sorted list of matched photos for neighbor lookup
+        # Build sorted list of matched photos for neighbor lookup (exclude untrusted)
         matched = sorted(
-            [r for r in self._state.all_results if r.success and r.gps and r.photo.timestamp],
+            [r for r in self._state.all_results
+             if r.success and r.gps and r.photo.timestamp
+             and r.method not in ("skipped", "protected")],
             key=lambda r: r.photo.timestamp or 0,
         )
         if not matched:

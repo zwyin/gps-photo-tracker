@@ -45,25 +45,21 @@ class GPSMatcher:
             else:
                 results.append(self._match_one(photo, sorted_photos, i, segments))
 
-        # Second pass: neighbor follow for failed photos
-        self._second_pass_neighbor_follow(results)
-
         return results
 
-    def _second_pass_neighbor_follow(self, results: list[MatchResult]):
-        """Second pass: failed photos try to follow nearest successful neighbor.
+    def auto_follow(self, results: list[MatchResult]) -> int:
+        """② 自动跟随：failed photos try to follow nearest successful neighbor.
 
         Scans results on each iteration so newly-rescued photos cascade
-        to their neighbors (fixes chain-breaking bug where pre-built list
-        missed photos rescued earlier in the same pass).
+        to their neighbors. Returns number of photos rescued.
         """
+        changed_count = 0
         for i, result in enumerate(results):
             if result.success or result.photo.timestamp is None:
                 continue
 
             target_ts = result.photo.timestamp
 
-            # Scan results directly (includes photos rescued earlier in this loop)
             prev_neighbor = None
             next_neighbor = None
             prev_diff = float("inf")
@@ -72,8 +68,8 @@ class GPSMatcher:
             for sr in results:
                 if not sr.success or sr.gps is None or sr.photo.timestamp is None:
                     continue
-                if sr.method == "skipped":
-                    continue  # existing GPS may be unreliable — don't propagate
+                if sr.method in ("skipped", "protected"):
+                    continue
                 diff = sr.photo.timestamp - target_ts
                 if diff < 0 and abs(diff) < prev_diff:
                     prev_diff = abs(diff)
@@ -93,6 +89,7 @@ class GPSMatcher:
                 continue
 
             if chosen_diff <= self.config.isolated_window:
+                changed_count += 1
                 logger.debug("  → 第二回合跟随 | %s → %s diff=%.0fs",
                              result.photo.filename, method, chosen_diff)
                 result.success = True
@@ -104,6 +101,8 @@ class GPSMatcher:
                 result.method = method
                 result.time_diff = chosen_diff
                 result.reject_reason = None
+
+        return changed_count
 
     def _match_one(
         self,

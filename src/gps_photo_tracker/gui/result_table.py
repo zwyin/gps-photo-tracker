@@ -35,11 +35,11 @@ def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidg
     filter_row = QHBoxLayout()
     filter_row.addWidget(QLabel("筛选:"))
     result_filter = QComboBox()
-    result_filter.addItems(["全部", "成功", "失败", "跳过"])
+    result_filter.addItems(["全部", "成功", "失败", "跳过", "已保护"])
     filter_row.addWidget(result_filter)
     filter_row.addStretch()
 
-    shortcut_hint = QLabel("←→ 跟随GPS | . 重置 | ↑↓ 导航")
+    shortcut_hint = QLabel("←→ 跟随GPS | . 保护 | ↑↓ 导航")
     shortcut_hint.setStyleSheet("color: #888; font-size: 11px;")
     filter_row.addWidget(shortcut_hint)
 
@@ -56,7 +56,7 @@ def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidg
 
     # Results table
     results_table = QTableWidget(0, 8)
-    results_table.setHorizontalHeaderLabels(["文件名", "日期时间", "GPS(前)", "计算GPS", "GPS(后)", "方式", "状态", "备注"])
+    results_table.setHorizontalHeaderLabels(["文件名", "日期时间", "GPS(前)", "计算GPS", "GPS(后)", "来源", "状态", "备注"])
     header = results_table.horizontalHeader()
     header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
     header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)

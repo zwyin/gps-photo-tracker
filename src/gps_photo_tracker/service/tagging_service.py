@@ -114,7 +114,7 @@ class GPSTaggingService:
         search_range = range(idx + direction, -1 if direction < 0 else len(ordered), direction)
         for j in search_range:
             neighbor = ordered[j]
-            if neighbor.success and neighbor.gps:
+            if neighbor.success and neighbor.gps and neighbor.method not in ("skipped", "protected"):
                 result.review_gps = GPSInfo(
                     latitude=neighbor.gps.latitude,
                     longitude=neighbor.gps.longitude,
@@ -158,7 +158,7 @@ class GPSTaggingService:
                     elapsed_seconds=time.time() - start,
                 ))
 
-            if result.method == "skipped":
+            if result.method == "skipped" or result.method == "protected":
                 skipped += 1
                 if is_copy and options and options.output_dir:
                     dst = self._copy_destination(result.photo.path, options, photo_dir)
@@ -356,6 +356,7 @@ class GPSTaggingService:
         # Matching phase
         if valid_photos:
             match_results = matcher.match(valid_photos, segments)
+            matcher.auto_follow(match_results)
 
         # Create checkpoint for COPY mode resume
         if use_checkpoint and options and options.output_dir:
@@ -395,7 +396,7 @@ class GPSTaggingService:
                 ))
 
             if result.success:
-                if result.method == "skipped":
+                if result.method in ("skipped", "protected"):
                     skipped += 1
                     if is_copy and options and options.output_dir:
                         dst = self._copy_destination(result.photo.path, options, photo_dir)

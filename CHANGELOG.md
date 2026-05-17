@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-05-17
+
+### Added
+
+- **Source column redesign**: "方式" column renamed to "来源" with ①②③ step prefix labels (① 插值, ① 就近, ② 跟随, ③ 跟随, ③ 手动, —). Direction info (prev/next) moved to remark column
+- **Protection mechanism**: `.` key now toggles per-photo protection (replaces old reset-to-original). Protected photos freeze current GPS(后), skip writing, and cannot be followed. Each row has independent snapshot for precise unprotect restore
+- **Trusted record filtering**: All follow operations (auto_follow, review dialog, arrow keys) now consistently exclude skipped and protected photos as GPS sources
+- **Protected filter**: New "已保护" filter option in result table dropdown
+- **Stats card**: Shows "已保护" count separately when any photos are protected
+
+### Changed
+
+- **auto_follow API separation**: `GPSMatcher.auto_follow()` is now a public method called separately from `match()` in service layer, making the ①预览匹配 → ②自动跟随 pipeline explicit
+- **Method internal codes stored in UserRole**: Table items store internal English codes (`interpolated`, `auto_follow_prev`, etc.) in `Qt.UserRole` for reliable WYSIWYG write path, eliminating display-label reverse-mapping
+- **Remark column auto-generated**: Auto-follow photos automatically show direction ("跟随上一张"/"跟随下一张") in remark column
+
+### Fixed
+
+- Skipped photos (with existing GPS) no longer show a value in "计算GPS" column — `gps` field in `MatchResult` is now `None` for skipped photos
+- Second-pass auto_follow excludes skipped photos — camera GPS may be unreliable and should not propagate to neighbors
+- Cascade chain propagation in second-pass auto_follow — scans results dynamically, allowing rescued photos to cascade
+- Export filename commit hash fallback — uses `git rev-parse` in dev mode when `__commit__` is empty
+- Skipped photo counting in `process()` and `write_phase()` — correctly counted as "skipped"
+- `_apply_follow` in tagging_service now excludes skipped/protected as follow sources
+
+### Tested
+
+- 506 tests passing
+- 5 rounds of independent design review via sub-agents
+
 ## [0.16.0] - 2026-05-17
 
 ### Added
@@ -228,6 +258,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GUI integrated smart recommend, workers, resume, and report controls
 - BatchProcessor uses ThreadPoolExecutor (not ProcessPoolExecutor)
 
+[0.17.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.13.0...v0.14.0
