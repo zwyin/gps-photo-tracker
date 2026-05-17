@@ -158,7 +158,12 @@ class GPSTaggingService:
                     elapsed_seconds=time.time() - start,
                 ))
 
-            if result.success and effective_gps:
+            if result.method == "skipped":
+                skipped += 1
+                if is_copy and options and options.output_dir:
+                    dst = self._copy_destination(result.photo.path, options, photo_dir)
+                    self._file_provider.copy_file(result.photo.path, dst)
+            elif result.success and effective_gps:
                 matched += 1
                 if not is_preview:
                     write_result = MatchResult(
@@ -390,44 +395,50 @@ class GPSTaggingService:
                 ))
 
             if result.success:
-                matched += 1
-                if self._op_logger:
-                    self._op_logger.log_match_success(result)
-                if not is_preview and options and result.gps:
-                    if self._should_write(result, options):
-                        if result.photo.has_gps:
-                            overwritten += 1
-                            if self._op_logger and result.photo.existing_gps:
-                                self._op_logger.log_gps_overwrite(
-                                    result.photo, result.photo.existing_gps, result.gps,
-                                )
-                        if use_parallel:
-                            write_tasks.append(WriteTask(
-                                match_result=result, options=options, photo_dir=photo_dir,
-                            ))
-                            filename_to_overwritten[result.photo.filename] = result.photo.has_gps
+                if result.method == "skipped":
+                    skipped += 1
+                    if is_copy and options and options.output_dir:
+                        dst = self._copy_destination(result.photo.path, options, photo_dir)
+                        self._file_provider.copy_file(result.photo.path, dst)
+                else:
+                    matched += 1
+                    if self._op_logger:
+                        self._op_logger.log_match_success(result)
+                    if not is_preview and options and result.gps:
+                        if self._should_write(result, options):
+                            if result.photo.has_gps:
+                                overwritten += 1
+                                if self._op_logger and result.photo.existing_gps:
+                                    self._op_logger.log_gps_overwrite(
+                                        result.photo, result.photo.existing_gps, result.gps,
+                                    )
+                            if use_parallel:
+                                write_tasks.append(WriteTask(
+                                    match_result=result, options=options, photo_dir=photo_dir,
+                                ))
+                                filename_to_overwritten[result.photo.filename] = result.photo.has_gps
+                            else:
+                                try:
+                                    dst = self._write_photo(result, options, photo_dir)
+                                    if self._op_logger:
+                                        self._op_logger.log_write_success(result.photo, result.gps, dest=dst)
+                                except Exception as e:
+                                    failed += 1
+                                    matched -= 1
+                                    if self._op_logger:
+                                        self._op_logger.log_error(f"write: {result.photo.filename}", e)
+                                    if is_copy and options.output_dir:
+                                        try:
+                                            dst = self._copy_destination(result.photo.path, options, photo_dir)
+                                            self._file_provider.copy_file(result.photo.path, dst)
+                                        except Exception as copy_err:
+                                            if self._op_logger:
+                                                self._op_logger.log_error(f"copy_after_write_fail: {result.photo.filename}", copy_err)
                         else:
-                            try:
-                                dst = self._write_photo(result, options, photo_dir)
-                                if self._op_logger:
-                                    self._op_logger.log_write_success(result.photo, result.gps, dest=dst)
-                            except Exception as e:
-                                failed += 1
-                                matched -= 1
-                                if self._op_logger:
-                                    self._op_logger.log_error(f"write: {result.photo.filename}", e)
-                                if is_copy and options.output_dir:
-                                    try:
-                                        dst = self._copy_destination(result.photo.path, options, photo_dir)
-                                        self._file_provider.copy_file(result.photo.path, dst)
-                                    except Exception as copy_err:
-                                        if self._op_logger:
-                                            self._op_logger.log_error(f"copy_after_write_fail: {result.photo.filename}", copy_err)
-                    else:
-                        skipped += 1
-                        if is_copy and options.output_dir:
-                            dst = self._copy_destination(result.photo.path, options, photo_dir)
-                            self._file_provider.copy_file(result.photo.path, dst)
+                            skipped += 1
+                            if is_copy and options.output_dir:
+                                dst = self._copy_destination(result.photo.path, options, photo_dir)
+                                self._file_provider.copy_file(result.photo.path, dst)
             else:
                 failed += 1
                 if self._op_logger:

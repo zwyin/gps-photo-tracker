@@ -40,7 +40,7 @@ class GPSMatcher:
             if photo.has_gps and not self.config.overwrite_gps:
                 results.append(MatchResult(
                     photo=photo, success=True, method="skipped",
-                    gps=photo.existing_gps,
+                    gps=None,
                 ))
             else:
                 results.append(self._match_one(photo, sorted_photos, i, segments))

@@ -645,9 +645,7 @@ class TestSkipExistingGPS:
         r = results[0]
         assert r.success
         assert r.method == "skipped"
-        assert r.gps is not None
-        assert r.gps.latitude == 25.0
-        assert r.gps.longitude == 100.0
+        assert r.gps is None  # skipped photos don't get computed GPS
 
     def test_skip_gps_photo_mixed_batch(self):
         """Mixed batch: GPS photos skipped, non-GPS photos matched normally."""
@@ -685,15 +683,16 @@ class TestSkipExistingGPS:
         assert r.gps.latitude != 25.0 or r.gps.longitude != 100.0
 
     def test_skip_preserves_existing_gps(self):
-        """Skipped photos keep their original GPS coordinates."""
+        """Skipped photos: gps is None (no computation), existing_gps preserved on photo."""
         matcher = GPSMatcher(MatcherConfig())
         seg = _uniform_segment()
         photo = make_photo("gps.jpg", utc(8, 5), has_gps=True, lat=30.5, lon=120.3, alt=500.0)
         results = matcher.match([photo], [seg])
         r = results[0]
-        assert r.gps.latitude == 30.5
-        assert r.gps.longitude == 120.3
-        assert r.gps.altitude == 500.0
+        assert r.gps is None  # skipped → no computed GPS
+        assert r.photo.existing_gps.latitude == 30.5
+        assert r.photo.existing_gps.longitude == 120.3
+        assert r.photo.existing_gps.altitude == 500.0
 
     def test_no_timestamp_photo_filtered_out(self):
         """Photos without timestamp are excluded from matching entirely."""
