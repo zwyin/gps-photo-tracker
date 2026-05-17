@@ -5,6 +5,102 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-05-17
+
+### Added
+
+- WYSIWYG step-based workflow: ① 预览匹配 → ② 审核 → ③ 拷贝/覆盖
+- `_collect_table_results()` reads GPS directly from table column (what you see is what gets written)
+- `_original_details` deep copy enables true `.` key reset to original match
+- Worker `pre_computed_results` parameter skips scan+match, writes directly
+- COPY mode wraps flat photo directories with `photo_dir.name` subdirectory
+
+### Changed
+
+- Step buttons (① ② ③) replace mode radio buttons in config panel
+- `_copy_destination()` adds `photo_dir.name` wrapper for flat directories
+- `concurrency.py` parallel write path synced with same directory fix
+- Removed dead code: `_review_decisions`, `_reviewed_results`
+
+### Fixed
+
+- Preview results (arrow follows, review edits, resets) now carry forward to execution
+- Altitude preserved in WYSIWYG write path
+- Skipped photos no longer counted as failures in write phase
+- Parent directories created before EXIF write (sequential + parallel paths)
+
+### Tested
+
+- 487 tests passing, 78% coverage
+- Independent E2E testing + code review via sub-agents
+
+## [0.12.0] - 2026-05-17
+
+### Added
+
+- Review reopen button: re-open review dialog after closing
+- Dot reset key: "." restores original GPS match, clears remarks
+- Remarks column: 8th column tracks manual interventions (arrow follow, manual GPS, etc.)
+- Arrow key GPS follow: ← → keys follow adjacent matched GPS
+
+### Changed
+
+- Arrow key handling: ← → trigger GPS follow instead of cell navigation
+- Status/method/remarks three-column design for clearer result classification
+
+### Fixed
+
+- Arrow key interception by QTableWidget cell navigation
+- Splitter handle visibility and hover color-coding
+
+### Tested
+
+- 430+ tests passing
+
+## [0.11.0] - 2026-05-16
+
+### Added
+
+- Date/time column in results table
+- Pre-processing overview: total photos, existing GPS, GPS coverage stats
+- GPS coverage delta display (e.g., "45% → 78% (+33%)")
+- Method column color coding for GPS interpolation types
+
+### Fixed
+
+- GPS column highlighting for review suggestions
+- Splitter visibility with visual indicators
+- Preview scaling on splitter resize
+- Isolated photo matching (header/tail orphans)
+- Existing GPS skip when overwrite disabled
+- Statistics update after review corrections
+
+### Tested
+
+- 380+ tests passing
+
+## [0.10.0] - 2026-05-16
+
+### Added
+
+- Drag-and-drop support for main window
+- Configuration profiles (save/load multiple settings)
+- Logging system with rolling rotation and GUI log viewer
+- Thumbnail preloading (±3 rows cached)
+- Column auto-sizing and default sort
+- GPS color coding (overwritten vs. matched)
+- Resizable splitters for panel adjustment
+- Smart review suggestions
+
+### Fixed
+
+- File handler leaks (Windows compatibility)
+- Timezone display consistency
+- Result table: empty rows, sorting index, cursor warnings
+- Review dialog: keyboard navigation, date-time display
+- Cross-platform CI test failures
+- Settings layout, preview display, splitter initialization
+
 ## [0.9.0] - 2026-05-16
 
 ### Added
