@@ -1158,10 +1158,7 @@ class MainWindow(QMainWindow):
         # Only act on rows that lack GPS(后)
         gps_after_item = self._results_table.item(visual_row, 4)
         if gps_after_item and gps_after_item.text() not in ("无", "—", ""):
-            # Already has GPS — just advance selection
-            next_row = visual_row + direction
-            if 0 <= next_row < self._results_table.rowCount():
-                self._results_table.selectRow(next_row)
+            # Already has GPS — do nothing (let ↑↓ handle navigation)
             return
 
         # Search for nearest row with GPS(后) in the given direction
