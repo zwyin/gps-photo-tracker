@@ -1163,7 +1163,17 @@ class MainWindow(QMainWindow):
         dir_name = Path(photo_dir).name if photo_dir else "results"
         safe_name = self._sanitize_filename(dir_name)
         today = date.today().isoformat()
-        suffix = f"_v{__version__}{f'_{__commit__}' if __commit__ else ''}"
+        commit = __commit__
+        if not commit:
+            import subprocess
+            try:
+                commit = subprocess.run(
+                    ["git", "rev-parse", "--short", "HEAD"],
+                    capture_output=True, text=True, timeout=2,
+                ).stdout.strip()
+            except Exception:
+                commit = ""
+        suffix = f"_v{__version__}{f'_{commit}' if commit else ''}"
         return f"GPS追踪_{safe_name}_{today}{suffix}.{ext}"
 
     @staticmethod

@@ -888,40 +888,98 @@ class TestRealDataRegression:
     def test_case_02622_cascade_chain(self):
         """v0.16.0 chain bug: rescued photos must cascade to neighbors.
 
-        Real case from 02622-02641: 02606 (has GPS, skipped) was the only seed.
-        02608-02616 were within 300s of 02606 → rescued. But 02622 was 310s
-        from 02606 and only 26s from 02616 (just rescued). With pre-built list,
-        02622 couldn't see 02616 and failed. With dynamic scan, it cascades.
-
-        Setup: track point far away (no first-pass matches), seed with has_gps,
-        chain of photos each 180s apart.
+        Only seed is within isolated_window of the track point.
+        Anchor follows seed. Far cascades from anchor (NOT from seed —
+        far is 480s from seed, exceeding the 300s window).
+        Beyond fails (360s from far exceeds window).
         """
         matcher = GPSMatcher(MatcherConfig(isolated_window=300))
-        # Track point at 20:00 — too far from 21:xx photos for first pass
-        seg = make_segment([make_point(25.0, 100.0, utc(20, 0))])
+        # Track at 21:00 — only seed (21:04, 240s away) within tolerance
+        seg = make_segment([make_point(25.0, 100.0, utc(21, 0, 0))])
 
         photos = [
-            make_photo("seed.jpg", utc(21, 6, 0), has_gps=True,
-                       lat=25.0554, lon=102.7028),  # skipped → seed
-            make_photo("anchor.jpg", utc(21, 9, 0)),    # 180s from seed → auto_follow
-            make_photo("far.jpg", utc(21, 12, 0)),      # 180s from anchor → cascade
+            make_photo("seed.jpg", utc(21, 4, 0)),      # 240s from track → nearest
+            make_photo("anchor.jpg", utc(21, 8, 0)),    # 240s from seed → auto_follow
+            make_photo("far.jpg", utc(21, 12, 0)),      # 240s from anchor → cascade
             make_photo("beyond.jpg", utc(21, 18, 0)),   # 360s from far → FAIL
         ]
         results = matcher.match(photos, [seg])
 
-        # seed: skipped
+        # seed: nearest from track (240s)
         assert results[0].success
-        assert results[0].method == "skipped"
+        assert results[0].method == "nearest"
 
-        # anchor: auto_follow from seed (180s)
+        # anchor: auto_follow from seed (240s)
         assert results[1].success
         assert results[1].method == "auto_follow_prev"
-        assert results[1].time_diff == 180
+        assert results[1].time_diff == 240
 
-        # far: must cascade from anchor (180s), NOT from seed (360s > 300s)
+        # far: cascade from anchor (240s), NOT from seed (480s > 300s)
         assert results[2].success
         assert results[2].method == "auto_follow_prev"
-        assert results[2].time_diff == 180
+        assert results[2].time_diff == 240
 
         # beyond: 360s from far → exceeds window
         assert not results[3].success
+
+    def test_skipped_photos_excluded_from_auto_follow(self):
+        """Skipped photos (has existing GPS) must NOT propagate to neighbors.
+
+        Real case: 02606 has existing GPS (skipped), 02608+ should NOT
+        auto_follow from it — that GPS may be unreliable (camera GPS).
+        Only track-matched GPS should propagate.
+        """
+        matcher = GPSMatcher(MatcherConfig(isolated_window=300))
+        # No track points near 21:xx → no first-pass matches possible
+        seg = make_segment([make_point(25.0, 100.0, utc(20, 0))])
+
+        photos = [
+            make_photo("skipped.jpg", utc(21, 1, 40), has_gps=True,
+                       lat=25.0554, lon=102.7028),  # existing GPS → skipped
+            make_photo("no_gps_1.jpg", utc(21, 3, 0)),   # 80s from skipped
+            make_photo("no_gps_2.jpg", utc(21, 5, 0)),   # 200s from skipped
+        ]
+        results = matcher.match(photos, [seg])
+
+        # skipped: has existing GPS, preserved
+        assert results[0].success
+        assert results[0].method == "skipped"
+
+        # no_gps_1: should NOT auto_follow from skipped photo
+        assert not results[1].success
+
+        # no_gps_2: same — no valid neighbor to follow
+        assert not results[2].success
+
+    def test_skipped_does_not_block_track_matched_cascade(self):
+        """Skipped photo between track-matched photo and follower.
+
+        Follower auto_follows from track-matched photo (not from skipped),
+        because skipped photos are excluded from auto_follow neighbor search.
+        """
+        matcher = GPSMatcher(MatcherConfig(isolated_window=300))
+        # Track at 21:00 — only photos within 300s get segment match
+        seg = make_segment([make_point(25.0, 100.0, utc(21, 0, 0))])
+
+        photos = [
+            make_photo("track_matched.jpg", utc(21, 2, 0)),   # 120s from track → nearest
+            make_photo("skipped.jpg", utc(21, 4, 0), has_gps=True,
+                       lat=25.0554, lon=102.7028),             # existing GPS → skipped
+            make_photo("follower.jpg", utc(21, 6, 0)),        # 240s from track_matched → auto_follow
+        ]
+        results = matcher.match(photos, [seg])
+
+        # track_matched: nearest from track (120s)
+        assert results[0].success
+        assert results[0].method == "nearest"
+
+        # skipped: preserved
+        assert results[1].success
+        assert results[1].method == "skipped"
+
+        # follower: auto_follow from track_matched (240s), NOT from skipped
+        assert results[2].success
+        assert results[2].method == "auto_follow_prev"
+        assert results[2].time_diff == 240
+        # GPS from track point (via track_matched), not from skipped photo
+        assert results[2].gps.latitude == pytest.approx(25.0, abs=0.001)

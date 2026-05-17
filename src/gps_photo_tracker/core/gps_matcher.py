@@ -72,6 +72,8 @@ class GPSMatcher:
             for sr in results:
                 if not sr.success or sr.gps is None or sr.photo.timestamp is None:
                     continue
+                if sr.method == "skipped":
+                    continue  # existing GPS may be unreliable — don't propagate
                 diff = sr.photo.timestamp - target_ts
                 if diff < 0 and abs(diff) < prev_diff:
                     prev_diff = abs(diff)
