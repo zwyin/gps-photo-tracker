@@ -55,8 +55,8 @@ def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidg
     layout.addLayout(filter_row)
 
     # Results table
-    results_table = QTableWidget(0, 8)
-    results_table.setHorizontalHeaderLabels(["文件名", "日期时间", "GPS(前)", "计算GPS", "GPS(后)", "来源", "状态", "备注"])
+    results_table = QTableWidget(0, 9)
+    results_table.setHorizontalHeaderLabels(["文件名", "日期时间", "GPS(前)", "计算GPS", "GPS(后)", "来源", "状态", "写入状态", "备注"])
     header = results_table.horizontalHeader()
     header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
     header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -65,7 +65,8 @@ def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidg
     header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
     header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
     header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-    header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+    header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+    header.setSectionResizeMode(8, QHeaderView.ResizeMode.Stretch)
     results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
     results_table.setSortingEnabled(True)

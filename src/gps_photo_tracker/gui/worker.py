@@ -22,6 +22,7 @@ class Worker(QThread):
 
     progress_signal = Signal(str, int, int, str, float)  # phase, current, total, filename, elapsed
     photo_signal = Signal(dict)  # MatchResult as dict
+    write_signal = Signal(dict)  # Write phase update (MatchResult as dict)
     done_signal = Signal(dict)  # BatchResult as dict
     scan_done_signal = Signal(list)  # list of GPX segment dicts for browser
     photos_scanned_signal = Signal(list)  # list of photo info dicts for browser
@@ -276,7 +277,7 @@ class Worker(QThread):
                 "capture_time_ts": result.photo.timestamp,
                 "gps_before": gps_before,
             }
-            self.photo_signal.emit(detail)
+            self.write_signal.emit(detail)
 
         try:
             result = service.write_phase(

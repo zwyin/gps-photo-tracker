@@ -702,11 +702,16 @@ class TestRealtimeStatsCard:
 class TestCompletionNotification:
 
     def test_on_done_shows_message_box(self, main_window, monkeypatch):
-        """Fix #3: _on_done should show QMessageBox.information."""
+        """Fix #3: _on_done should show QMessageBox.information (via delayed timer)."""
         informed = []
         monkeypatch.setattr(
             "PySide6.QtWidgets.QMessageBox.information",
             lambda *a, **kw: informed.append(True),
+        )
+        # Make QTimer.singleShot execute immediately
+        monkeypatch.setattr(
+            "PySide6.QtCore.QTimer.singleShot",
+            lambda ms, cb: cb(),
         )
         main_window._on_done({
             "total": 5, "matched": 3, "failed": 1, "skipped": 1, "success_rate": 0.6,
@@ -719,6 +724,10 @@ class TestCompletionNotification:
         monkeypatch.setattr(
             "PySide6.QtWidgets.QMessageBox.information",
             lambda self_w, title, msg: messages.append((title, msg)),
+        )
+        monkeypatch.setattr(
+            "PySide6.QtCore.QTimer.singleShot",
+            lambda ms, cb: cb(),
         )
         main_window._on_done({
             "total": 10, "matched": 8, "failed": 1, "skipped": 1, "success_rate": 0.8,
@@ -735,6 +744,10 @@ class TestCompletionNotification:
         monkeypatch.setattr(
             "PySide6.QtWidgets.QMessageBox.information",
             lambda *a, **kw: None,
+        )
+        monkeypatch.setattr(
+            "PySide6.QtCore.QTimer.singleShot",
+            lambda ms, cb: cb(),
         )
         main_window._set_processing(True)
         assert not main_window._step1_btn.isEnabled()
@@ -1384,7 +1397,7 @@ class TestExportResults:
             table.setItem(1, col, QTableWidgetItem(f"r1c{col}"))
 
         headers, rows = main_window._collect_visible_table_data()
-        assert len(headers) == 8
+        assert len(headers) == 9
         assert headers[0] == "文件名"
         assert len(rows) == 2
         assert rows[0][0] == "r0c0"
@@ -1586,3 +1599,137 @@ class TestSourceColumnMenu:
         labels = widget.findChildren(QLabel)
         hint_texts = [l.text() for l in labels]
         assert any("Esc" in t for t in hint_texts), f"No Esc in hints: {hint_texts}"
+
+
+# ── v0.19.0: Write signal + write status column tests ──────────
+
+class TestWriteSignal:
+    """BUG-1 (v0.19.0): Write phase uses write_signal, not photo_signal."""
+
+    def test_worker_has_write_signal(self, qapp):
+        """Worker class should have write_signal defined."""
+        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+                   ProcessOptions(mode=ProcessMode.PREVIEW))
+        assert hasattr(w, "write_signal")
+
+    def test_write_signal_connected_in_step3(self, main_window, monkeypatch):
+        """Step 3 execution should connect write_signal to _on_write_update."""
+        # Populate table first
+        main_window._on_photo_processed({
+            "filename": "a.jpg", "success": True, "method": "interpolated",
+            "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+        })
+
+        # Verify _on_write_update updates write status column
+        main_window._on_write_update({
+            "filename": "a.jpg", "success": True, "method": "interpolated",
+        })
+        write_status_item = main_window._results_table.item(0, 7)
+        assert write_status_item is not None
+        assert write_status_item.text() in ("已复制", "已覆盖")
+
+
+class TestWriteStatusColumn:
+    """FEAT-1 (v0.19.0): Write status column in result table."""
+
+    def test_table_has_9_columns(self, main_window):
+        """Result table should have 9 columns (including write status)."""
+        assert main_window._results_table.columnCount() == 9
+
+    def test_write_status_column_header(self, main_window):
+        """Column 7 header should be '写入状态'."""
+        header = main_window._results_table.horizontalHeaderItem(7)
+        assert header is not None
+        assert header.text() == "写入状态"
+
+    def test_write_update_sets_copied_status(self, main_window):
+        """Successful COPY write should show '已复制'."""
+        main_window._on_photo_processed({
+            "filename": "test.jpg", "success": True, "method": "interpolated",
+            "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+        })
+        main_window._write_mode = ProcessMode.COPY
+        main_window._on_write_update({
+            "filename": "test.jpg", "success": True, "method": "interpolated",
+        })
+        assert main_window._results_table.item(0, 7).text() == "已复制"
+
+    def test_write_update_sets_overwrite_status(self, main_window):
+        """Successful OVERWRITE write should show '已覆盖'."""
+        main_window._on_photo_processed({
+            "filename": "test.jpg", "success": True, "method": "interpolated",
+            "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+        })
+        main_window._write_mode = ProcessMode.OVERWRITE
+        main_window._on_write_update({
+            "filename": "test.jpg", "success": True, "method": "interpolated",
+        })
+        assert main_window._results_table.item(0, 7).text() == "已覆盖"
+
+    def test_write_update_sets_skip_status(self, main_window):
+        """Skipped photo should show '跳过'."""
+        main_window._on_photo_processed({
+            "filename": "skip.jpg", "success": True, "method": "skipped",
+            "has_gps": True, "latitude": 25.0, "longitude": 100.0,
+        })
+        main_window._on_write_update({
+            "filename": "skip.jpg", "success": True, "method": "skipped",
+        })
+        assert main_window._results_table.item(0, 7).text() == "跳过"
+
+    def test_write_update_sets_failed_status(self, main_window):
+        """Failed write should show '失败'."""
+        main_window._on_photo_processed({
+            "filename": "fail.jpg", "success": False, "method": "",
+            "has_gps": False, "reject_reason": "no_gps_coverage",
+        })
+        main_window._on_write_update({
+            "filename": "fail.jpg", "success": False, "method": "",
+        })
+        assert main_window._results_table.item(0, 7).text() == "失败"
+
+    def test_write_does_not_duplicate_rows(self, main_window):
+        """Write phase should not add new rows to the table (BUG-1)."""
+        for i in range(3):
+            main_window._on_photo_processed({
+                "filename": f"photo{i}.jpg", "success": True, "method": "interpolated",
+                "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+            })
+        assert main_window._results_table.rowCount() == 3
+
+        # Simulate write updates (should only update column 7, not add rows)
+        main_window._write_mode = ProcessMode.COPY
+        for i in range(3):
+            main_window._on_write_update({
+                "filename": f"photo{i}.jpg", "success": True, "method": "interpolated",
+            })
+        assert main_window._results_table.rowCount() == 3, "Write updates should not add rows"
+
+    def test_done_popup_skipped_when_processing(self, main_window, monkeypatch):
+        """BUG-2: Completion popup should be skipped if user started a new task."""
+        informed = []
+        monkeypatch.setattr(
+            "PySide6.QtWidgets.QMessageBox.information",
+            lambda *a, **kw: informed.append(True),
+        )
+
+        # Make QTimer.singleShot capture the callback
+        captured_cb = []
+        monkeypatch.setattr(
+            "PySide6.QtCore.QTimer.singleShot",
+            lambda ms, cb: captured_cb.append(cb),
+        )
+
+        main_window._on_done({
+            "total": 5, "matched": 3, "failed": 1, "skipped": 1, "success_rate": 0.6,
+        })
+
+        # User starts new processing before timer fires → step1 disabled
+        main_window._step1_btn.setEnabled(False)
+
+        # Now fire the captured callback
+        assert len(captured_cb) == 1
+        captured_cb[0]()
+
+        # Popup should NOT appear because step1 is disabled (new task in progress)
+        assert not informed, "Popup should be suppressed when new task started"

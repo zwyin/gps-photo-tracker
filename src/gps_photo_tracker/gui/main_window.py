@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSettings, QUrl
+from PySide6.QtCore import Qt, QSettings, QTimer, QUrl
 from PySide6.QtGui import QBrush, QColor, QCursor, QDragEnterEvent, QDragMoveEvent, QDropEvent
 
 logger = logging.getLogger("gps_tracker")
@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
         self._result_details: list[dict] = []
         self._original_details: list[dict] = []
         self._protection_snapshots: dict[int, dict] = {}
+        self._write_mode: ProcessMode | None = None
         self._cached_segments = []
         self._cached_photos = []
         self._excluded_filenames: set[str] = set()
@@ -636,6 +637,7 @@ class MainWindow(QMainWindow):
             bar.setMaximum(100)
         self._progress_label.setText("写入中...")
         self._set_processing(True)
+        self._write_mode = mode
 
         self._worker = Worker(
             gps_dir=Path(self._gps_dir_edit.currentText()),
@@ -648,6 +650,7 @@ class MainWindow(QMainWindow):
         )
         self._worker.progress_signal.connect(self._on_progress)
         self._worker.photo_signal.connect(self._on_photo_processed)
+        self._worker.write_signal.connect(self._on_write_update)
         self._worker.done_signal.connect(self._on_done)
         self._worker.start()
 
@@ -752,7 +755,7 @@ class MainWindow(QMainWindow):
 
         # 备注 — auto-follow directions get remark text
         remark = self._METHOD_REMARKS.get(method, "")
-        self._results_table.setItem(row, 7, QTableWidgetItem(remark))
+        self._results_table.setItem(row, 8, QTableWidgetItem(remark))
 
         if sorting_was_enabled:
             self._results_table.setSortingEnabled(True)
@@ -762,6 +765,33 @@ class MainWindow(QMainWindow):
         self._original_details.append(dict(result_dict))  # deep copy for reset
         self._apply_result_filter()
         self._update_stats_card()
+
+    def _on_write_update(self, result_dict: dict):
+        """Update write status column for an already-displayed row."""
+        filename = result_dict.get("filename", "")
+        method = result_dict.get("method", "")
+        success = result_dict.get("success", False)
+
+        if method == "skipped":
+            write_status = "跳过"
+        elif method == "protected":
+            write_status = "跳过"
+        elif success:
+            write_status = "已复制" if self._write_mode == ProcessMode.COPY else "已覆盖"
+        else:
+            write_status = "失败"
+
+        # Find the matching row by filename
+        for row in range(self._results_table.rowCount()):
+            name_item = self._results_table.item(row, 0)
+            if name_item and name_item.text() == filename:
+                status_item = QTableWidgetItem(write_status)
+                if write_status == "失败":
+                    status_item.setForeground(QBrush(QColor(200, 0, 0)))
+                elif write_status in ("已复制", "已覆盖"):
+                    status_item.setForeground(QBrush(QColor(0, 128, 0)))
+                self._results_table.setItem(row, 7, status_item)
+                break
 
     def _update_stats_card(self):
         details = self._result_details
@@ -1096,7 +1126,7 @@ class MainWindow(QMainWindow):
                 "follow_next": "Review: 跟随下一行",
             }
             remark_text = remark_map.get(method_code, "")
-            self._results_table.setItem(visual_row, 7, QTableWidgetItem(remark_text))
+            self._results_table.setItem(visual_row, 8, QTableWidgetItem(remark_text))
 
             # Also update the detail dict (store internal code, not display label)
             detail["success"] = True
@@ -1143,10 +1173,10 @@ class MainWindow(QMainWindow):
         self._review_btn.setEnabled(has_failures)
         self._export_btn.setEnabled(total > 0)
 
-        QMessageBox.information(
-            self, "处理完成",
-            f"处理完成！\n\n总数: {total}\n成功: {matched}\n失败: {failed}\n跳过: {skipped}\n成功率: {rate:.1%}"
-        )
+        # Use delayed non-blocking notification to avoid stale popup (BUG-2)
+        msg = f"处理完成！\n\n总数: {total}\n成功: {matched}\n失败: {failed}\n跳过: {skipped}\n成功率: {rate:.1%}"
+        QTimer.singleShot(100, lambda: QMessageBox.information(self, "处理完成", msg)
+                          if self._step1_btn.isEnabled() else None)
 
     def _on_export_results(self):
         headers, rows = self._collect_visible_table_data()
@@ -1474,7 +1504,7 @@ class MainWindow(QMainWindow):
 
         # Remark — record arrow key follow direction
         remark = self._METHOD_REMARKS.get(method_code, "")
-        self._results_table.setItem(visual_row, 7, QTableWidgetItem(remark))
+        self._results_table.setItem(visual_row, 8, QTableWidgetItem(remark))
 
         # Color-code GPS(后) column
         same_brush = QBrush(QColor(220, 245, 220))
@@ -1532,7 +1562,7 @@ class MainWindow(QMainWindow):
             self._results_table.setItem(visual_row, 5, method_item)
 
             self._results_table.setItem(visual_row, 6, QTableWidgetItem(snap["status"]))
-            self._results_table.setItem(visual_row, 7, QTableWidgetItem(snap["remark"]))
+            self._results_table.setItem(visual_row, 8, QTableWidgetItem(snap["remark"]))
 
             # Restore detail dict
             detail["success"] = snap["success"]
@@ -1549,7 +1579,7 @@ class MainWindow(QMainWindow):
             method_code = method_item_cur.data(Qt.ItemDataRole.UserRole) if method_item_cur else ""
             status_item = self._results_table.item(visual_row, 6)
             status_text = status_item.text() if status_item else ""
-            remark_item = self._results_table.item(visual_row, 7)
+            remark_item = self._results_table.item(visual_row, 8)
             remark_text = remark_item.text() if remark_item else ""
 
             self._protection_snapshots[data_row] = {
@@ -1572,7 +1602,7 @@ class MainWindow(QMainWindow):
                 m_item.setBackground(self._METHOD_COLORS[method_text])
             self._results_table.setItem(visual_row, 5, m_item)
             self._results_table.setItem(visual_row, 6, QTableWidgetItem("已保护"))
-            self._results_table.setItem(visual_row, 7, QTableWidgetItem(""))
+            self._results_table.setItem(visual_row, 8, QTableWidgetItem(""))
 
             detail["method"] = "protected"
             detail["success"] = True  # protected photos have GPS, just locked
@@ -1637,7 +1667,7 @@ class MainWindow(QMainWindow):
 
         # Restore remark
         remark = self._METHOD_REMARKS.get(method, "")
-        self._results_table.setItem(visual_row, 7, QTableWidgetItem(remark))
+        self._results_table.setItem(visual_row, 8, QTableWidgetItem(remark))
 
         # Sync detail dict back to original
         self._result_details[data_row] = dict(original)
