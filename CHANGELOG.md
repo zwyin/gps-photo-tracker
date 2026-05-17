@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-05-17
+
+### Added
+
+- Second-pass neighbor follow: unmatched photos automatically follow nearest successful neighbor within `isolated_window`
+- Auto-follow methods: `auto_follow_prev` / `auto_follow_next` with distinct color coding
+- Result table export: CSV (UTF-8 BOM) and Markdown (pipe-escaped) with auto-generated filename
+- Reset defaults button in config panel: restores all parameters including checkboxes
+- Smart export filename: `{photo_dir}_{timestamp}.{ext}`
+
+### Fixed
+
+- Arrow-key GPS follow direction: searches by timestamp (not visual row) for correct prev/next
+- `_quick_follow_gps` altitude not copied to detail dict
+- `_collect_table_results` missing `auto_follow_prev`/`auto_follow_next` in reverse method map
+- Method label map extracted to class constants (`_METHOD_LABELS` / `_METHOD_CODES`) to prevent sync drift
+
+### Changed
+
+- Method label maps unified from 4 inline dictionaries to 2 class-level constants
+- Photo preview uses `setFixedWidth` instead of `setFixedSize` for natural height in QSplitter
+
+### Tested
+
+- 501 tests passing, ~78% coverage
+- Two independent code reviews + E2E analysis via sub-agents
+
+## [0.15.0] - 2026-05-17
+
+### Added
+
+- Interpolation fallback to nearest-point: when middle photo interpolation fails due to distance/time, degrades to nearest GPS point instead of hard failure
+- Result export functionality: export table to CSV or Markdown file with column-accurate output
+- Export button in result table panel
+
+### Fixed
+
+- Middle photos (between two GPS points) that exceed `max_gps_distance` now degrade gracefully to nearest-point matching
+- Time-diff exceeded cases also degrade to nearest-point when within `middle_time_window`
+
+### Tested
+
+- 495 tests passing
+- Independent code review via sub-agent
+
+## [0.13.0] - 2026-05-17
+
+### Fixed
+
+- Version number stuck at 0.9.0: synced `pyproject.toml` and `__init__.py` to match actual development version
+
 ## [0.14.0] - 2026-05-17
 
 ### Added
@@ -177,6 +228,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GUI integrated smart recommend, workers, resume, and report controls
 - BatchProcessor uses ThreadPoolExecutor (not ProcessPoolExecutor)
 
+[0.16.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.15.0...v0.16.0
+[0.15.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.14.0...v0.15.0
+[0.14.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.13.0...v0.14.0
+[0.13.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/zwyin/gps-photo-tracker/releases/tag/v0.9.0
 [0.8.1]: https://github.com/zwyin/gps-photo-tracker/releases/tag/v0.8.1
 [1.0.0]: https://github.com/zwyin/gps-photo-tracker/releases/tag/v1.0.0
