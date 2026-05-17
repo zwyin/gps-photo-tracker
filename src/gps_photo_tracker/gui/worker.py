@@ -152,6 +152,7 @@ class Worker(QThread):
                 "interpolation_distance": result.interpolation_distance,
                 "interpolation_ratio": result.interpolation_ratio,
                 "capture_time": capture_time,
+                "capture_time_ts": result.photo.timestamp,
                 "gps_before": gps_before,
                 "gps_old": gps_old,
                 "gps_new": gps_new,
@@ -272,6 +273,7 @@ class Worker(QThread):
                 "longitude": result.gps.longitude if result.gps else None,
                 "altitude": result.gps.altitude if result.gps else None,
                 "capture_time": capture_time,
+                "capture_time_ts": result.photo.timestamp,
                 "gps_before": gps_before,
             }
             self.photo_signal.emit(detail)

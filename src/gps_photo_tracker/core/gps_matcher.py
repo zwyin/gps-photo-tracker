@@ -44,7 +44,65 @@ class GPSMatcher:
                 ))
             else:
                 results.append(self._match_one(photo, sorted_photos, i, segments))
+
+        # Second pass: neighbor follow for failed photos
+        self._second_pass_neighbor_follow(results)
+
         return results
+
+    def _second_pass_neighbor_follow(self, results: list[MatchResult]):
+        """Second pass: failed photos try to follow nearest successful neighbor."""
+        # Build time-ordered list of successful results with GPS
+        succeeded = [(i, r) for i, r in enumerate(results) if r.success and r.gps and r.photo.timestamp]
+
+        if not succeeded:
+            return
+
+        for i, result in enumerate(results):
+            if result.success or result.photo.timestamp is None:
+                continue
+
+            target_ts = result.photo.timestamp
+
+            # Find nearest prev and next successful neighbor by time
+            prev_neighbor = None
+            next_neighbor = None
+            prev_diff = float("inf")
+            next_diff = float("inf")
+
+            for _, sr in succeeded:
+                if sr.photo.timestamp is None:
+                    continue
+                diff = sr.photo.timestamp - target_ts
+                if diff < 0 and abs(diff) < prev_diff:
+                    prev_diff = abs(diff)
+                    prev_neighbor = sr
+                elif diff > 0 and abs(diff) < next_diff:
+                    next_diff = abs(diff)
+                    next_neighbor = sr
+
+            # Pick the closer one
+            if prev_neighbor and prev_diff <= next_diff:
+                chosen, chosen_diff = prev_neighbor, prev_diff
+                method = "auto_follow_prev"
+            elif next_neighbor:
+                chosen, chosen_diff = next_neighbor, next_diff
+                method = "auto_follow_next"
+            else:
+                continue
+
+            if chosen_diff <= self.config.isolated_window:
+                logger.debug("  → 第二回合跟随 | %s → %s diff=%.0fs",
+                             result.photo.filename, method, chosen_diff)
+                result.success = True
+                result.gps = GPSInfo(
+                    latitude=chosen.gps.latitude,
+                    longitude=chosen.gps.longitude,
+                    altitude=chosen.gps.altitude,
+                )
+                result.method = method
+                result.time_diff = chosen_diff
+                result.reject_reason = None
 
     def _match_one(
         self,

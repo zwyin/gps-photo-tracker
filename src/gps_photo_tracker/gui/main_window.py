@@ -54,6 +54,8 @@ class MainWindow(QMainWindow):
         "插值": QBrush(QColor(220, 235, 255)),
         "跟随上一个": QBrush(QColor(255, 220, 220)),
         "跟随下一个": QBrush(QColor(255, 245, 200)),
+        "自动跟随上一个": QBrush(QColor(255, 230, 230)),
+        "自动跟随下一个": QBrush(QColor(255, 250, 210)),
         "手动GPS": QBrush(QColor(230, 220, 255)),
         "手动坐标": QBrush(QColor(230, 220, 255)),
         "已跳过": QBrush(QColor(230, 230, 230)),
@@ -153,8 +155,10 @@ class MainWindow(QMainWindow):
         self._overwrite_gps_cb = params_w["overwrite_gps_cb"]
         self._keep_struct_cb = params_w["keep_struct_cb"]
         self._auto_tune_btn = params_w["auto_tune_btn"]
+        self._reset_btn = params_w["reset_btn"]
         self._workers_spin = params_w["workers_spin"]
         self._auto_tune_btn.clicked.connect(self._on_auto_tune)
+        self._reset_btn.clicked.connect(self._on_reset_defaults)
         layout.addWidget(params_group)
 
         # Step-based workflow (from config_panel)
@@ -449,6 +453,18 @@ class MainWindow(QMainWindow):
         self._match_isolated_cb.setChecked(config.match_isolated)
         self.statusBar().showMessage("参数已根据数据自动推荐")
 
+    def _on_reset_defaults(self):
+        """Reset all parameters to MatcherConfig defaults."""
+        self._isolated_spin.setValue(300)
+        self._middle_spin.setValue(3600)
+        self._context_spin.setValue(300)
+        self._distance_spin.setValue(200)
+        self._offset_spin.setValue(0)
+        self._match_isolated_cb.setChecked(True)
+        self._overwrite_gps_cb.setChecked(False)
+        self._keep_struct_cb.setChecked(True)
+        self.statusBar().showMessage("参数已恢复为默认值")
+
     # ── Processing ──────────────────────────────────────────
 
     def _set_processing(self, active: bool):
@@ -703,7 +719,7 @@ class MainWindow(QMainWindow):
             self._results_table.item(row, 4).setBackground(same_brush)
 
         method = result_dict.get("method", "")
-        method_text = {"interpolated": "插值", "nearest": "就近", "skipped": "已跳过"}.get(method, "")
+        method_text = {"interpolated": "插值", "nearest": "就近", "skipped": "已跳过", "auto_follow_prev": "自动跟随上一个", "auto_follow_next": "自动跟随下一个"}.get(method, "")
         method_item = QTableWidgetItem(method_text)
         if method_text in self._METHOD_COLORS:
             method_item.setBackground(self._METHOD_COLORS[method_text])
@@ -1116,9 +1132,10 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "导出", "没有可导出的数据")
             return
 
+        default_name = self._build_export_filename("csv")
         path, filter_idx = QFileDialog.getSaveFileName(
             self, "导出结果",
-            "gps_results.csv",
+            default_name,
             "CSV (*.csv);;Markdown (*.md)",
         )
         if not path:
@@ -1133,6 +1150,21 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error("导出失败: %s", e)
             QMessageBox.warning(self, "导出失败", str(e))
+
+    def _build_export_filename(self, ext: str) -> str:
+        from datetime import date
+        photo_dir = self._photo_dir_edit.currentText()
+        dir_name = Path(photo_dir).name if photo_dir else "results"
+        safe_name = self._sanitize_filename(dir_name)
+        today = date.today().isoformat()
+        return f"GPS追踪_{safe_name}_{today}.{ext}"
+
+    @staticmethod
+    def _sanitize_filename(name: str) -> str:
+        safe = name.replace(" ", "_")
+        for ch in r'/\:*?"<>|':
+            safe = safe.replace(ch, "")
+        return safe
 
     def _collect_visible_table_data(self) -> tuple[list[str], list[list[str]]]:
         headers = []
@@ -1233,7 +1265,7 @@ class MainWindow(QMainWindow):
             lat = detail.get("latitude")
             lon = detail.get("longitude")
             method = detail.get("method", "")
-            method_text = {"interpolated": "插值", "nearest": "就近"}.get(method, "—")
+            method_text = {"interpolated": "插值", "nearest": "就近", "auto_follow_prev": "自动跟随上一个", "auto_follow_next": "自动跟随下一个"}.get(method, "—")
             gps_str = f"{lat:.4f}, {lon:.4f}" if lat is not None and lon is not None else "—"
             time_str = detail.get("capture_time") or "—"
             info = f"文件: {detail.get('filename', '—')}\n拍摄时间: {time_str}\nGPS: {gps_str}\n方式: {method_text}"
@@ -1281,7 +1313,8 @@ class MainWindow(QMainWindow):
     def _quick_follow_gps(self, visual_row: int, direction: int):
         """Assign GPS from nearest neighbor with GPS(后) in the given direction.
 
-        direction: -1 = look upward (earlier in time), +1 = look downward (later in time).
+        direction: -1 = look earlier in time, +1 = look later in time.
+        Searches by timestamp order, not visual row order.
         After assignment, auto-advance selection in the same direction.
         """
         data_row = self._get_detail_row(visual_row)
@@ -1292,28 +1325,46 @@ class MainWindow(QMainWindow):
         # Only act on rows that lack GPS(后)
         gps_after_item = self._results_table.item(visual_row, 4)
         if gps_after_item and gps_after_item.text() not in ("无", "—", ""):
-            # Already has GPS — do nothing (let ↑↓ handle navigation)
             return
 
-        # Search for nearest row with GPS(后) in the given direction
+        target_ts = detail.get("capture_time_ts")
+        if target_ts is None:
+            return
+
+        # Search by timestamp: find nearest neighbor with GPS in time direction
         found_visual = -1
         found_gps_text = ""
         found_lat = None
         found_lon = None
-        step = direction
-        candidate = visual_row + step
-        while 0 <= candidate < self._results_table.rowCount():
-            cand_data = self._get_detail_row(candidate)
-            if 0 <= cand_data < len(self._result_details):
-                cand_detail = self._result_details[cand_data]
-                cand_gps_item = self._results_table.item(candidate, 4)
-                if cand_gps_item and cand_gps_item.text() not in ("无", "—", ""):
-                    found_visual = candidate
-                    found_gps_text = cand_gps_item.text()
-                    found_lat = cand_detail.get("latitude")
-                    found_lon = cand_detail.get("longitude")
-                    break
-            candidate += step
+        best_diff = float("inf")
+
+        for row in range(self._results_table.rowCount()):
+            if row == visual_row:
+                continue
+            cand_data = self._get_detail_row(row)
+            if cand_data < 0 or cand_data >= len(self._result_details):
+                continue
+            cand_detail = self._result_details[cand_data]
+            cand_ts = cand_detail.get("capture_time_ts")
+            if cand_ts is None:
+                continue
+
+            if direction > 0 and cand_ts <= target_ts:
+                continue
+            if direction < 0 and cand_ts >= target_ts:
+                continue
+
+            cand_gps_item = self._results_table.item(row, 4)
+            if not cand_gps_item or cand_gps_item.text() in ("无", "—", ""):
+                continue
+
+            diff = abs(cand_ts - target_ts)
+            if diff < best_diff:
+                best_diff = diff
+                found_visual = row
+                found_gps_text = cand_gps_item.text()
+                found_lat = cand_detail.get("latitude")
+                found_lon = cand_detail.get("longitude")
 
         if found_visual < 0:
             return
@@ -1351,6 +1402,8 @@ class MainWindow(QMainWindow):
         if found_lat is not None and found_lon is not None:
             detail["latitude"] = found_lat
             detail["longitude"] = found_lon
+        cand_detail = self._result_details[self._get_detail_row(found_visual)]
+        detail["altitude"] = cand_detail.get("altitude")
 
         if sorting_was_enabled:
             self._results_table.setSortingEnabled(True)
@@ -1393,7 +1446,7 @@ class MainWindow(QMainWindow):
 
         # Restore method column
         original_method = original.get("method", "")
-        method_text = {"interpolated": "插值", "nearest": "就近", "skipped": "已跳过"}.get(original_method, "")
+        method_text = {"interpolated": "插值", "nearest": "就近", "skipped": "已跳过", "auto_follow_prev": "自动跟随上一个", "auto_follow_next": "自动跟随下一个"}.get(original_method, "")
         method_item = QTableWidgetItem(method_text)
         if method_text in self._METHOD_COLORS:
             method_item.setBackground(self._METHOD_COLORS[method_text])

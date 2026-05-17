@@ -61,20 +61,18 @@ class PhotoPreview(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # BUG-3: thumb takes 30% width, full height of preview area
-        w = self.width()
-        h = self.height()
-        thumb_w = max(int(w * 0.3), 80)
-        self._thumb_label.setFixedSize(thumb_w, h)
+        thumb_w = max(int(self.width() * 0.3), 80)
+        self._thumb_label.setFixedWidth(thumb_w)
         if self._full_pixmap and not self._full_pixmap.isNull():
             self._rescale()
 
     def _rescale(self):
         if not self._full_pixmap or self._full_pixmap.isNull():
             return
-        size = self._thumb_label.size()
+        thumb_w = max(int(self.width() * 0.3), 80)
+        h = self.height()
         scaled = self._full_pixmap.scaled(
-            size.width(), size.height(),
+            thumb_w, h,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )

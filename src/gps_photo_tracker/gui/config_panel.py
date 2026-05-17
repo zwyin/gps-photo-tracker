@@ -96,11 +96,18 @@ def build_params_group() -> tuple[QGroupBox, dict]:
     layout.addWidget(keep_struct_cb)
     widgets["keep_struct_cb"] = keep_struct_cb
 
-    # Auto-tune button
+    # Auto-tune + reset defaults buttons
+    btn_row = QHBoxLayout()
     auto_tune_btn = QPushButton("智能推荐参数")
     auto_tune_btn.setToolTip("根据扫描到的轨迹和照片数据自动推荐匹配参数")
-    layout.addWidget(auto_tune_btn)
+    btn_row.addWidget(auto_tune_btn)
     widgets["auto_tune_btn"] = auto_tune_btn
+
+    reset_btn = QPushButton("恢复默认")
+    reset_btn.setToolTip("恢复所有参数为默认值")
+    btn_row.addWidget(reset_btn)
+    widgets["reset_btn"] = reset_btn
+    layout.addLayout(btn_row)
 
     # Workers spinbox
     row_workers = QHBoxLayout()

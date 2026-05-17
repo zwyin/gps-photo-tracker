@@ -258,8 +258,8 @@ class TestRejection:
         assert results[0].reject_reason == RejectReason.TIME_DIFF
 
     def test_middle_degradation_nearest_too_far(self):
-        """Distance too large + nearest point also beyond middle_time_window → TIME_DIFF."""
-        matcher = GPSMatcher(MatcherConfig(max_gps_distance=200, middle_time_window=60))
+        """Distance too large + nearest point also beyond middle_time_window → TIME_DIFF, second pass also blocked."""
+        matcher = GPSMatcher(MatcherConfig(max_gps_distance=200, middle_time_window=60, isolated_window=60))
         points = [
             make_point(25.0, 100.0, utc(8, 0)),
             make_point(26.0, 101.0, utc(8, 10)),  # ~157km, 600s away
@@ -381,7 +381,7 @@ class TestParameterEffects:
 
         # Time span between prev and next GPS points = 300s
         m_wide = GPSMatcher(MatcherConfig(middle_time_window=400))
-        m_narrow = GPSMatcher(MatcherConfig(middle_time_window=60))
+        m_narrow = GPSMatcher(MatcherConfig(middle_time_window=60, isolated_window=60))
 
         assert m_wide.match(photos, [seg])[1].success
         assert not m_narrow.match(photos, [seg])[1].success
@@ -589,7 +589,7 @@ class TestZeroSpanInterpolationDistance:
 
     def test_zero_span_no_crash(self):
         """Two GPS points with same timestamp should not crash the matcher."""
-        matcher = GPSMatcher(MatcherConfig())
+        matcher = GPSMatcher(MatcherConfig(isolated_window=60))
         pts = [
             make_point(25.0, 100.0, utc(8, 5)),
             make_point(25.001, 100.001, utc(8, 5)),  # same timestamp
@@ -709,3 +709,78 @@ class TestSkipExistingGPS:
         )
         results = matcher.match([photo], [seg])
         assert len(results) == 0
+
+
+# ── Second pass neighbor follow ──────────────────────────────
+
+class TestSecondPassNeighborFollow:
+
+    def test_auto_follow_prev_within_window(self):
+        """Failed photo follows prev successful neighbor within isolated_window."""
+        # seg at 08:00, p0 at 08:01:40 (100s from seg → matches), fail at 08:02 (120s → fails)
+        matcher = GPSMatcher(MatcherConfig(isolated_window=100, match_isolated=True))
+        seg = make_segment([make_point(25.0, 100.0, utc(8, 0))])
+        photos = [
+            make_photo("p0.jpg", utc(8, 1, 40)),
+            make_photo("fail.jpg", utc(8, 2)),
+        ]
+        results = matcher.match(photos, [seg])
+        assert results[0].success
+        assert results[1].success
+        assert results[1].method == "auto_follow_prev"
+        assert results[1].gps.latitude == 25.0
+
+    def test_auto_follow_next_within_window(self):
+        """Failed photo follows next successful neighbor within isolated_window."""
+        # seg at 08:05, fail at 08:03 (120s from seg → fails), p1 at 08:03:20 (100s → matches)
+        matcher = GPSMatcher(MatcherConfig(isolated_window=100, match_isolated=True))
+        seg = make_segment([make_point(25.0, 100.0, utc(8, 5))])
+        photos = [
+            make_photo("fail.jpg", utc(8, 3)),
+            make_photo("p1.jpg", utc(8, 3, 20)),
+        ]
+        results = matcher.match(photos, [seg])
+        assert results[0].success
+        assert results[0].method == "auto_follow_next"
+
+    def test_auto_follow_next_closer_than_prev(self):
+        """Both neighbors within window, next is closer → follows next."""
+        # seg_a at 08:00, seg_b at 08:05, isolated_window=100
+        matcher = GPSMatcher(MatcherConfig(isolated_window=100, match_isolated=True))
+        seg_a = make_segment([make_point(25.0, 100.0, utc(8, 0))])
+        seg_b = make_segment([make_point(25.005, 100.005, utc(8, 5))])
+        photos = [
+            make_photo("prev.jpg", utc(8, 1, 30)),   # 90s from seg_a → matches
+            make_photo("fail.jpg", utc(8, 2, 50)),    # 170s from seg_a, 130s from seg_b → fails
+            make_photo("next.jpg", utc(8, 3, 50)),    # 70s from seg_b → matches
+        ]
+        results = matcher.match(photos, [seg_a, seg_b])
+        # prev=80s, next=60s → next closer → auto_follow_next
+        assert results[1].success
+        assert results[1].method == "auto_follow_next"
+
+    def test_auto_follow_blocked_by_window(self):
+        """Both neighbors too far in time → second pass still fails."""
+        matcher = GPSMatcher(MatcherConfig(isolated_window=60, match_isolated=True))
+        seg = make_segment([make_point(25.0, 100.0, utc(8, 0))])
+        photos = [
+            make_photo("p0.jpg", utc(8, 0, 30)),   # matches (30s from seg)
+            make_photo("fail.jpg", utc(8, 3)),       # 180s from seg → NO_GPS_COVERAGE
+        ]
+        results = matcher.match(photos, [seg])
+        assert not results[1].success  # 150s from p0 > 60
+
+    def test_case_00975_far_neighbors(self):
+        """v0.16.0 case: 00975 far from both neighbors → second pass rejects."""
+        matcher = GPSMatcher(MatcherConfig(isolated_window=300, match_isolated=True))
+        seg_a = make_segment([make_point(23.6190, 102.8299, utc(9, 19))])
+        seg_b = make_segment([make_point(23.0873, 102.8166, utc(15, 15))])
+        photos = [
+            make_photo("00973.jpg", utc(9, 19, 30)),
+            make_photo("00975.jpg", utc(14, 9)),
+            make_photo("00984.jpg", utc(15, 14, 30)),
+        ]
+        results = matcher.match(photos, [seg_a, seg_b])
+        assert results[0].success
+        assert not results[1].success
+        assert results[2].success
