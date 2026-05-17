@@ -784,3 +784,103 @@ class TestSecondPassNeighborFollow:
         assert results[0].success
         assert not results[1].success
         assert results[2].success
+
+
+class TestRealDataRegression:
+    """Regression tests using coordinates and timestamps from actual user feedback."""
+
+    def test_case_00463_00474_distance_degradation(self):
+        """v0.15.0 real case: DSC00463-00474 between track points ~250m apart.
+
+        Source: test-data/debug_input/照片 GPS 追踪记录（2026-02-07）.md
+        Track has points near 25.05, 102.70 at ~13:30 and ~13:48.
+        Photos at 13:38-13:42 are "middle" — interpolation rejected for distance
+        (251m > 200m), but should degrade to nearest-point matching.
+
+        Before fix: all failed with "距离过大"
+        After fix: succeed via degradation to nearest-point
+
+        Note: is_middle requires photo neighbors within context_window (300s).
+        In the real run, DSC00458 (13:32) and DSC00477 (13:43) provided context.
+        We add padding photos to replicate this.
+        """
+        matcher = GPSMatcher(MatcherConfig(
+            max_gps_distance=200,
+            middle_time_window=3600,
+            isolated_window=300,
+            match_isolated=True,
+        ))
+        # Real track points (simplified from actual GPX recording)
+        points = [
+            make_point(25.0519, 102.7052, utc(13, 30)),  # cluster before gap
+            make_point(25.0521, 102.7027, utc(13, 48)),  # cluster after gap
+        ]
+        seg = make_segment(points)
+
+        # Real photo timestamps, with padding photos for context_window
+        photos = [
+            make_photo("DSC00458.JPG", utc(13, 37, 30)),  # padding (138s before 00463)
+            make_photo("DSC00463.JPG", utc(13, 38, 7)),
+            make_photo("DSC00466.JPG", utc(13, 39, 55)),
+            make_photo("DSC00474.JPG", utc(13, 42, 35)),
+            make_photo("DSC00477.JPG", utc(13, 43, 5)),   # padding (30s after 00474)
+        ]
+        results = matcher.match(photos, [seg])
+
+        # Find our target photos in results (sorted by timestamp)
+        r463 = next(r for r in results if r.photo.filename == "DSC00463.JPG")
+        r466 = next(r for r in results if r.photo.filename == "DSC00466.JPG")
+        r474 = next(r for r in results if r.photo.filename == "DSC00474.JPG")
+
+        # All should succeed via nearest-point degradation
+        for label, r in [("00463", r463), ("00466", r466), ("00474", r474)]:
+            assert r.success, f"{label} should succeed via degradation"
+            assert r.method == "nearest", f"{label} should use nearest-point method"
+
+        # 00463 (13:38:07): prev=13:30 (487s), next=13:48 (593s) → picks prev
+        assert r463.time_diff == 487
+        assert abs(r463.gps.latitude - 25.0519) < 0.0001
+
+        # 00466 (13:39:55): prev=13:30 (595s), next=13:48 (485s) → picks next
+        assert r466.time_diff == 485
+        assert abs(r466.gps.latitude - 25.0521) < 0.0001
+
+        # 00474 (13:42:35): prev=13:30 (755s), next=13:48 (325s) → picks next
+        assert r474.time_diff == 325
+        assert abs(r474.gps.latitude - 25.0521) < 0.0001
+
+    def test_case_00975_auto_follow_next_direction(self):
+        """v0.16.0 direction regression: auto_follow must pick next (not prev).
+
+        Source: v0.16.0 BUG-1 feedback
+        Real coordinates from 00973 (seg_a) and 00984 (seg_b).
+        Bug was: GUI labeled "跟随下一个" but GPS came from prev neighbor (00973).
+        This test validates the matcher correctly picks auto_follow_next
+        and assigns next neighbor's GPS, not prev's.
+        """
+        matcher = GPSMatcher(MatcherConfig(isolated_window=600))
+        seg_a = make_segment([make_point(23.6190, 102.8299, utc(9, 19))])
+        seg_b = make_segment([make_point(23.0873, 102.8166, utc(14, 20))])
+
+        photos = [
+            make_photo("00973.jpg", utc(9, 19, 30)),
+            make_photo("00975.jpg", utc(14, 9)),
+            make_photo("00984.jpg", utc(14, 14, 30)),
+        ]
+        results = matcher.match(photos, [seg_a, seg_b])
+
+        # 00973: nearest match from seg_a
+        assert results[0].success
+        assert abs(results[0].gps.latitude - 23.6190) < 0.0001
+
+        # 00984: nearest match from seg_b (330s < 600s window)
+        assert results[2].success
+        assert abs(results[2].gps.latitude - 23.0873) < 0.0001
+
+        # 00975: no direct GPS coverage → second-pass auto_follow
+        # 00973 is 17410s away, 00984 is 330s away → picks 00984 (auto_follow_next)
+        assert results[1].success
+        assert results[1].method == "auto_follow_next"
+        # CRITICAL: GPS must come from NEXT (00984), not PREV (00973)
+        assert abs(results[1].gps.latitude - 23.0873) < 0.0001, \
+            "auto_follow_next should give next neighbor's GPS, not prev's"
