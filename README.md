@@ -19,8 +19,11 @@ Batch process photos with GPS tracks (GPX/KML/TCX) to automatically write EXIF G
 - **Interactive review** — Review failed GPS matches after preview, manually assign coordinates or pick nearby track points
 - **WYSIWYG workflow** — Step-based guided flow: preview → review → execute. All table edits carry forward to write
 - **Arrow-key GPS follow** — Use ← → keys to quickly assign GPS from adjacent matched photos
-- **Second-pass auto follow** — Unmatched photos automatically follow nearest successful neighbor
-- **Result export** — Export results to CSV or Markdown for debugging and feedback
+- **Second-pass auto follow** — Unmatched photos automatically follow nearest successful neighbor; skipped photos (existing GPS) excluded from propagation
+- **Result export** — Export results to CSV or Markdown with auto-generated filename (includes commit hash in dev mode)
+- **Esc undo** — Press Esc to restore any photo to its original matched state, undoing all follow/protect/edit operations
+- **Source column context menu** — Double-click the source column for quick access to follow/protect/undo actions
+- **Write status tracking** — Per-photo write status column (copied / overwritten / skipped / failed / cancelled) with dedicated write signal
 
 ## Quick Start
 
@@ -30,9 +33,9 @@ Download from [GitHub Actions](../../actions/workflows/build.yml) → click the 
 
 | Platform | File |
 |----------|------|
-| macOS | `GPS-Photo-Tracker-v0.16.0-macos.zip` |
-| Windows | `GPS-Photo-Tracker-v0.16.0-windows.zip` |
-| Linux | `GPS-Photo-Tracker-v0.16.0-linux.tar.gz` |
+| macOS | `GPS-Photo-Tracker-v0.19.0-macos.zip` |
+| Windows | `GPS-Photo-Tracker-v0.19.0-windows.zip` |
+| Linux | `GPS-Photo-Tracker-v0.19.0-linux.tar.gz` |
 
 Download, unzip, and double-click to run. No Python or any other software needed.
 
@@ -112,7 +115,7 @@ src/gps_photo_tracker/
 ├── gui/            # PySide6 GUI: main window, panels, dialogs
 └── logging_/       # Structured logging
 tests/
-├── unit/           # 500+ unit tests
+├── unit/           # 510+ unit tests
 ├── integration/    # End-to-end tests
 └── batch/          # Large-scale batch tests
 ```
