@@ -66,6 +66,11 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(central)
 
         self._splitter = QSplitter(Qt.Horizontal)
+        self._splitter.setHandleWidth(4)
+        self._splitter.setStyleSheet(
+            "QSplitter::handle { background: #c0c0c0; }"
+            "QSplitter::handle:hover { background: #4a9eff; }"
+        )
         layout.addWidget(self._splitter)
 
         # Left panel
@@ -244,7 +249,7 @@ class MainWindow(QMainWindow):
 
     def _build_right_panel(self) -> QWidget:
         # Result table (from result_table module)
-        result_widget, self._stats_label, self._result_filter, self._results_table = build_result_panel()
+        result_widget, self._pre_stats_label, self._stats_label, self._result_filter, self._results_table = build_result_panel()
         self._result_filter.currentIndexChanged.connect(self._apply_result_filter)
         self._results_table.doubleClicked.connect(self._on_table_double_click)
         self._results_table.selectionModel().selectionChanged.connect(self._on_selection_changed)
@@ -254,6 +259,11 @@ class MainWindow(QMainWindow):
         # Move results_table into a vertical splitter with photo preview
         layout.removeWidget(self._results_table)
         splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setHandleWidth(4)
+        splitter.setStyleSheet(
+            "QSplitter::handle { background: #c0c0c0; }"
+            "QSplitter::handle:hover { background: #4a9eff; }"
+        )
         splitter.addWidget(self._results_table)
 
         self._photo_preview = PhotoPreview()
@@ -540,10 +550,14 @@ class MainWindow(QMainWindow):
         fn_item.setData(Qt.ItemDataRole.UserRole, data_idx)
         self._results_table.setItem(row, 0, fn_item)
 
+        # 日期时间 — EXIF capture time
+        datetime_text = result_dict.get("capture_time", "")
+        self._results_table.setItem(row, 1, QTableWidgetItem(datetime_text))
+
         # GPS(前) — existing GPS before processing
         gps_before = result_dict.get("gps_before", "")
         before_text = gps_before if gps_before else "无"
-        self._results_table.setItem(row, 1, QTableWidgetItem(before_text))
+        self._results_table.setItem(row, 2, QTableWidgetItem(before_text))
 
         # 计算GPS — computed GPS coordinates from matching
         lat = result_dict.get("latitude")
@@ -552,7 +566,7 @@ class MainWindow(QMainWindow):
             gps_text = f"{lat:.4f}, {lon:.4f}"
         else:
             gps_text = "—"
-        self._results_table.setItem(row, 2, QTableWidgetItem(gps_text))
+        self._results_table.setItem(row, 3, QTableWidgetItem(gps_text))
 
         # GPS(后) — what GPS will be after processing
         has_gps = result_dict.get("has_gps", False)
@@ -561,20 +575,20 @@ class MainWindow(QMainWindow):
             after_text = before_text  # no change — keep existing GPS
         else:
             after_text = gps_text  # new match result
-        self._results_table.setItem(row, 3, QTableWidgetItem(after_text))
+        self._results_table.setItem(row, 4, QTableWidgetItem(after_text))
 
         # Color-code matching GPS values
         same_brush = QBrush(QColor(220, 245, 220))  # light green
         if before_text not in ("无", "—") and before_text == after_text:
-            self._results_table.item(row, 1).setBackground(same_brush)
-            self._results_table.item(row, 3).setBackground(same_brush)
-        if gps_text not in ("无", "—") and gps_text == after_text:
             self._results_table.item(row, 2).setBackground(same_brush)
+            self._results_table.item(row, 4).setBackground(same_brush)
+        if gps_text not in ("无", "—") and gps_text == after_text:
             self._results_table.item(row, 3).setBackground(same_brush)
+            self._results_table.item(row, 4).setBackground(same_brush)
 
         method = result_dict.get("method", "")
         method_text = {"interpolated": "插值", "nearest": "就近"}.get(method, "")
-        self._results_table.setItem(row, 4, QTableWidgetItem(method_text))
+        self._results_table.setItem(row, 5, QTableWidgetItem(method_text))
 
         success = result_dict.get("success", False)
         if success:
@@ -584,7 +598,7 @@ class MainWindow(QMainWindow):
             status = {"no_gps_coverage": "无GPS覆盖", "time_diff": "时差过大",
                       "gps_distance": "距离过大", "tail_isolated": "孤立",
                       "no_track_points": "无轨迹点"}.get(reason, reason)
-        self._results_table.setItem(row, 5, QTableWidgetItem(status))
+        self._results_table.setItem(row, 6, QTableWidgetItem(status))
 
         if sorting_was_enabled:
             self._results_table.setSortingEnabled(True)
@@ -787,13 +801,27 @@ class MainWindow(QMainWindow):
             gps_text = f"{gps.latitude:.4f}, {gps.longitude:.4f}"
 
             # Update GPS(后) column — show the review-assigned GPS
-            self._results_table.setItem(visual_row, 3, QTableWidgetItem(gps_text))
+            self._results_table.setItem(visual_row, 4, QTableWidgetItem(gps_text))
+
+            # Color-code: GPS(后) matching GPS(前) or 计算GPS
+            same_brush = QBrush(QColor(220, 245, 220))
+            before_item = self._results_table.item(visual_row, 2)
+            calc_item = self._results_table.item(visual_row, 3)
+            if before_item and before_item.text() not in ("无", "—") and before_item.text() == gps_text:
+                self._results_table.item(visual_row, 4).setBackground(same_brush)
+                before_item.setBackground(same_brush)
+            elif calc_item and calc_item.text() not in ("无", "—") and calc_item.text() == gps_text:
+                self._results_table.item(visual_row, 4).setBackground(same_brush)
+                calc_item.setBackground(same_brush)
+            else:
+                review_brush = QBrush(QColor(200, 230, 255))  # light blue for review-assigned
+                self._results_table.item(visual_row, 4).setBackground(review_brush)
 
             # Update method column
-            self._results_table.setItem(visual_row, 4, QTableWidgetItem(method_label))
+            self._results_table.setItem(visual_row, 5, QTableWidgetItem(method_label))
 
             # Update status column
-            self._results_table.setItem(visual_row, 5, QTableWidgetItem("已审核"))
+            self._results_table.setItem(visual_row, 6, QTableWidgetItem("已审核"))
 
             # Also update the detail dict so double-click shows correct info
             detail["success"] = True
@@ -874,6 +902,10 @@ class MainWindow(QMainWindow):
         self._scan_summary.setText(
             f"{self._scan_summary.text()} | 照片: {total}张 ({with_gps}有GPS)"
         )
+        gps_ratio = with_gps / total if total > 0 else 0
+        self._pre_stats_label.setText(
+            f"处理前: {total}张照片 | {with_gps}张有GPS ({gps_ratio:.1%})"
+        )
 
     def _open_photo_browser(self):
         if self._cached_photos:
@@ -940,7 +972,7 @@ class MainWindow(QMainWindow):
         detail = self._result_details[data_row]
 
         # Only act on rows that lack GPS(后)
-        gps_after_item = self._results_table.item(visual_row, 3)
+        gps_after_item = self._results_table.item(visual_row, 4)
         if gps_after_item and gps_after_item.text() not in ("无", "—", ""):
             # Already has GPS — just advance selection
             next_row = visual_row + direction
@@ -959,7 +991,7 @@ class MainWindow(QMainWindow):
             cand_data = self._get_detail_row(candidate)
             if 0 <= cand_data < len(self._result_details):
                 cand_detail = self._result_details[cand_data]
-                cand_gps_item = self._results_table.item(candidate, 3)
+                cand_gps_item = self._results_table.item(candidate, 4)
                 if cand_gps_item and cand_gps_item.text() not in ("无", "—", ""):
                     found_visual = candidate
                     found_gps_text = cand_gps_item.text()
@@ -977,9 +1009,19 @@ class MainWindow(QMainWindow):
         if sorting_was_enabled:
             self._results_table.setSortingEnabled(False)
 
-        self._results_table.setItem(visual_row, 3, QTableWidgetItem(found_gps_text))
-        self._results_table.setItem(visual_row, 4, QTableWidgetItem(method_label))
-        self._results_table.setItem(visual_row, 5, QTableWidgetItem("已跟随"))
+        self._results_table.setItem(visual_row, 4, QTableWidgetItem(found_gps_text))
+        self._results_table.setItem(visual_row, 5, QTableWidgetItem(method_label))
+        self._results_table.setItem(visual_row, 6, QTableWidgetItem("已跟随"))
+
+        # Color-code GPS(后) column
+        same_brush = QBrush(QColor(220, 245, 220))
+        follow_brush = QBrush(QColor(200, 230, 255))
+        before_item = self._results_table.item(visual_row, 2)
+        if before_item and before_item.text() not in ("无", "—") and before_item.text() == found_gps_text:
+            self._results_table.item(visual_row, 4).setBackground(same_brush)
+            before_item.setBackground(same_brush)
+        else:
+            self._results_table.item(visual_row, 4).setBackground(follow_brush)
 
         # Update detail dict
         detail["success"] = True

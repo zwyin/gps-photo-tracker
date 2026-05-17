@@ -12,13 +12,18 @@ from PySide6.QtWidgets import (
 )
 
 
-def build_result_panel() -> tuple[QWidget, QLabel, QComboBox, QTableWidget]:
+def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidget]:
     """Build right-side result panel.
 
-    Returns (widget, stats_label, result_filter, results_table).
+    Returns (widget, pre_stats_label, stats_label, result_filter, results_table).
     """
     widget = QWidget()
     layout = QVBoxLayout(widget)
+
+    # Pre-processing stats
+    pre_stats_label = QLabel("")
+    pre_stats_label.setStyleSheet("padding: 4px 8px; color: #666; font-size: 12px;")
+    layout.addWidget(pre_stats_label)
 
     # Stats card
     stats_label = QLabel("匹配结果将在此显示")
@@ -39,8 +44,8 @@ def build_result_panel() -> tuple[QWidget, QLabel, QComboBox, QTableWidget]:
     layout.addLayout(filter_row)
 
     # Results table
-    results_table = QTableWidget(0, 6)
-    results_table.setHorizontalHeaderLabels(["文件名", "GPS(前)", "计算GPS", "GPS(后)", "方式", "状态"])
+    results_table = QTableWidget(0, 7)
+    results_table.setHorizontalHeaderLabels(["文件名", "日期时间", "GPS(前)", "计算GPS", "GPS(后)", "方式", "状态"])
     header = results_table.horizontalHeader()
     header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
     header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -48,10 +53,11 @@ def build_result_panel() -> tuple[QWidget, QLabel, QComboBox, QTableWidget]:
     header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
     header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
     header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+    header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
     results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
     results_table.setSortingEnabled(True)
     results_table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
     layout.addWidget(results_table, stretch=1)
 
-    return widget, stats_label, result_filter, results_table
+    return widget, pre_stats_label, stats_label, result_filter, results_table

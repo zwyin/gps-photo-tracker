@@ -389,10 +389,13 @@ class TestThumbnailPreview:
         assert main_window._photo_preview._thumb_label is not None
         assert main_window._photo_preview._info_label is not None
 
-    def test_thumb_size_200x200(self, main_window):
-        """Fix #4: Thumbnail preview should be 200x200 per spec."""
-        assert main_window._photo_preview._thumb_label.width() == 200
-        assert main_window._photo_preview._thumb_label.height() == 200
+    def test_thumb_dynamic_resize(self, main_window):
+        """Thumbnail preview dynamically resizes with splitter, minimum 80x80."""
+        label = main_window._photo_preview._thumb_label
+        assert label.minimumWidth() == 80
+        assert label.minimumHeight() == 80
+        # resizeEvent should not crash even without pixmap
+        main_window._photo_preview.resize(300, 200)
 
     def test_thumb_info_default_text(self, main_window):
         assert "选中" in main_window._photo_preview._info_label.text()
@@ -750,15 +753,16 @@ class TestCompletionNotification:
 
 class TestThumbnailSize:
 
-    def test_thumb_label_is_200x200(self, main_window):
-        """Fix #4: Thumbnail preview area should be 200x200 per spec."""
-        assert main_window._photo_preview._thumb_label.width() == 200
-        assert main_window._photo_preview._thumb_label.height() == 200
+    def test_thumb_label_dynamic_resize(self, main_window):
+        """Thumbnail preview dynamically resizes with container."""
+        label = main_window._photo_preview._thumb_label
+        assert label.minimumWidth() >= 80
+        assert label.minimumHeight() >= 80
 
     def test_thumb_label_not_120(self, main_window):
         """Fix #4: Ensure the old 120x120 size is no longer used."""
-        assert main_window._photo_preview._thumb_label.width() != 120
-        assert main_window._photo_preview._thumb_label.height() != 120
+        assert main_window._photo_preview._thumb_label.minimumWidth() != 120
+        assert main_window._photo_preview._thumb_label.minimumHeight() != 120
 
 
 # ── Fix #5: Settings mode persistence tests ────────────────
