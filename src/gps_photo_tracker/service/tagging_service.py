@@ -114,7 +114,7 @@ class GPSTaggingService:
         search_range = range(idx + direction, -1 if direction < 0 else len(ordered), direction)
         for j in search_range:
             neighbor = ordered[j]
-            if neighbor.success and neighbor.gps:
+            if neighbor.success and neighbor.gps and neighbor.method not in ("skipped", "protected"):
                 result.review_gps = GPSInfo(
                     latitude=neighbor.gps.latitude,
                     longitude=neighbor.gps.longitude,
@@ -158,7 +158,12 @@ class GPSTaggingService:
                     elapsed_seconds=time.time() - start,
                 ))
 
-            if result.success and effective_gps:
+            if result.method == "skipped" or result.method == "protected":
+                skipped += 1
+                if is_copy and options and options.output_dir:
+                    dst = self._copy_destination(result.photo.path, options, photo_dir)
+                    self._file_provider.copy_file(result.photo.path, dst)
+            elif result.success and effective_gps:
                 matched += 1
                 if not is_preview:
                     write_result = MatchResult(
@@ -351,6 +356,7 @@ class GPSTaggingService:
         # Matching phase
         if valid_photos:
             match_results = matcher.match(valid_photos, segments)
+            matcher.auto_follow(match_results)
 
         # Create checkpoint for COPY mode resume
         if use_checkpoint and options and options.output_dir:
@@ -390,44 +396,50 @@ class GPSTaggingService:
                 ))
 
             if result.success:
-                matched += 1
-                if self._op_logger:
-                    self._op_logger.log_match_success(result)
-                if not is_preview and options and result.gps:
-                    if self._should_write(result, options):
-                        if result.photo.has_gps:
-                            overwritten += 1
-                            if self._op_logger and result.photo.existing_gps:
-                                self._op_logger.log_gps_overwrite(
-                                    result.photo, result.photo.existing_gps, result.gps,
-                                )
-                        if use_parallel:
-                            write_tasks.append(WriteTask(
-                                match_result=result, options=options, photo_dir=photo_dir,
-                            ))
-                            filename_to_overwritten[result.photo.filename] = result.photo.has_gps
+                if result.method in ("skipped", "protected"):
+                    skipped += 1
+                    if is_copy and options and options.output_dir:
+                        dst = self._copy_destination(result.photo.path, options, photo_dir)
+                        self._file_provider.copy_file(result.photo.path, dst)
+                else:
+                    matched += 1
+                    if self._op_logger:
+                        self._op_logger.log_match_success(result)
+                    if not is_preview and options and result.gps:
+                        if self._should_write(result, options):
+                            if result.photo.has_gps:
+                                overwritten += 1
+                                if self._op_logger and result.photo.existing_gps:
+                                    self._op_logger.log_gps_overwrite(
+                                        result.photo, result.photo.existing_gps, result.gps,
+                                    )
+                            if use_parallel:
+                                write_tasks.append(WriteTask(
+                                    match_result=result, options=options, photo_dir=photo_dir,
+                                ))
+                                filename_to_overwritten[result.photo.filename] = result.photo.has_gps
+                            else:
+                                try:
+                                    dst = self._write_photo(result, options, photo_dir)
+                                    if self._op_logger:
+                                        self._op_logger.log_write_success(result.photo, result.gps, dest=dst)
+                                except Exception as e:
+                                    failed += 1
+                                    matched -= 1
+                                    if self._op_logger:
+                                        self._op_logger.log_error(f"write: {result.photo.filename}", e)
+                                    if is_copy and options.output_dir:
+                                        try:
+                                            dst = self._copy_destination(result.photo.path, options, photo_dir)
+                                            self._file_provider.copy_file(result.photo.path, dst)
+                                        except Exception as copy_err:
+                                            if self._op_logger:
+                                                self._op_logger.log_error(f"copy_after_write_fail: {result.photo.filename}", copy_err)
                         else:
-                            try:
-                                dst = self._write_photo(result, options, photo_dir)
-                                if self._op_logger:
-                                    self._op_logger.log_write_success(result.photo, result.gps, dest=dst)
-                            except Exception as e:
-                                failed += 1
-                                matched -= 1
-                                if self._op_logger:
-                                    self._op_logger.log_error(f"write: {result.photo.filename}", e)
-                                if is_copy and options.output_dir:
-                                    try:
-                                        dst = self._copy_destination(result.photo.path, options, photo_dir)
-                                        self._file_provider.copy_file(result.photo.path, dst)
-                                    except Exception as copy_err:
-                                        if self._op_logger:
-                                            self._op_logger.log_error(f"copy_after_write_fail: {result.photo.filename}", copy_err)
-                    else:
-                        skipped += 1
-                        if is_copy and options.output_dir:
-                            dst = self._copy_destination(result.photo.path, options, photo_dir)
-                            self._file_provider.copy_file(result.photo.path, dst)
+                            skipped += 1
+                            if is_copy and options.output_dir:
+                                dst = self._copy_destination(result.photo.path, options, photo_dir)
+                                self._file_provider.copy_file(result.photo.path, dst)
             else:
                 failed += 1
                 if self._op_logger:
@@ -575,6 +587,7 @@ class GPSTaggingService:
         """Write GPS data to photo based on process mode. Returns destination path for COPY, None otherwise."""
         if options.mode == ProcessMode.COPY and options.output_dir:
             dst = self._copy_destination(result.photo.path, options, photo_dir)
+            dst.parent.mkdir(parents=True, exist_ok=True)
             EXIFWriter.write_gps(result.photo.path, dst, result.gps)
             return dst
         elif options.mode == ProcessMode.OVERWRITE:
@@ -586,7 +599,10 @@ class GPSTaggingService:
         if options.keep_structure and options.output_dir and photo_dir:
             try:
                 rel = src_path.relative_to(photo_dir)
+                # For flat photo directories (no subdirs), use photo_dir.name as wrapper
+                if rel.parent == Path("."):
+                    return options.output_dir / photo_dir.name / rel
                 return options.output_dir / rel
             except ValueError:
-                return options.output_dir / src_path.name
+                return options.output_dir / photo_dir.name / src_path.name
         return options.output_dir / src_path.name

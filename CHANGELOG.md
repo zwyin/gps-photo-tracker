@@ -5,6 +5,183 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-05-17
+
+### Added
+
+- **Source column redesign**: "方式" column renamed to "来源" with ①②③ step prefix labels (① 插值, ① 就近, ② 跟随, ③ 跟随, ③ 手动, —). Direction info (prev/next) moved to remark column
+- **Protection mechanism**: `.` key now toggles per-photo protection (replaces old reset-to-original). Protected photos freeze current GPS(后), skip writing, and cannot be followed. Each row has independent snapshot for precise unprotect restore
+- **Trusted record filtering**: All follow operations (auto_follow, review dialog, arrow keys) now consistently exclude skipped and protected photos as GPS sources
+- **Protected filter**: New "已保护" filter option in result table dropdown
+- **Stats card**: Shows "已保护" count separately when any photos are protected
+
+### Changed
+
+- **auto_follow API separation**: `GPSMatcher.auto_follow()` is now a public method called separately from `match()` in service layer, making the ①预览匹配 → ②自动跟随 pipeline explicit
+- **Method internal codes stored in UserRole**: Table items store internal English codes (`interpolated`, `auto_follow_prev`, etc.) in `Qt.UserRole` for reliable WYSIWYG write path, eliminating display-label reverse-mapping
+- **Remark column auto-generated**: Auto-follow photos automatically show direction ("跟随上一张"/"跟随下一张") in remark column
+
+### Fixed
+
+- Skipped photos (with existing GPS) no longer show a value in "计算GPS" column — `gps` field in `MatchResult` is now `None` for skipped photos
+- Second-pass auto_follow excludes skipped photos — camera GPS may be unreliable and should not propagate to neighbors
+- Cascade chain propagation in second-pass auto_follow — scans results dynamically, allowing rescued photos to cascade
+- Export filename commit hash fallback — uses `git rev-parse` in dev mode when `__commit__` is empty
+- Skipped photo counting in `process()` and `write_phase()` — correctly counted as "skipped"
+- `_apply_follow` in tagging_service now excludes skipped/protected as follow sources
+
+### Tested
+
+- 506 tests passing
+- 5 rounds of independent design review via sub-agents
+
+## [0.16.0] - 2026-05-17
+
+### Added
+
+- Second-pass neighbor follow: unmatched photos automatically follow nearest successful neighbor within `isolated_window`
+- Auto-follow methods: `auto_follow_prev` / `auto_follow_next` with distinct color coding
+- Result table export: CSV (UTF-8 BOM) and Markdown (pipe-escaped) with auto-generated filename
+- Reset defaults button in config panel: restores all parameters including checkboxes
+- Smart export filename: `{photo_dir}_{timestamp}.{ext}`
+
+### Fixed
+
+- Arrow-key GPS follow direction: searches by timestamp (not visual row) for correct prev/next
+- `_quick_follow_gps` altitude not copied to detail dict
+- `_collect_table_results` missing `auto_follow_prev`/`auto_follow_next` in reverse method map
+- Method label map extracted to class constants (`_METHOD_LABELS` / `_METHOD_CODES`) to prevent sync drift
+
+### Changed
+
+- Method label maps unified from 4 inline dictionaries to 2 class-level constants
+- Photo preview uses `setFixedWidth` instead of `setFixedSize` for natural height in QSplitter
+
+### Tested
+
+- 501 tests passing, ~78% coverage
+- Two independent code reviews + E2E analysis via sub-agents
+
+## [0.15.0] - 2026-05-17
+
+### Added
+
+- Interpolation fallback to nearest-point: when middle photo interpolation fails due to distance/time, degrades to nearest GPS point instead of hard failure
+- Result export functionality: export table to CSV or Markdown file with column-accurate output
+- Export button in result table panel
+
+### Fixed
+
+- Middle photos (between two GPS points) that exceed `max_gps_distance` now degrade gracefully to nearest-point matching
+- Time-diff exceeded cases also degrade to nearest-point when within `middle_time_window`
+
+### Tested
+
+- 495 tests passing
+- Independent code review via sub-agent
+
+## [0.13.0] - 2026-05-17
+
+### Fixed
+
+- Version number stuck at 0.9.0: synced `pyproject.toml` and `__init__.py` to match actual development version
+
+## [0.14.0] - 2026-05-17
+
+### Added
+
+- WYSIWYG step-based workflow: ① 预览匹配 → ② 审核 → ③ 拷贝/覆盖
+- `_collect_table_results()` reads GPS directly from table column (what you see is what gets written)
+- `_original_details` deep copy enables true `.` key reset to original match
+- Worker `pre_computed_results` parameter skips scan+match, writes directly
+- COPY mode wraps flat photo directories with `photo_dir.name` subdirectory
+
+### Changed
+
+- Step buttons (① ② ③) replace mode radio buttons in config panel
+- `_copy_destination()` adds `photo_dir.name` wrapper for flat directories
+- `concurrency.py` parallel write path synced with same directory fix
+- Removed dead code: `_review_decisions`, `_reviewed_results`
+
+### Fixed
+
+- Preview results (arrow follows, review edits, resets) now carry forward to execution
+- Altitude preserved in WYSIWYG write path
+- Skipped photos no longer counted as failures in write phase
+- Parent directories created before EXIF write (sequential + parallel paths)
+
+### Tested
+
+- 487 tests passing, 78% coverage
+- Independent E2E testing + code review via sub-agents
+
+## [0.12.0] - 2026-05-17
+
+### Added
+
+- Review reopen button: re-open review dialog after closing
+- Dot reset key: "." restores original GPS match, clears remarks
+- Remarks column: 8th column tracks manual interventions (arrow follow, manual GPS, etc.)
+- Arrow key GPS follow: ← → keys follow adjacent matched GPS
+
+### Changed
+
+- Arrow key handling: ← → trigger GPS follow instead of cell navigation
+- Status/method/remarks three-column design for clearer result classification
+
+### Fixed
+
+- Arrow key interception by QTableWidget cell navigation
+- Splitter handle visibility and hover color-coding
+
+### Tested
+
+- 430+ tests passing
+
+## [0.11.0] - 2026-05-16
+
+### Added
+
+- Date/time column in results table
+- Pre-processing overview: total photos, existing GPS, GPS coverage stats
+- GPS coverage delta display (e.g., "45% → 78% (+33%)")
+- Method column color coding for GPS interpolation types
+
+### Fixed
+
+- GPS column highlighting for review suggestions
+- Splitter visibility with visual indicators
+- Preview scaling on splitter resize
+- Isolated photo matching (header/tail orphans)
+- Existing GPS skip when overwrite disabled
+- Statistics update after review corrections
+
+### Tested
+
+- 380+ tests passing
+
+## [0.10.0] - 2026-05-16
+
+### Added
+
+- Drag-and-drop support for main window
+- Configuration profiles (save/load multiple settings)
+- Logging system with rolling rotation and GUI log viewer
+- Thumbnail preloading (±3 rows cached)
+- Column auto-sizing and default sort
+- GPS color coding (overwritten vs. matched)
+- Resizable splitters for panel adjustment
+- Smart review suggestions
+
+### Fixed
+
+- File handler leaks (Windows compatibility)
+- Timezone display consistency
+- Result table: empty rows, sorting index, cursor warnings
+- Review dialog: keyboard navigation, date-time display
+- Cross-platform CI test failures
+- Settings layout, preview display, splitter initialization
+
 ## [0.9.0] - 2026-05-16
 
 ### Added
@@ -81,6 +258,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GUI integrated smart recommend, workers, resume, and report controls
 - BatchProcessor uses ThreadPoolExecutor (not ProcessPoolExecutor)
 
+[0.17.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.16.0...v0.17.0
+[0.16.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.15.0...v0.16.0
+[0.15.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.14.0...v0.15.0
+[0.14.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.13.0...v0.14.0
+[0.13.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/zwyin/gps-photo-tracker/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/zwyin/gps-photo-tracker/releases/tag/v0.9.0
 [0.8.1]: https://github.com/zwyin/gps-photo-tracker/releases/tag/v0.8.1
 [1.0.0]: https://github.com/zwyin/gps-photo-tracker/releases/tag/v1.0.0

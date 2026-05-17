@@ -37,8 +37,72 @@ class GPSMatcher:
         sorted_photos = sorted(valid_photos, key=lambda p: p.timestamp)
         results: list[MatchResult] = []
         for i, photo in enumerate(sorted_photos):
-            results.append(self._match_one(photo, sorted_photos, i, segments))
+            if photo.has_gps and not self.config.overwrite_gps:
+                results.append(MatchResult(
+                    photo=photo, success=True, method="skipped",
+                    gps=None,
+                ))
+            else:
+                results.append(self._match_one(photo, sorted_photos, i, segments))
+
         return results
+
+    def auto_follow(self, results: list[MatchResult]) -> int:
+        """② 自动跟随：failed photos try to follow nearest successful neighbor.
+
+        Scans results on each iteration so newly-rescued photos cascade
+        to their neighbors. Returns number of photos rescued.
+        """
+        changed_count = 0
+        for i, result in enumerate(results):
+            if result.success or result.photo.timestamp is None:
+                continue
+
+            target_ts = result.photo.timestamp
+
+            prev_neighbor = None
+            next_neighbor = None
+            prev_diff = float("inf")
+            next_diff = float("inf")
+
+            for sr in results:
+                if not sr.success or sr.gps is None or sr.photo.timestamp is None:
+                    continue
+                if sr.method in ("skipped", "protected"):
+                    continue
+                diff = sr.photo.timestamp - target_ts
+                if diff < 0 and abs(diff) < prev_diff:
+                    prev_diff = abs(diff)
+                    prev_neighbor = sr
+                elif diff > 0 and abs(diff) < next_diff:
+                    next_diff = abs(diff)
+                    next_neighbor = sr
+
+            # Pick the closer one
+            if prev_neighbor and prev_diff <= next_diff:
+                chosen, chosen_diff = prev_neighbor, prev_diff
+                method = "auto_follow_prev"
+            elif next_neighbor:
+                chosen, chosen_diff = next_neighbor, next_diff
+                method = "auto_follow_next"
+            else:
+                continue
+
+            if chosen_diff <= self.config.isolated_window:
+                changed_count += 1
+                logger.debug("  → 第二回合跟随 | %s → %s diff=%.0fs",
+                             result.photo.filename, method, chosen_diff)
+                result.success = True
+                result.gps = GPSInfo(
+                    latitude=chosen.gps.latitude,
+                    longitude=chosen.gps.longitude,
+                    altitude=chosen.gps.altitude,
+                )
+                result.method = method
+                result.time_diff = chosen_diff
+                result.reject_reason = None
+
+        return changed_count
 
     def _match_one(
         self,
@@ -81,44 +145,57 @@ class GPSMatcher:
                 reject_reason=RejectReason.NO_TRACK_POINTS,
             )
 
-        # Step 4a: middle + both points → try interpolation
+        # Step 4a: middle + both points → try interpolation, fallback to nearest
         if is_middle and prev_point is not None and next_point is not None:
             distance = geodesic(
                 (prev_point.latitude, prev_point.longitude),
                 (next_point.latitude, next_point.longitude),
             ).meters
-
-            if distance > self.config.max_gps_distance:
-                logger.debug("  → GPS距离过大 | dist=%.0fm > max=%.0fm", distance, self.config.max_gps_distance)
-                return MatchResult(
-                    photo=photo, success=False,
-                    reject_reason=RejectReason.GPS_DISTANCE,
-                )
-
             time_diff = abs(next_point.timestamp - prev_point.timestamp)
-            if time_diff > self.config.middle_time_window:
-                return MatchResult(
-                    photo=photo, success=False,
-                    reject_reason=RejectReason.TIME_DIFF,
-                    time_diff=time_diff,
-                )
 
-            # Linear interpolation
-            span = next_point.timestamp - prev_point.timestamp
-            logger.debug("  → 插值 | span=%.1fs dist=%.0fm ratio=%.3f", span, distance,
-                         (adjusted_time - prev_point.timestamp) / span if span else 0.5)
-            if span == 0:
-                # Same timestamp — use midpoint
-                lat = (prev_point.latitude + next_point.latitude) / 2
-                lon = (prev_point.longitude + next_point.longitude) / 2
+            can_interpolate = (
+                distance <= self.config.max_gps_distance
+                and time_diff <= self.config.middle_time_window
+            )
+
+            if can_interpolate:
+                # Linear interpolation
+                span = next_point.timestamp - prev_point.timestamp
+                logger.debug("  → 插值 | span=%.1fs dist=%.0fm ratio=%.3f", span, distance,
+                             (adjusted_time - prev_point.timestamp) / span if span else 0.5)
+                if span == 0:
+                    # Same timestamp — use midpoint
+                    lat = (prev_point.latitude + next_point.latitude) / 2
+                    lon = (prev_point.longitude + next_point.longitude) / 2
+                    prev_alt = prev_point.altitude if prev_point.altitude is not None else 0.0
+                    next_alt = next_point.altitude if next_point.altitude is not None else 0.0
+                    alt = None if (prev_point.altitude is None and next_point.altitude is None) else (prev_alt + next_alt) / 2
+                    seg_distance = geodesic(
+                        (prev_point.latitude, prev_point.longitude),
+                        (next_point.latitude, next_point.longitude),
+                    ).meters
+                    return MatchResult(
+                        photo=photo, success=True,
+                        gps=GPSInfo(latitude=lat, longitude=lon, altitude=alt),
+                        method="interpolated",
+                        time_diff=time_diff,
+                        interpolation_prev=prev_point,
+                        interpolation_next=next_point,
+                        interpolation_distance=seg_distance,
+                        interpolation_ratio=0.5,
+                    )
+                ratio = (adjusted_time - prev_point.timestamp) / span
+                lat = prev_point.latitude + ratio * (next_point.latitude - prev_point.latitude)
+                lon = prev_point.longitude + ratio * (next_point.longitude - prev_point.longitude)
+
+                # Altitude: None treated as 0 for calculation; both None → result None
                 prev_alt = prev_point.altitude if prev_point.altitude is not None else 0.0
                 next_alt = next_point.altitude if next_point.altitude is not None else 0.0
-                alt = None if (prev_point.altitude is None and next_point.altitude is None) else (prev_alt + next_alt) / 2
-                # Recompute distance for the zero-span edge case
-                seg_distance = geodesic(
-                    (prev_point.latitude, prev_point.longitude),
-                    (next_point.latitude, next_point.longitude),
-                ).meters
+                if prev_point.altitude is None and next_point.altitude is None:
+                    alt = None
+                else:
+                    alt = prev_alt + ratio * (next_alt - prev_alt)
+
                 return MatchResult(
                     photo=photo, success=True,
                     gps=GPSInfo(latitude=lat, longitude=lon, altitude=alt),
@@ -126,30 +203,31 @@ class GPSMatcher:
                     time_diff=time_diff,
                     interpolation_prev=prev_point,
                     interpolation_next=next_point,
-                    interpolation_distance=seg_distance,
-                    interpolation_ratio=0.5,
+                    interpolation_distance=distance,
+                    interpolation_ratio=ratio,
                 )
-            ratio = (adjusted_time - prev_point.timestamp) / span
-            lat = prev_point.latitude + ratio * (next_point.latitude - prev_point.latitude)
-            lon = prev_point.longitude + ratio * (next_point.longitude - prev_point.longitude)
 
-            # Altitude: None treated as 0 for calculation; both None → result None
-            prev_alt = prev_point.altitude if prev_point.altitude is not None else 0.0
-            next_alt = next_point.altitude if next_point.altitude is not None else 0.0
-            if prev_point.altitude is None and next_point.altitude is None:
-                alt = None
+            # Fallback: distance/time_diff too large → degrade to nearest point
+            prev_td = abs(prev_point.timestamp - adjusted_time)
+            next_td = abs(next_point.timestamp - adjusted_time)
+            if prev_td <= next_td:
+                nearest, nearest_td = prev_point, prev_td
             else:
-                alt = prev_alt + ratio * (next_alt - prev_alt)
-
+                nearest, nearest_td = next_point, next_td
+            logger.debug("  → 插值降级就近 | dist=%.0fm time_diff=%.1fs nearest_td=%.1fs",
+                         distance, time_diff, nearest_td)
+            if nearest_td > self.config.middle_time_window:
+                return MatchResult(
+                    photo=photo, success=False,
+                    reject_reason=RejectReason.TIME_DIFF,
+                    time_diff=nearest_td,
+                )
             return MatchResult(
                 photo=photo, success=True,
-                gps=GPSInfo(latitude=lat, longitude=lon, altitude=alt),
-                method="interpolated",
-                time_diff=time_diff,
-                interpolation_prev=prev_point,
-                interpolation_next=next_point,
-                interpolation_distance=distance,
-                interpolation_ratio=ratio,
+                gps=GPSInfo(latitude=nearest.latitude, longitude=nearest.longitude,
+                            altitude=nearest.altitude),
+                method="nearest",
+                time_diff=nearest_td,
             )
 
         # Step 4b: middle but single-sided → nearest
@@ -171,10 +249,10 @@ class GPSMatcher:
             )
 
         # Step 4c: isolated
-        if not self.config.match_tail:
+        if not self.config.match_isolated:
             return MatchResult(
                 photo=photo, success=False,
-                reject_reason=RejectReason.TAIL_ISOLATED,
+                reject_reason=RejectReason.ISOLATED_DISABLED,
             )
 
         # Find nearest point
@@ -200,9 +278,25 @@ class GPSMatcher:
         )
 
     def _find_segment(self, ts: float, segments: list[GPXSegment]) -> GPXSegment | None:
+        # Level 1: exact match (photo time within segment range)
         for seg in segments:
             if seg.start <= ts <= seg.end:
                 return seg
+        # Level 2: tolerance match (photo time within isolated_window of nearest segment)
+        best_seg = None
+        best_diff = float("inf")
+        for seg in segments:
+            if ts < seg.start:
+                diff = seg.start - ts
+            elif ts > seg.end:
+                diff = ts - seg.end
+            else:
+                continue
+            if diff < best_diff:
+                best_diff = diff
+                best_seg = seg
+        if best_seg is not None and best_diff <= self.config.isolated_window:
+            return best_seg
         return None
 
     def _find_prev_point(self, ts: float, segment: GPXSegment) -> TrackPoint | None:

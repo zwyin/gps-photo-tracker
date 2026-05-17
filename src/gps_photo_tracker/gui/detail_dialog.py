@@ -20,6 +20,7 @@ _REJECT_EXPLANATIONS = {
     "time_diff": "照片与最近的 GPS 点时间差超出阈值",
     "gps_distance": "前后 GPS 点距离超出阈值，无法插值",
     "tail_isolated": "照片是首尾孤立照片（未启用匹配首尾）",
+    "isolated_disabled": "照片是孤立照片（未启用匹配孤立照片）",
     "no_track_points": "对应的 GPX 轨迹段中没有有效的轨迹点",
 }
 
@@ -91,6 +92,7 @@ class DetailDialog(QDialog):
                 "time_diff": "时差过大",
                 "gps_distance": "距离过大",
                 "tail_isolated": "孤立照片",
+                "isolated_disabled": "孤立照片",
                 "no_track_points": "无轨迹点",
             }
             gps_layout.addRow("状态:", QLabel(f"匹配失败: {reason_map.get(reason, reason)}"))

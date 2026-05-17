@@ -17,6 +17,10 @@ Batch process photos with GPS tracks (GPX/KML/TCX) to automatically write EXIF G
 - **Parallel write** — Multi-threaded EXIF writing for faster processing
 - **EXIF orientation** — Correctly displays thumbnails with orientation transforms
 - **Interactive review** — Review failed GPS matches after preview, manually assign coordinates or pick nearby track points
+- **WYSIWYG workflow** — Step-based guided flow: preview → review → execute. All table edits carry forward to write
+- **Arrow-key GPS follow** — Use ← → keys to quickly assign GPS from adjacent matched photos
+- **Second-pass auto follow** — Unmatched photos automatically follow nearest successful neighbor
+- **Result export** — Export results to CSV or Markdown for debugging and feedback
 
 ## Quick Start
 
@@ -26,9 +30,9 @@ Download from [GitHub Actions](../../actions/workflows/build.yml) → click the 
 
 | Platform | File |
 |----------|------|
-| macOS | `GPS-Photo-Tracker-v0.9.0-macos.zip` |
-| Windows | `GPS-Photo-Tracker-v0.9.0-windows.zip` |
-| Linux | `GPS-Photo-Tracker-v0.9.0-linux.tar.gz` |
+| macOS | `GPS-Photo-Tracker-v0.16.0-macos.zip` |
+| Windows | `GPS-Photo-Tracker-v0.16.0-windows.zip` |
+| Linux | `GPS-Photo-Tracker-v0.16.0-linux.tar.gz` |
 
 Download, unzip, and double-click to run. No Python or any other software needed.
 
@@ -67,10 +71,13 @@ The program will automatically check dependencies on startup. If anything is mis
 
 ### Basic Workflow
 
-1. Select a directory containing GPS track files (GPX/KML/TCX)
-2. Select a directory containing photos (JPEG)
-3. Adjust matching parameters or use "Smart Recommend"
-4. Preview results, then run in copy or overwrite mode
+The app uses a step-based guided workflow:
+
+1. **① Preview** — Select GPS track and photo directories, auto-match photos to GPS positions
+2. **② Review** — For unmatched photos, manually assign coordinates or pick nearby track points
+3. **③ Execute** — Write GPS data to photos (copy to output or overwrite in-place)
+
+What you see in the preview table is exactly what gets written — all manual corrections (arrow-key follows, review edits, resets) carry forward to execution.
 
 ## Development
 
@@ -94,7 +101,7 @@ pytest tests/unit/test_gps_matcher.py  # Single module
 |-------|--------|---------|
 | Core (algorithm/IO) | >= 85% | ~90% |
 | Service | >= 80% | ~81% |
-| Overall | >= 75% | ~86% |
+| Overall | >= 75% | ~78% |
 
 ### Project Structure
 
@@ -105,7 +112,7 @@ src/gps_photo_tracker/
 ├── gui/            # PySide6 GUI: main window, panels, dialogs
 └── logging_/       # Structured logging
 tests/
-├── unit/           # 334 unit tests
+├── unit/           # 500+ unit tests
 ├── integration/    # End-to-end tests
 └── batch/          # Large-scale batch tests
 ```

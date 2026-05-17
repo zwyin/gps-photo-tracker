@@ -20,6 +20,7 @@ _REASON_LABELS = {
     "time_diff": "时间差过大",
     "gps_distance": "距离过大",
     "tail_isolated": "孤立照片",
+    "isolated_disabled": "孤立照片",
     "no_track_points": "无轨迹点",
 }
 
@@ -97,7 +98,9 @@ class ReviewDialog(QDialog):
             self._table.setItem(row, 4, sug_item)
 
             combo = QComboBox()
+            combo.blockSignals(True)
             combo.addItems(self._COMBO_LABELS)
+            combo.blockSignals(False)
             combo.currentIndexChanged.connect(lambda idx, r=row: self._on_action_changed(r, idx))
             self._table.setCellWidget(row, 5, combo)
             self._action_combos.append(combo)
@@ -202,9 +205,11 @@ class ReviewDialog(QDialog):
         if not self._state.all_results:
             return suggestions
 
-        # Build sorted list of matched photos for neighbor lookup
+        # Build sorted list of matched photos for neighbor lookup (exclude untrusted)
         matched = sorted(
-            [r for r in self._state.all_results if r.success and r.gps and r.photo.timestamp],
+            [r for r in self._state.all_results
+             if r.success and r.gps and r.photo.timestamp
+             and r.method not in ("skipped", "protected")],
             key=lambda r: r.photo.timestamp or 0,
         )
         if not matched:
@@ -379,7 +384,10 @@ class ReviewDialog(QDialog):
     def _reassign_combo_widgets(self):
         for visual_row in range(self._table.rowCount()):
             data_row = self._get_data_row(visual_row)
-            self._table.setCellWidget(visual_row, 5, self._action_combos[data_row])
+            combo = self._action_combos[data_row]
+            combo.blockSignals(True)
+            self._table.setCellWidget(visual_row, 5, combo)
+            combo.blockSignals(False)
 
     @staticmethod
     def _format_time(ts: float | None) -> str:

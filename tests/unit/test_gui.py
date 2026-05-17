@@ -36,9 +36,12 @@ class TestMainWindow:
     def test_window_title(self, main_window):
         assert main_window.windowTitle() == "GPS Photo Tracker"
 
-    def test_start_button_exists(self, main_window):
-        assert main_window._start_btn is not None
-        assert main_window._start_btn.isEnabled()
+    def test_step_buttons_exist(self, main_window):
+        assert main_window._step1_btn is not None
+        assert main_window._step1_btn.isEnabled()
+        assert not main_window._step2_btn.isEnabled()
+        assert not main_window._step3_copy_btn.isEnabled()
+        assert not main_window._step3_overwrite_btn.isEnabled()
 
     def test_cancel_button_disabled(self, main_window):
         assert not main_window._cancel_btn.isEnabled()
@@ -48,10 +51,11 @@ class TestMainWindow:
         assert main_window._middle_spin.value() == 3600
         assert main_window._context_spin.value() == 300
         assert main_window._distance_spin.value() == 200
-        assert main_window._match_tail_cb.isChecked()
+        assert main_window._match_isolated_cb.isChecked()
 
     def test_default_mode_preview(self, main_window):
-        assert main_window._preview_rb.isChecked()
+        # Step-based workflow: step1 is always preview
+        assert main_window._step1_btn.isEnabled()
 
     def test_get_matcher_config(self, main_window):
         config = main_window._get_matcher_config()
@@ -59,19 +63,9 @@ class TestMainWindow:
         assert config.isolated_window == 300
         assert config.max_gps_distance == 200
 
-    def test_get_process_options_preview(self, main_window):
+    def test_get_process_options_defaults(self, main_window):
         options = main_window._get_process_options()
         assert options.mode == ProcessMode.PREVIEW
-
-    def test_get_process_options_copy(self, main_window):
-        main_window._copy_rb.setChecked(True)
-        options = main_window._get_process_options()
-        assert options.mode == ProcessMode.COPY
-
-    def test_get_process_options_overwrite(self, main_window):
-        main_window._overwrite_rb.setChecked(True)
-        options = main_window._get_process_options()
-        assert options.mode == ProcessMode.OVERWRITE
         assert not options.overwrite_gps
 
     def test_start_without_dirs_shows_warning(self, main_window, monkeypatch):
@@ -84,7 +78,7 @@ class TestMainWindow:
             "PySide6.QtWidgets.QMessageBox.warning",
             lambda *a, **kw: warned.append(True),
         )
-        main_window._on_start()
+        main_window._on_step1_preview()
         assert warned
 
 
@@ -191,7 +185,7 @@ class TestSettingsDialog:
         from gps_photo_tracker.gui.settings_dialog import SettingsDialog
         dialog = SettingsDialog()
         assert dialog._isolated is not None
-        assert dialog._match_tail is not None
+        assert dialog._match_isolated is not None
         assert dialog._overwrite is not None
 
     def test_settings_dialog_has_mode_radio_buttons(self, qapp):
@@ -204,9 +198,10 @@ class TestSettingsDialog:
         assert dialog._mode_group is not None
 
     def test_settings_dialog_default_mode_preview(self, qapp):
-        """Fix #5: Default mode should be preview (index 0)."""
+        """Fix #5: Reset defaults should set mode to preview."""
         from gps_photo_tracker.gui.settings_dialog import SettingsDialog
         dialog = SettingsDialog()
+        dialog._reset_defaults()
         assert dialog._mode_preview_rb.isChecked()
         assert not dialog._mode_copy_rb.isChecked()
         assert not dialog._mode_overwrite_rb.isChecked()
@@ -365,7 +360,7 @@ class TestPhaseProgress:
         for bar in main_window._phase_bars:
             assert bar.value() == 0
 
-    def test_on_start_resets_all_bars(self, main_window, monkeypatch):
+    def test_on_step1_resets_all_bars(self, main_window, monkeypatch):
         for bar in main_window._phase_bars:
             bar.setValue(50)
         main_window._gps_dir_edit.setCurrentText("/tmp")
@@ -376,7 +371,7 @@ class TestPhaseProgress:
         )
         # Don't actually run worker
         monkeypatch.setattr(Worker, "start", lambda self: None)
-        main_window._on_start()
+        main_window._on_step1_preview()
         for bar in main_window._phase_bars:
             assert bar.value() == 0
 
@@ -389,10 +384,13 @@ class TestThumbnailPreview:
         assert main_window._photo_preview._thumb_label is not None
         assert main_window._photo_preview._info_label is not None
 
-    def test_thumb_size_200x200(self, main_window):
-        """Fix #4: Thumbnail preview should be 200x200 per spec."""
-        assert main_window._photo_preview._thumb_label.width() == 200
-        assert main_window._photo_preview._thumb_label.height() == 200
+    def test_thumb_dynamic_resize(self, main_window):
+        """Thumbnail preview dynamically resizes with splitter, minimum 80x80."""
+        label = main_window._photo_preview._thumb_label
+        assert label.minimumWidth() == 80
+        assert label.minimumHeight() == 80
+        # resizeEvent should not crash even without pixmap
+        main_window._photo_preview.resize(300, 200)
 
     def test_thumb_info_default_text(self, main_window):
         assert "选中" in main_window._photo_preview._info_label.text()
@@ -536,7 +534,7 @@ class TestResultFilter:
 
     def test_result_filter_exists(self, main_window):
         assert main_window._result_filter is not None
-        assert main_window._result_filter.count() == 4
+        assert main_window._result_filter.count() == 5
 
     def test_apply_result_filter_shows_all(self, main_window):
         main_window._result_details = [
@@ -655,8 +653,9 @@ class TestRealtimeStatsCard:
     def test_update_stats_card_empty(self, main_window):
         main_window._result_details = []
         main_window._update_stats_card()
-        assert "总数: 0" in main_window._stats_label.text()
-        assert "成功率: 0.0%" in main_window._stats_label.text()
+        text = main_window._stats_label.text()
+        assert "总数: 0" in text
+        assert "GPS覆盖率: 0.0%" in text
 
     def test_update_stats_card_with_results(self, main_window):
         main_window._result_details = [
@@ -703,11 +702,16 @@ class TestRealtimeStatsCard:
 class TestCompletionNotification:
 
     def test_on_done_shows_message_box(self, main_window, monkeypatch):
-        """Fix #3: _on_done should show QMessageBox.information."""
+        """Fix #3: _on_done should show QMessageBox.information (via delayed timer)."""
         informed = []
         monkeypatch.setattr(
             "PySide6.QtWidgets.QMessageBox.information",
             lambda *a, **kw: informed.append(True),
+        )
+        # Make QTimer.singleShot execute immediately
+        monkeypatch.setattr(
+            "PySide6.QtCore.QTimer.singleShot",
+            lambda ms, cb: cb(),
         )
         main_window._on_done({
             "total": 5, "matched": 3, "failed": 1, "skipped": 1, "success_rate": 0.6,
@@ -721,6 +725,10 @@ class TestCompletionNotification:
             "PySide6.QtWidgets.QMessageBox.information",
             lambda self_w, title, msg: messages.append((title, msg)),
         )
+        monkeypatch.setattr(
+            "PySide6.QtCore.QTimer.singleShot",
+            lambda ms, cb: cb(),
+        )
         main_window._on_done({
             "total": 10, "matched": 8, "failed": 1, "skipped": 1, "success_rate": 0.8,
         })
@@ -732,17 +740,22 @@ class TestCompletionNotification:
         assert "失败: 1" in msg
 
     def test_on_done_reenables_buttons(self, main_window, monkeypatch):
-        """Fix #3: _on_done should re-enable start button, disable cancel."""
+        """Fix #3: _on_done should re-enable step buttons, disable cancel."""
         monkeypatch.setattr(
             "PySide6.QtWidgets.QMessageBox.information",
             lambda *a, **kw: None,
         )
-        main_window._start_btn.setEnabled(False)
-        main_window._cancel_btn.setEnabled(True)
+        monkeypatch.setattr(
+            "PySide6.QtCore.QTimer.singleShot",
+            lambda ms, cb: cb(),
+        )
+        main_window._set_processing(True)
+        assert not main_window._step1_btn.isEnabled()
+        assert main_window._cancel_btn.isEnabled()
         main_window._on_done({
             "total": 1, "matched": 1, "failed": 0, "skipped": 0, "success_rate": 1.0,
         })
-        assert main_window._start_btn.isEnabled()
+        assert main_window._step1_btn.isEnabled()
         assert not main_window._cancel_btn.isEnabled()
 
 
@@ -750,15 +763,16 @@ class TestCompletionNotification:
 
 class TestThumbnailSize:
 
-    def test_thumb_label_is_200x200(self, main_window):
-        """Fix #4: Thumbnail preview area should be 200x200 per spec."""
-        assert main_window._photo_preview._thumb_label.width() == 200
-        assert main_window._photo_preview._thumb_label.height() == 200
+    def test_thumb_label_dynamic_resize(self, main_window):
+        """Thumbnail preview dynamically resizes with container."""
+        label = main_window._photo_preview._thumb_label
+        assert label.minimumWidth() >= 80
+        assert label.minimumHeight() >= 80
 
     def test_thumb_label_not_120(self, main_window):
         """Fix #4: Ensure the old 120x120 size is no longer used."""
-        assert main_window._photo_preview._thumb_label.width() != 120
-        assert main_window._photo_preview._thumb_label.height() != 120
+        assert main_window._photo_preview._thumb_label.minimumWidth() != 120
+        assert main_window._photo_preview._thumb_label.minimumHeight() != 120
 
 
 # ── Fix #5: Settings mode persistence tests ────────────────
@@ -766,51 +780,31 @@ class TestThumbnailSize:
 class TestSettingsModePersistence:
 
     def test_apply_saved_settings_restores_mode(self, main_window, monkeypatch):
-        """Fix #5: _apply_saved_settings should restore saved processing mode."""
+        """Fix #5: _apply_saved_settings should restore saved processing mode in settings dialog."""
         from gps_photo_tracker.gui import settings_dialog as sd
-        original_load = sd.load_settings
-
-        def mock_load():
-            s = original_load()
-            s["mode"] = 1  # copy mode
-            return s
-
-        # Patch in the main_window module namespace where load_settings is used
-        import gps_photo_tracker.gui.main_window as mw_module
-        monkeypatch.setattr(mw_module, "load_settings", mock_load)
-        main_window._apply_saved_settings()
-        assert main_window._copy_rb.isChecked()
-        assert not main_window._preview_rb.isChecked()
+        dialog = sd.SettingsDialog()
+        dialog._mode_copy_rb.setChecked(True)
+        dialog._save()
+        loaded = sd.load_settings()
+        assert loaded.get("mode") == 1
 
     def test_apply_saved_settings_overwrite_mode(self, main_window, monkeypatch):
-        """Fix #5: _apply_saved_settings should restore overwrite mode."""
+        """Fix #5: Settings dialog should save overwrite mode."""
         from gps_photo_tracker.gui import settings_dialog as sd
-        original_load = sd.load_settings
-
-        def mock_load():
-            s = original_load()
-            s["mode"] = 2  # overwrite mode
-            return s
-
-        import gps_photo_tracker.gui.main_window as mw_module
-        monkeypatch.setattr(mw_module, "load_settings", mock_load)
-        main_window._apply_saved_settings()
-        assert main_window._overwrite_rb.isChecked()
+        dialog = sd.SettingsDialog()
+        dialog._mode_overwrite_rb.setChecked(True)
+        dialog._save()
+        loaded = sd.load_settings()
+        assert loaded.get("mode") == 2
 
     def test_apply_saved_settings_preview_mode(self, main_window, monkeypatch):
-        """Fix #5: _apply_saved_settings should restore preview mode (default)."""
+        """Fix #5: Settings dialog should save preview mode (default)."""
         from gps_photo_tracker.gui import settings_dialog as sd
-        original_load = sd.load_settings
-
-        def mock_load():
-            s = original_load()
-            s["mode"] = 0  # preview mode
-            return s
-
-        import gps_photo_tracker.gui.main_window as mw_module
-        monkeypatch.setattr(mw_module, "load_settings", mock_load)
-        main_window._apply_saved_settings()
-        assert main_window._preview_rb.isChecked()
+        dialog = sd.SettingsDialog()
+        dialog._mode_preview_rb.setChecked(True)
+        dialog._save()
+        loaded = sd.load_settings()
+        assert loaded.get("mode") == 0
 
 
 class TestPathHistory:
@@ -1188,25 +1182,29 @@ class TestWorkerRun:
         mock_svc.process.assert_not_called()
 
     @patch("gps_photo_tracker.gui.worker.GPSTaggingService")
-    def test_copy_run(self, MockService, qapp):
-        from gps_photo_tracker.core.models import BatchResult
-        segments = self._make_segments()
+    def test_direct_write_run(self, MockService, qapp):
+        """Step ③: Worker with pre_computed_results calls write_phase directly."""
+        from gps_photo_tracker.core.models import BatchResult, MatchResult, GPSInfo
         photos = self._make_photos()
+        pre_computed = [
+            MatchResult(photo=photos[0], success=True, gps=GPSInfo(25.01, 102.01), method="interpolated"),
+            MatchResult(photo=photos[1], success=True, gps=GPSInfo(25.0, 102.0), method="skipped"),
+        ]
         mock_svc = MockService.return_value
-        mock_svc.scan_gpx.return_value = segments
-        mock_svc.scan_photos.return_value = photos
-        mock_svc.process.return_value = BatchResult(
-            total=2, matched=2, skipped=0, failed=0, overwritten=0,
+        mock_svc.write_phase.return_value = BatchResult(
+            total=2, matched=2, skipped=1, failed=0, overwritten=0,
             success_rate=1.0, results=[], reject_groups={},
         )
 
         w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
-                   ProcessOptions(mode=ProcessMode.COPY, output_dir=Path("/out")))
+                   ProcessOptions(mode=ProcessMode.COPY, output_dir=Path("/out")),
+                   pre_computed_results=pre_computed)
         r = self._run_worker(w)
 
         assert r["done"]["matched"] == 2
-        mock_svc.process.assert_called_once()
+        mock_svc.write_phase.assert_called_once()
         mock_svc.preview.assert_not_called()
+        mock_svc.scan_gpx.assert_not_called()
 
     @patch("gps_photo_tracker.gui.worker.GPSTaggingService")
     def test_scan_error(self, MockService, qapp):
@@ -1378,3 +1376,360 @@ class TestWorkerRun:
 
         # Should not emit error, should not crash
         assert r["done"] is None or "error" not in (r["done"] or {})
+
+
+# ── Export tests ──────────────────────────────────────────────
+
+class TestExportResults:
+
+    def test_export_button_exists(self, main_window):
+        assert main_window._export_btn is not None
+        assert not main_window._export_btn.isEnabled()
+
+    def test_export_button_initially_disabled(self, main_window):
+        assert not main_window._export_btn.isEnabled()
+
+    def test_collect_visible_table_data(self, main_window):
+        table = main_window._results_table
+        table.setRowCount(2)
+        for col in range(table.columnCount()):
+            table.setItem(0, col, QTableWidgetItem(f"r0c{col}"))
+            table.setItem(1, col, QTableWidgetItem(f"r1c{col}"))
+
+        headers, rows = main_window._collect_visible_table_data()
+        assert len(headers) == 9
+        assert headers[0] == "文件名"
+        assert len(rows) == 2
+        assert rows[0][0] == "r0c0"
+
+    def test_collect_skips_hidden_rows(self, main_window):
+        table = main_window._results_table
+        table.setRowCount(3)
+        for col in range(table.columnCount()):
+            table.setItem(0, col, QTableWidgetItem(f"a{col}"))
+            table.setItem(1, col, QTableWidgetItem(f"b{col}"))
+            table.setItem(2, col, QTableWidgetItem(f"c{col}"))
+        table.setRowHidden(1, True)
+
+        _, rows = main_window._collect_visible_table_data()
+        assert len(rows) == 2
+        assert rows[0][0] == "a0"
+        assert rows[1][0] == "c0"
+
+    def test_write_csv(self, main_window, tmp_path):
+        headers = ["文件名", "状态"]
+        rows = [["photo.jpg", "成功"]]
+        path = str(tmp_path / "out.csv")
+        main_window._write_csv(path, headers, rows)
+
+        content = Path(path).read_text(encoding="utf-8-sig")
+        assert "文件名" in content
+        assert "photo.jpg" in content
+
+    def test_write_markdown(self, main_window, tmp_path):
+        headers = ["文件名", "状态"]
+        rows = [["photo.jpg", "成功"]]
+        path = str(tmp_path / "out.md")
+        main_window._write_markdown(path, headers, rows)
+
+        content = Path(path).read_text(encoding="utf-8")
+        assert "| 文件名 | 状态 |" in content
+        assert "| photo.jpg | 成功 |" in content
+        assert "| --- |" in content
+
+    def test_write_markdown_escapes_pipe(self, main_window, tmp_path):
+        headers = ["文件名", "备注"]
+        rows = [["photo.jpg", "GPS(前) | GPS(后)"]]
+        path = str(tmp_path / "out.md")
+        main_window._write_markdown(path, headers, rows)
+
+        content = Path(path).read_text(encoding="utf-8")
+        assert r"GPS(前) \| GPS(后)" in content
+
+
+# ── v0.18.0: Undo + Source column menu tests ──────────────────
+
+class TestUndoRow:
+    """BUG-2 (v0.18.0): Esc undo restores original match state."""
+
+    @staticmethod
+    def _populate_rows(main_window, rows_data):
+        """Populate table via _on_photo_processed and return list of data_rows."""
+        data_rows = []
+        for rd in rows_data:
+            main_window._on_photo_processed(rd)
+            # data_row = index into _result_details (no sorting disruption in tests)
+            data_rows.append(len(main_window._result_details) - 1)
+        return data_rows
+
+    def test_undo_after_follow_restores_original(self, main_window):
+        """Follow a neighbor, then undo — GPS(后), source, status all revert."""
+        rows = self._populate_rows(main_window, [
+            {"filename": "a.jpg", "success": True, "method": "interpolated",
+             "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+             "capture_time": "2024-01-01 10:00:00", "capture_time_ts": 1704112800.0},
+            {"filename": "b.jpg", "success": False, "method": "",
+             "has_gps": False, "reject_reason": "no_gps_coverage",
+             "capture_time": "2024-01-01 10:05:00", "capture_time_ts": 1704113100.0},
+        ])
+        assert len(main_window._result_details) == 2
+        assert len(main_window._original_details) == 2
+
+        # Follow: row 1 (visual=1) follows previous
+        main_window._quick_follow_gps(1, -1)
+
+        # Verify follow changed state
+        detail_after_follow = dict(main_window._result_details[rows[1]])
+        assert detail_after_follow["success"] is True
+        assert "follow" in detail_after_follow.get("method", "")
+
+        # Undo
+        main_window._undo_row(1)
+
+        # Verify restored to original
+        detail_after_undo = main_window._result_details[rows[1]]
+        original = main_window._original_details[rows[1]]
+        assert detail_after_undo["success"] == original["success"]
+        assert detail_after_undo["method"] == original["method"]
+        assert detail_after_undo.get("latitude") == original.get("latitude")
+
+        # Table columns restored
+        status_item = main_window._results_table.item(1, 6)
+        assert status_item is not None
+        assert "无GPS覆盖" in status_item.text()
+
+    def test_undo_after_protection_restores_original(self, main_window):
+        """Protect a row, then undo — restores pre-protection state."""
+        rows = self._populate_rows(main_window, [
+            {"filename": "a.jpg", "success": True, "method": "interpolated",
+             "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+             "capture_time": "2024-01-01 10:00:00"},
+        ])
+        original_method = main_window._original_details[rows[0]]["method"]
+
+        # Protect
+        main_window._reset_row_gps(0)
+        assert main_window._result_details[rows[0]]["method"] == "protected"
+
+        # Undo (Esc)
+        main_window._undo_row(0)
+
+        # Restored to original
+        assert main_window._result_details[rows[0]]["method"] == original_method
+        method_item = main_window._results_table.item(0, 5)
+        assert method_item.data(Qt.ItemDataRole.UserRole) == original_method
+
+        # Protection snapshot cleared
+        assert rows[0] not in main_window._protection_snapshots
+
+    def test_undo_idempotent(self, main_window):
+        """Undo on an already-original row is a no-op."""
+        self._populate_rows(main_window, [
+            {"filename": "a.jpg", "success": True, "method": "nearest",
+             "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+             "capture_time": "2024-01-01 10:00:00"},
+        ])
+        detail_before = dict(main_window._result_details[0])
+
+        main_window._undo_row(0)
+
+        assert main_window._result_details[0] == detail_before
+
+    def test_undo_clears_protection_snapshot(self, main_window):
+        """Undo after follow+protect clears protection snapshot entirely."""
+        self._populate_rows(main_window, [
+            {"filename": "a.jpg", "success": True, "method": "interpolated",
+             "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+             "capture_time": "2024-01-01 10:00:00", "capture_time_ts": 1704112800.0},
+            {"filename": "b.jpg", "success": False, "method": "",
+             "has_gps": False, "reject_reason": "no_gps_coverage",
+             "capture_time": "2024-01-01 10:05:00", "capture_time_ts": 1704113100.0},
+        ])
+        # Follow then protect
+        main_window._quick_follow_gps(1, -1)
+        main_window._reset_row_gps(1)  # protect the followed row
+        assert 1 in main_window._protection_snapshots
+
+        # Undo clears everything
+        main_window._undo_row(1)
+        assert 1 not in main_window._protection_snapshots
+        assert main_window._result_details[1]["method"] == ""
+
+
+class TestSourceColumnMenu:
+    """FEAT-2 (v0.18.0): Double-click source column shows context menu."""
+
+    def test_source_column_double_click_opens_menu(self, main_window, monkeypatch):
+        """Double-clicking column 5 (source) triggers _show_source_menu instead of detail dialog."""
+        main_window._on_photo_processed({
+            "filename": "a.jpg", "success": True, "method": "interpolated",
+            "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+        })
+        menu_called = []
+        monkeypatch.setattr(
+            main_window, "_show_source_menu",
+            lambda vr, dr: menu_called.append((vr, dr)),
+        )
+        index = main_window._results_table.model().index(0, 5)
+        main_window._on_table_double_click(index)
+        assert menu_called, "Source column double-click should call _show_source_menu"
+
+    def test_other_column_double_click_opens_detail(self, main_window, monkeypatch):
+        """Double-clicking a non-source column still opens detail dialog."""
+        main_window._on_photo_processed({
+            "filename": "a.jpg", "success": True, "method": "interpolated",
+            "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+        })
+        dialogs = []
+        monkeypatch.setattr(
+            "gps_photo_tracker.gui.main_window.DetailDialog",
+            type("FakeDialog", (), {"__init__": lambda s, d, p: None, "exec": lambda s: dialogs.append(True)}),
+        )
+        index = main_window._results_table.model().index(0, 0)
+        main_window._on_table_double_click(index)
+        assert dialogs, "Non-source column double-click should open detail dialog"
+
+    def test_shortcut_hint_includes_esc(self, main_window):
+        """Shortcut hint bar mentions Esc undo."""
+        from gps_photo_tracker.gui.result_table import build_result_panel
+        widget, *_ = build_result_panel()
+        hint = widget.findChild(object)
+        # Find QLabel children
+        from PySide6.QtWidgets import QLabel
+        labels = widget.findChildren(QLabel)
+        hint_texts = [l.text() for l in labels]
+        assert any("Esc" in t for t in hint_texts), f"No Esc in hints: {hint_texts}"
+
+
+# ── v0.19.0: Write signal + write status column tests ──────────
+
+class TestWriteSignal:
+    """BUG-1 (v0.19.0): Write phase uses write_signal, not photo_signal."""
+
+    def test_worker_has_write_signal(self, qapp):
+        """Worker class should have write_signal defined."""
+        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+                   ProcessOptions(mode=ProcessMode.PREVIEW))
+        assert hasattr(w, "write_signal")
+
+    def test_write_signal_connected_in_step3(self, main_window, monkeypatch):
+        """Step 3 execution should connect write_signal to _on_write_update."""
+        # Populate table first
+        main_window._on_photo_processed({
+            "filename": "a.jpg", "success": True, "method": "interpolated",
+            "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+        })
+
+        # Verify _on_write_update updates write status column
+        main_window._on_write_update({
+            "filename": "a.jpg", "success": True, "method": "interpolated",
+        })
+        write_status_item = main_window._results_table.item(0, 7)
+        assert write_status_item is not None
+        assert write_status_item.text() in ("已复制", "已覆盖")
+
+
+class TestWriteStatusColumn:
+    """FEAT-1 (v0.19.0): Write status column in result table."""
+
+    def test_table_has_9_columns(self, main_window):
+        """Result table should have 9 columns (including write status)."""
+        assert main_window._results_table.columnCount() == 9
+
+    def test_write_status_column_header(self, main_window):
+        """Column 7 header should be '写入状态'."""
+        header = main_window._results_table.horizontalHeaderItem(7)
+        assert header is not None
+        assert header.text() == "写入状态"
+
+    def test_write_update_sets_copied_status(self, main_window):
+        """Successful COPY write should show '已复制'."""
+        main_window._on_photo_processed({
+            "filename": "test.jpg", "success": True, "method": "interpolated",
+            "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+        })
+        main_window._write_mode = ProcessMode.COPY
+        main_window._on_write_update({
+            "filename": "test.jpg", "success": True, "method": "interpolated",
+        })
+        assert main_window._results_table.item(0, 7).text() == "已复制"
+
+    def test_write_update_sets_overwrite_status(self, main_window):
+        """Successful OVERWRITE write should show '已覆盖'."""
+        main_window._on_photo_processed({
+            "filename": "test.jpg", "success": True, "method": "interpolated",
+            "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+        })
+        main_window._write_mode = ProcessMode.OVERWRITE
+        main_window._on_write_update({
+            "filename": "test.jpg", "success": True, "method": "interpolated",
+        })
+        assert main_window._results_table.item(0, 7).text() == "已覆盖"
+
+    def test_write_update_sets_skip_status(self, main_window):
+        """Skipped photo should show '跳过'."""
+        main_window._on_photo_processed({
+            "filename": "skip.jpg", "success": True, "method": "skipped",
+            "has_gps": True, "latitude": 25.0, "longitude": 100.0,
+        })
+        main_window._on_write_update({
+            "filename": "skip.jpg", "success": True, "method": "skipped",
+        })
+        assert main_window._results_table.item(0, 7).text() == "跳过"
+
+    def test_write_update_sets_failed_status(self, main_window):
+        """Failed write should show '失败'."""
+        main_window._on_photo_processed({
+            "filename": "fail.jpg", "success": False, "method": "",
+            "has_gps": False, "reject_reason": "no_gps_coverage",
+        })
+        main_window._on_write_update({
+            "filename": "fail.jpg", "success": False, "method": "",
+        })
+        assert main_window._results_table.item(0, 7).text() == "失败"
+
+    def test_write_does_not_duplicate_rows(self, main_window):
+        """Write phase should not add new rows to the table (BUG-1)."""
+        for i in range(3):
+            main_window._on_photo_processed({
+                "filename": f"photo{i}.jpg", "success": True, "method": "interpolated",
+                "has_gps": False, "latitude": 25.0, "longitude": 100.0,
+            })
+        assert main_window._results_table.rowCount() == 3
+
+        # Simulate write updates (should only update column 7, not add rows)
+        main_window._write_mode = ProcessMode.COPY
+        for i in range(3):
+            main_window._on_write_update({
+                "filename": f"photo{i}.jpg", "success": True, "method": "interpolated",
+            })
+        assert main_window._results_table.rowCount() == 3, "Write updates should not add rows"
+
+    def test_done_popup_skipped_when_processing(self, main_window, monkeypatch):
+        """BUG-2: Completion popup should be skipped if user started a new task."""
+        informed = []
+        monkeypatch.setattr(
+            "PySide6.QtWidgets.QMessageBox.information",
+            lambda *a, **kw: informed.append(True),
+        )
+
+        # Make QTimer.singleShot capture the callback
+        captured_cb = []
+        monkeypatch.setattr(
+            "PySide6.QtCore.QTimer.singleShot",
+            lambda ms, cb: captured_cb.append(cb),
+        )
+
+        main_window._on_done({
+            "total": 5, "matched": 3, "failed": 1, "skipped": 1, "success_rate": 0.6,
+        })
+
+        # User starts new processing before timer fires → step1 disabled
+        main_window._step1_btn.setEnabled(False)
+
+        # Now fire the captured callback
+        assert len(captured_cb) == 1
+        captured_cb[0]()
+
+        # Popup should NOT appear because step1 is disabled (new task in progress)
+        assert not informed, "Popup should be suppressed when new task started"

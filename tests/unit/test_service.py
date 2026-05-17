@@ -469,10 +469,10 @@ class TestCopyModeSkippedStillCopied:
         result = service.process(segments, photos, MatcherConfig(), options, photo_dir=tmp_path)
         # Photo has existing GPS + overwrite=False → skipped, but still copied
         if result.skipped >= 1:
-            assert (output / "photo.jpg").exists()
+            assert (output / tmp_path.name / "photo.jpg").exists()
         # If matching fails due to timezone offset, it's still copied as failed photo
         elif result.failed >= 1:
-            assert (output / "photo.jpg").exists()
+            assert (output / tmp_path.name / "photo.jpg").exists()
 
     @staticmethod
     def _make_photo_with_gps(tmp_path, filename, dt_bytes, lat, lon, alt=None):
@@ -519,7 +519,7 @@ class TestKeepStructure:
         result = service.process(segments, photos, MatcherConfig(), options, photo_dir=sub)
         # Should preserve the subdirectory structure
         assert result.matched >= 0
-        assert (output / "photo.jpg").exists()
+        assert (output / sub.name / "photo.jpg").exists()
 
 
 class TestRejectGroups:
@@ -844,9 +844,9 @@ class TestCopyModeEdgeCases:
         options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
         result = service.process(segments, photos, MatcherConfig(), options, photo_dir=tmp_path)
 
-        assert (output / "matched.jpg").exists()
-        assert (output / "unmatched.jpg").exists()
-        output_count = len(list(output.glob("*.jpg")))
+        assert (output / tmp_path.name / "matched.jpg").exists()
+        assert (output / tmp_path.name / "unmatched.jpg").exists()
+        output_count = len(list(output.rglob("*.jpg")))
         assert output_count == 2
 
     def test_copy_skip_existing_gps(self, tmp_path):
@@ -898,7 +898,7 @@ class TestCopyModeEdgeCases:
         result = service.process(segments, photos, MatcherConfig(), options, photo_dir=tmp_path)
 
         assert result.skipped >= 1
-        assert (output / "photo.jpg").exists()
+        assert (output / tmp_path.name / "photo.jpg").exists()
 
 
 class TestPipelineProgressCallback:
@@ -1288,9 +1288,9 @@ class TestCopyDestinationPaths:
             output_dir=Path("/output"),
             keep_structure=True,
         )
-        # Path not relative to photo_dir → ValueError → fallback to filename
+        # Path not relative to photo_dir → ValueError → fallback to photo_dir.name / filename
         result = service._copy_destination(Path("/other/photo.jpg"), options, Path("/photos"))
-        assert result == Path("/output") / "photo.jpg"
+        assert result == Path("/output") / "photos" / "photo.jpg"
 
     def test_keep_structure_preserves_relative_path(self):
         service = GPSTaggingService()
@@ -1411,5 +1411,5 @@ class TestSequentialWriteError:
             result = service.process([], [photo], MatcherConfig(), opts, photo_dir=tmp_path)
             assert result.matched == 0
             assert result.failed == 1
-            assert (output / "photo.jpg").exists()
+            assert (output / tmp_path.name / "photo.jpg").exists()
 

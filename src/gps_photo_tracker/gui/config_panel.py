@@ -2,12 +2,9 @@
 
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QRadioButton,
-    QButtonGroup,
     QSpinBox,
     QVBoxLayout,
     QPushButton,
@@ -81,11 +78,11 @@ def build_params_group() -> tuple[QGroupBox, dict]:
     widgets["offset_spin"] = spin5
 
     # Checkboxes
-    match_tail_cb = QCheckBox("匹配首尾孤立照片")
-    match_tail_cb.setChecked(True)
-    match_tail_cb.setToolTip("允许匹配轨迹开头/结尾处的孤立照片。\n开启后，轨迹边缘的照片会使用最近的轨迹点。")
-    layout.addWidget(match_tail_cb)
-    widgets["match_tail_cb"] = match_tail_cb
+    match_isolated_cb = QCheckBox("匹配孤立照片（头部/尾部/中间）")
+    match_isolated_cb.setChecked(True)
+    match_isolated_cb.setToolTip("允许匹配轨迹开头/结尾/中间的孤立照片。\n开启后，这些照片会使用最近的轨迹点。")
+    layout.addWidget(match_isolated_cb)
+    widgets["match_isolated_cb"] = match_isolated_cb
 
     overwrite_gps_cb = QCheckBox("覆盖已有 GPS")
     overwrite_gps_cb.setChecked(False)
@@ -99,11 +96,18 @@ def build_params_group() -> tuple[QGroupBox, dict]:
     layout.addWidget(keep_struct_cb)
     widgets["keep_struct_cb"] = keep_struct_cb
 
-    # Auto-tune button
+    # Auto-tune + reset defaults buttons
+    btn_row = QHBoxLayout()
     auto_tune_btn = QPushButton("智能推荐参数")
     auto_tune_btn.setToolTip("根据扫描到的轨迹和照片数据自动推荐匹配参数")
-    layout.addWidget(auto_tune_btn)
+    btn_row.addWidget(auto_tune_btn)
     widgets["auto_tune_btn"] = auto_tune_btn
+
+    reset_btn = QPushButton("恢复默认")
+    reset_btn.setToolTip("恢复所有参数为默认值")
+    btn_row.addWidget(reset_btn)
+    widgets["reset_btn"] = reset_btn
+    layout.addLayout(btn_row)
 
     # Workers spinbox
     row_workers = QHBoxLayout()
@@ -119,28 +123,29 @@ def build_params_group() -> tuple[QGroupBox, dict]:
     return group, widgets
 
 
-def build_mode_group() -> tuple[QGroupBox, QButtonGroup, dict]:
-    """Build process mode selection panel. Returns (group, button_group, radio_dict)."""
-    group = QGroupBox("处理模式")
+def build_step_group() -> tuple[QGroupBox, QPushButton, QPushButton, QPushButton, QPushButton]:
+    """Build step-based workflow buttons. Returns (group, step1_btn, step2_btn, step3_copy_btn, step3_overwrite_btn)."""
+    group = QGroupBox("工作流")
     layout = QHBoxLayout(group)
 
-    btn_group = QButtonGroup(group)
-    radios = {}
+    step1_btn = QPushButton("① 预览匹配")
+    step1_btn.setToolTip("扫描 GPS 轨迹和照片，进行自动匹配预览")
 
-    rb_preview = QRadioButton("预览")
-    rb_preview.setChecked(True)
-    btn_group.addButton(rb_preview, 0)
-    layout.addWidget(rb_preview)
-    radios["preview_rb"] = rb_preview
+    step2_btn = QPushButton("② 审核")
+    step2_btn.setEnabled(False)
+    step2_btn.setToolTip("对匹配失败的照片进行人工审核修正")
 
-    rb_copy = QRadioButton("拷贝")
-    btn_group.addButton(rb_copy, 1)
-    layout.addWidget(rb_copy)
-    radios["copy_rb"] = rb_copy
+    step3_copy_btn = QPushButton("③ 拷贝")
+    step3_copy_btn.setEnabled(False)
+    step3_copy_btn.setToolTip("将匹配结果拷贝到输出目录（保留原文件）")
 
-    rb_overwrite = QRadioButton("覆盖")
-    btn_group.addButton(rb_overwrite, 2)
-    layout.addWidget(rb_overwrite)
-    radios["overwrite_rb"] = rb_overwrite
+    step3_overwrite_btn = QPushButton("③ 覆盖")
+    step3_overwrite_btn.setEnabled(False)
+    step3_overwrite_btn.setToolTip("将匹配结果写入原照片文件")
 
-    return group, btn_group, radios
+    layout.addWidget(step1_btn)
+    layout.addWidget(step2_btn)
+    layout.addWidget(step3_copy_btn)
+    layout.addWidget(step3_overwrite_btn)
+
+    return group, step1_btn, step2_btn, step3_copy_btn, step3_overwrite_btn
