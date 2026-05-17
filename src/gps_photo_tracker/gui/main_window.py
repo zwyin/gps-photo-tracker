@@ -259,10 +259,12 @@ class MainWindow(QMainWindow):
 
     def _build_right_panel(self) -> QWidget:
         # Result table (from result_table module)
-        result_widget, self._pre_stats_label, self._stats_label, self._result_filter, self._results_table = build_result_panel()
+        result_widget, self._pre_stats_label, self._stats_label, self._result_filter, self._results_table, self._review_btn = build_result_panel()
         self._result_filter.currentIndexChanged.connect(self._apply_result_filter)
         self._results_table.doubleClicked.connect(self._on_table_double_click)
         self._results_table.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        self._results_table.installEventFilter(self)  # BUG-1: capture arrow keys from table
+        self._review_btn.clicked.connect(self._reopen_review_dialog)
 
         layout = result_widget.layout()
 
@@ -617,6 +619,9 @@ class MainWindow(QMainWindow):
                       "no_track_points": "无轨迹点"}.get(reason, reason)
         self._results_table.setItem(row, 6, QTableWidgetItem(status))
 
+        # 备注 — empty for auto-matched results
+        self._results_table.setItem(row, 7, QTableWidgetItem(""))
+
         if sorting_was_enabled:
             self._results_table.setSortingEnabled(True)
 
@@ -671,6 +676,8 @@ class MainWindow(QMainWindow):
 
     def _on_review_ready(self, review_data: dict):
         """Handle review_ready_signal: show ReviewDialog for failed matches."""
+        self._review_data = review_data
+        self._review_btn.setEnabled(True)
         failed_results = []
         for fr in review_data.get("failed_results", []):
             photo = PhotoInfo(
@@ -783,6 +790,113 @@ class MainWindow(QMainWindow):
             "skipped": 0, "overwritten": 0, "success_rate": rate,
         })
 
+    def _reopen_review_dialog(self):
+        """Re-open ReviewDialog with current result data (reflects all prior edits)."""
+        if not self._review_data:
+            return
+
+        review_data = self._review_data
+
+        # Build failed results — check current table state for still-failing rows
+        failed_results = []
+        for visual_row in range(self._results_table.rowCount()):
+            data_row = self._get_detail_row(visual_row)
+            if data_row < 0 or data_row >= len(self._result_details):
+                continue
+            detail = self._result_details[data_row]
+            if not detail.get("success"):
+                photo = PhotoInfo(
+                    path=Path(detail.get("path", "")),
+                    filename=detail.get("filename", ""),
+                    timestamp=None,
+                    has_gps=False,
+                )
+                result = MatchResult(
+                    photo=photo, success=False,
+                    reject_reason=detail.get("reject_reason"),
+                    time_diff=detail.get("time_diff"),
+                )
+                failed_results.append(result)
+
+        if not failed_results:
+            self.statusBar().showMessage("所有照片均已匹配成功，无需审核")
+            return
+
+        # Reconstruct GPS segments
+        segments = []
+        for sd in review_data.get("gps_segments", []):
+            points = [
+                TrackPoint(
+                    timestamp=p["timestamp"],
+                    latitude=p["latitude"],
+                    longitude=p["longitude"],
+                    altitude=p.get("altitude"),
+                )
+                for p in sd.get("points", [])
+            ]
+            segments.append(GPXSegment(
+                filename=sd["filename"],
+                start=sd["start"],
+                end=sd["end"],
+                points=points,
+            ))
+
+        # Build all_results from current table state
+        all_results = []
+        for visual_row in range(self._results_table.rowCount()):
+            data_row = self._get_detail_row(visual_row)
+            if data_row < 0 or data_row >= len(self._result_details):
+                continue
+            detail = self._result_details[data_row]
+            photo = PhotoInfo(
+                path=Path(detail.get("path", "")),
+                filename=detail.get("filename", ""),
+                timestamp=None,
+                has_gps=detail.get("has_gps", False),
+            )
+            gps = None
+            if detail.get("latitude") is not None:
+                from gps_photo_tracker.core.models import GPSInfo
+                gps = GPSInfo(
+                    latitude=detail["latitude"],
+                    longitude=detail["longitude"],
+                    altitude=detail.get("altitude"),
+                )
+            result = MatchResult(
+                photo=photo, success=detail.get("success", False),
+                gps=gps, method=detail.get("method"),
+            )
+            all_results.append(result)
+
+        state = ReviewState(
+            failed_results=failed_results,
+            gps_segments=segments,
+            all_results=all_results,
+        )
+        dialog = ReviewDialog(state, self)
+        dialog.exec()
+
+        reviewed_state = dialog.get_state()
+        if reviewed_state.decisions:
+            if not hasattr(self, '_review_decisions') or self._review_decisions is None:
+                self._review_decisions = {}
+            for path_str, dec in reviewed_state.decisions.items():
+                dec_data = {"action": dec.action.value}
+                if dec.action == ReviewAction.MANUAL_GPS and dec.selected_point:
+                    dec_data["point"] = {
+                        "timestamp": dec.selected_point.timestamp,
+                        "latitude": dec.selected_point.latitude,
+                        "longitude": dec.selected_point.longitude,
+                        "altitude": dec.selected_point.altitude,
+                    }
+                elif dec.action == ReviewAction.MANUAL_COORD:
+                    dec_data["lat"] = dec.manual_lat
+                    dec_data["lon"] = dec.manual_lon
+                self._review_decisions[path_str] = dec_data
+
+            self._apply_review_to_table(reviewed_state, all_results)
+            self.statusBar().showMessage("审核完成 | 选中行后按 ← → 快速跟随相邻GPS")
+
     def _apply_review_to_table(self, reviewed_state: ReviewState, all_results: list):
         """Update result table rows with review decisions (GPS coords, method, status)."""
         from gps_photo_tracker.core.models import GPSInfo
@@ -866,7 +980,17 @@ class MainWindow(QMainWindow):
             self._results_table.setItem(visual_row, 5, method_item)
 
             # Update status column
-            self._results_table.setItem(visual_row, 6, QTableWidgetItem("已审核"))
+            self._results_table.setItem(visual_row, 6, QTableWidgetItem("成功"))
+
+            # Update remark column — record the review action
+            remark_map = {
+                "手动GPS": "手动选点",
+                "手动坐标": "手动输入坐标",
+                "跟随上一个": "Review: 跟随上一个",
+                "跟随下一个": "Review: 跟随下一个",
+            }
+            remark_text = remark_map.get(method_label, method_label)
+            self._results_table.setItem(visual_row, 7, QTableWidgetItem(remark_text))
 
             # Also update the detail dict so double-click shows correct info
             detail["success"] = True
@@ -996,13 +1120,29 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         key = event.key()
-        if key in (Qt.Key_Left, Qt.Key_Right):
+        if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Period):
             rows = self._results_table.selectionModel().selectedRows()
             if rows and self._results_table.rowCount() > 0:
-                self._results_table.setFocus()
-                self._quick_follow_gps(rows[0].row(), -1 if key == Qt.Key_Left else 1)
+                if key == Qt.Key_Period:
+                    self._reset_row_gps(rows[0].row())
+                else:
+                    self._quick_follow_gps(rows[0].row(), -1 if key == Qt.Key_Left else 1)
                 return
         super().keyPressEvent(event)
+
+    def eventFilter(self, obj, event):
+        # BUG-1: capture arrow keys and period from QTableWidget
+        if obj is self._results_table and event.type() == event.Type.KeyPress:
+            key = event.key()
+            if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Period):
+                rows = self._results_table.selectionModel().selectedRows()
+                if rows and self._results_table.rowCount() > 0:
+                    if key == Qt.Key_Period:
+                        self._reset_row_gps(rows[0].row())
+                    else:
+                        self._quick_follow_gps(rows[0].row(), -1 if key == Qt.Key_Left else 1)
+                    return True  # consumed
+        return super().eventFilter(obj, event)
 
     def _quick_follow_gps(self, visual_row: int, direction: int):
         """Assign GPS from nearest neighbor with GPS(后) in the given direction.
@@ -1058,7 +1198,11 @@ class MainWindow(QMainWindow):
         if method_label in self._METHOD_COLORS:
             method_item.setBackground(self._METHOD_COLORS[method_label])
         self._results_table.setItem(visual_row, 5, method_item)
-        self._results_table.setItem(visual_row, 6, QTableWidgetItem("已跟随"))
+        self._results_table.setItem(visual_row, 6, QTableWidgetItem("成功"))
+
+        # Remark — record arrow key follow
+        arrow_remark = "← 跟随上一个" if direction < 0 else "→ 跟随下一个"
+        self._results_table.setItem(visual_row, 7, QTableWidgetItem(arrow_remark))
 
         # Color-code GPS(后) column
         same_brush = QBrush(QColor(220, 245, 220))
@@ -1085,6 +1229,65 @@ class MainWindow(QMainWindow):
         next_row = visual_row + direction
         if 0 <= next_row < self._results_table.rowCount():
             self._results_table.selectRow(next_row)
+
+    def _reset_row_gps(self, visual_row: int):
+        """Reset current row to original auto-matched result (clear manual intervention)."""
+        data_row = self._get_detail_row(visual_row)
+        if data_row < 0 or data_row >= len(self._result_details):
+            return
+        detail = self._result_details[data_row]
+
+        # Restore original values from detail dict
+        sorting_was_enabled = self._results_table.isSortingEnabled()
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(False)
+
+        # Restore GPS(后) — original computed GPS or empty
+        lat = detail.get("latitude")
+        lon = detail.get("longitude")
+        has_gps = detail.get("has_gps", False)
+        success = detail.get("success", False)
+
+        if has_gps and not success:
+            # Original had GPS but matching failed — keep existing GPS
+            before_item = self._results_table.item(visual_row, 2)
+            after_text = before_item.text() if before_item else "无"
+        elif lat is not None and lon is not None:
+            after_text = f"{lat:.4f}, {lon:.4f}"
+        elif success:
+            after_text = "—"
+        else:
+            after_text = "—"
+
+        self._results_table.setItem(visual_row, 4, QTableWidgetItem(after_text))
+
+        # Restore method column
+        original_method = detail.get("method", "")
+        method_text = {"interpolated": "插值", "nearest": "就近", "skipped": "已跳过"}.get(original_method, "")
+        method_item = QTableWidgetItem(method_text)
+        if method_text in self._METHOD_COLORS:
+            method_item.setBackground(self._METHOD_COLORS[method_text])
+        self._results_table.setItem(visual_row, 5, method_item)
+
+        # Restore status column
+        if original_method == "skipped":
+            status = "已跳过"
+        elif success:
+            status = "成功"
+        else:
+            reason = detail.get("reject_reason", "失败")
+            status = {"no_gps_coverage": "无GPS覆盖", "time_diff": "时差过大",
+                      "gps_distance": "距离过大", "isolated_disabled": "孤立(已禁用)",
+                      "tail_isolated": "孤立(已禁用)",
+                      "no_track_points": "无轨迹点"}.get(reason, reason)
+        self._results_table.setItem(visual_row, 6, QTableWidgetItem(status))
+
+        # Clear remark
+        self._results_table.setItem(visual_row, 7, QTableWidgetItem(""))
+
+        if sorting_was_enabled:
+            self._results_table.setSortingEnabled(True)
+        self._update_stats_card()
 
     def _get_detail_row(self, visual_row: int) -> int:
         item = self._results_table.item(visual_row, 0)

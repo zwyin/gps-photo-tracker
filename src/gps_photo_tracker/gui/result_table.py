@@ -6,16 +6,17 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QPushButton,
     QTableWidget,
     QVBoxLayout,
     QWidget,
 )
 
 
-def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidget]:
+def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidget, QPushButton]:
     """Build right-side result panel.
 
-    Returns (widget, pre_stats_label, stats_label, result_filter, results_table).
+    Returns (widget, pre_stats_label, stats_label, result_filter, results_table, review_btn).
     """
     widget = QWidget()
     layout = QVBoxLayout(widget)
@@ -38,14 +39,19 @@ def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidg
     filter_row.addWidget(result_filter)
     filter_row.addStretch()
 
-    shortcut_hint = QLabel("← → 快速跟随相邻GPS")
+    shortcut_hint = QLabel("←→ 跟随GPS | . 重置 | ↑↓ 导航")
     shortcut_hint.setStyleSheet("color: #888; font-size: 11px;")
     filter_row.addWidget(shortcut_hint)
+
+    review_btn = QPushButton("审核")
+    review_btn.setFixedWidth(60)
+    review_btn.setEnabled(False)
+    filter_row.addWidget(review_btn)
     layout.addLayout(filter_row)
 
     # Results table
-    results_table = QTableWidget(0, 7)
-    results_table.setHorizontalHeaderLabels(["文件名", "日期时间", "GPS(前)", "计算GPS", "GPS(后)", "方式", "状态"])
+    results_table = QTableWidget(0, 8)
+    results_table.setHorizontalHeaderLabels(["文件名", "日期时间", "GPS(前)", "计算GPS", "GPS(后)", "方式", "状态", "备注"])
     header = results_table.horizontalHeader()
     header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
     header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -54,10 +60,11 @@ def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidg
     header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
     header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
     header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+    header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
     results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
     results_table.setSortingEnabled(True)
     results_table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
     layout.addWidget(results_table, stretch=1)
 
-    return widget, pre_stats_label, stats_label, result_filter, results_table
+    return widget, pre_stats_label, stats_label, result_filter, results_table, review_btn
