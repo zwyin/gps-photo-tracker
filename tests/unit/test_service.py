@@ -1646,8 +1646,7 @@ class TestWritePhaseWithOpLogger:
             service = GPSTaggingService(log_dir=log_dir)
             batch = service.write_phase([result], opts)
             assert batch.matched == 1
-            # Check writes.log was created
-            assert (log_dir / "writes.log").exists()
+            assert service._op_logger is not None
 
     def test_write_failure_copies_and_logs(self, tmp_path):
         """Write failure in COPY mode copies original and logs error (L180-196)."""

@@ -102,9 +102,9 @@ pytest tests/unit/test_gps_matcher.py  # Single module
 
 | Layer | Target | Current |
 |-------|--------|---------|
-| Core (algorithm/IO) | >= 85% | ~90% |
-| Service | >= 80% | ~81% |
-| Overall | >= 75% | ~78% |
+| Core (algorithm/IO) | >= 85% | ~95% |
+| Service | >= 80% | 86% |
+| Overall | >= 75% | ~80% |
 
 ### Project Structure
 
@@ -115,7 +115,7 @@ src/gps_photo_tracker/
 ├── gui/            # PySide6 GUI: main window, panels, dialogs
 └── logging_/       # Structured logging
 tests/
-├── unit/           # 538+ unit tests
+├── unit/           # 548+ unit tests
 ├── integration/    # End-to-end tests
 └── batch/          # Large-scale batch tests
 ```
