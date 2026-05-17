@@ -145,7 +145,7 @@ class Worker(QThread):
                 "method": result.method,
                 "reject_reason": result.reject_reason,
                 "has_gps": result.photo.has_gps,
-                "overwritten": result.photo.has_gps and result.success and result.gps is not None,
+                "overwritten": result.photo.has_gps and result.success and result.gps is not None and result.method != "skipped",
                 "latitude": result.gps.latitude if result.gps else None,
                 "longitude": result.gps.longitude if result.gps else None,
                 "altitude": result.gps.altitude if result.gps else None,

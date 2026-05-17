@@ -658,8 +658,9 @@ class TestRealtimeStatsCard:
     def test_update_stats_card_empty(self, main_window):
         main_window._result_details = []
         main_window._update_stats_card()
-        assert "总数: 0" in main_window._stats_label.text()
-        assert "成功率: 0.0%" in main_window._stats_label.text()
+        text = main_window._stats_label.text()
+        assert "总数: 0" in text
+        assert "GPS覆盖率: 0.0%" in text
 
     def test_update_stats_card_with_results(self, main_window):
         main_window._result_details = [

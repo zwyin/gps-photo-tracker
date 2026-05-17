@@ -3,7 +3,7 @@ Name: gps-photo-tracker
 Version: 0.9.0
 Summary: Batch process photos with GPS tracks (GPX/KML/TCX) to write EXIF GPS tags
 License: GPL-3.0-or-later
-Project-URL: Repository, https://github.com/zwyin/gps-photo-tracker-claude
+Project-URL: Repository, https://github.com/zwyin/gps-photo-tracker
 Requires-Python: >=3.11
 License-File: LICENSE
 Requires-Dist: PySide6>=6.6
@@ -15,4 +15,5 @@ Requires-Dist: tenacity>=8.0.0
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0; extra == "dev"
 Requires-Dist: pytest-cov>=4.0; extra == "dev"
+Requires-Dist: pytest-qt>=4.0; extra == "dev"
 Dynamic: license-file

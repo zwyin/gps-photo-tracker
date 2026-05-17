@@ -174,6 +174,7 @@ class MatcherConfig:
     max_gps_distance: int = 200  # meters
     match_tail: bool = True  # legacy alias
     match_isolated: bool = True
+    overwrite_gps: bool = False
     time_offset: int = 0  # seconds, positive = photo time + offset
 
 

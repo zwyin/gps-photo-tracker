@@ -580,3 +580,85 @@ class TestZeroSpanInterpolationDistance:
         # This gives single-sided nearest match, not interpolation
         assert mid.success
         assert mid.method == "nearest"
+
+
+# ── BUG-5: Skip photos with existing GPS when overwrite disabled ──
+
+
+class TestSkipExistingGPS:
+    """Photos with existing GPS should be skipped when overwrite_gps=False."""
+
+    def test_skip_gps_photo_default_config(self):
+        """Default config (overwrite_gps=False): GPS photo is skipped."""
+        matcher = GPSMatcher(MatcherConfig())
+        seg = _uniform_segment()
+        photo = make_photo("gps.jpg", utc(8, 5), has_gps=True, lat=25.0, lon=100.0)
+        results = matcher.match([photo], [seg])
+        assert len(results) == 1
+        r = results[0]
+        assert r.success
+        assert r.method == "skipped"
+        assert r.gps is not None
+        assert r.gps.latitude == 25.0
+        assert r.gps.longitude == 100.0
+
+    def test_skip_gps_photo_mixed_batch(self):
+        """Mixed batch: GPS photos skipped, non-GPS photos matched normally."""
+        matcher = GPSMatcher(MatcherConfig())
+        seg = _uniform_segment()
+        photos = [
+            make_photo("gps1.jpg", utc(8, 2), has_gps=True, lat=25.0, lon=100.0),
+            make_photo("no_gps.jpg", utc(8, 5)),
+            make_photo("gps2.jpg", utc(8, 8), has_gps=True, lat=26.0, lon=101.0),
+        ]
+        results = matcher.match(photos, [seg])
+        assert results[0].method == "skipped"
+        assert results[0].success
+        assert results[1].method == "interpolated"
+        assert results[1].success
+        assert results[2].method == "skipped"
+        assert results[2].success
+
+    def test_overwrite_gps_photos_when_enabled(self):
+        """overwrite_gps=True: GPS photos go through normal matching."""
+        config = MatcherConfig(overwrite_gps=True)
+        matcher = GPSMatcher(config)
+        seg = _uniform_segment()
+        photos = [
+            make_photo("prev.jpg", utc(8, 3)),
+            make_photo("gps.jpg", utc(8, 5), has_gps=True, lat=25.0, lon=100.0),
+            make_photo("next.jpg", utc(8, 7)),
+        ]
+        results = matcher.match(photos, [seg])
+        r = results[1]
+        assert r.success
+        assert r.method == "interpolated"
+        # GPS should be interpolated, not the original
+        assert r.gps is not None
+        assert r.gps.latitude != 25.0 or r.gps.longitude != 100.0
+
+    def test_skip_preserves_existing_gps(self):
+        """Skipped photos keep their original GPS coordinates."""
+        matcher = GPSMatcher(MatcherConfig())
+        seg = _uniform_segment()
+        photo = make_photo("gps.jpg", utc(8, 5), has_gps=True, lat=30.5, lon=120.3, alt=500.0)
+        results = matcher.match([photo], [seg])
+        r = results[0]
+        assert r.gps.latitude == 30.5
+        assert r.gps.longitude == 120.3
+        assert r.gps.altitude == 500.0
+
+    def test_no_timestamp_photo_filtered_out(self):
+        """Photos without timestamp are excluded from matching entirely."""
+        from pathlib import Path
+        from gps_photo_tracker.core.models import PhotoInfo
+        matcher = GPSMatcher(MatcherConfig())
+        seg = _uniform_segment()
+        photo = PhotoInfo(
+            path=Path("/photos/no_ts.jpg"),
+            filename="no_ts.jpg",
+            timestamp=None,
+            has_gps=False,
+        )
+        results = matcher.match([photo], [seg])
+        assert len(results) == 0

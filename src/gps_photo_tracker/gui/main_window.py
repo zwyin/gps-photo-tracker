@@ -56,6 +56,7 @@ class MainWindow(QMainWindow):
         "跟随下一个": QBrush(QColor(255, 245, 200)),
         "手动GPS": QBrush(QColor(230, 220, 255)),
         "手动坐标": QBrush(QColor(230, 220, 255)),
+        "已跳过": QBrush(QColor(230, 230, 230)),
     }
 
     def __init__(self):
@@ -402,6 +403,7 @@ class MainWindow(QMainWindow):
             max_gps_distance=self._distance_spin.value(),
             match_isolated=self._match_isolated_cb.isChecked(),
             time_offset=self._offset_spin.value(),
+            overwrite_gps=self._overwrite_gps_cb.isChecked(),
         )
 
     def _get_process_options(self) -> ProcessOptions:
@@ -596,14 +598,16 @@ class MainWindow(QMainWindow):
             self._results_table.item(row, 4).setBackground(same_brush)
 
         method = result_dict.get("method", "")
-        method_text = {"interpolated": "插值", "nearest": "就近"}.get(method, "")
+        method_text = {"interpolated": "插值", "nearest": "就近", "skipped": "已跳过"}.get(method, "")
         method_item = QTableWidgetItem(method_text)
         if method_text in self._METHOD_COLORS:
             method_item.setBackground(self._METHOD_COLORS[method_text])
         self._results_table.setItem(row, 5, method_item)
 
         success = result_dict.get("success", False)
-        if success:
+        if method == "skipped":
+            status = "已跳过"
+        elif success:
             status = "成功"
         else:
             reason = result_dict.get("reject_reason", "失败")
@@ -633,11 +637,36 @@ class MainWindow(QMainWindow):
         overwritten = sum(1 for d in details if d.get("overwritten"))
         failed = sum(1 for d in details if not d.get("success"))
         matched = new_matched + skipped_existing + overwritten
-        rate = matched / total if total > 0 else 0
+        final_rate = matched / total if total > 0 else 0
+
+        # GPS coverage: pre (existing GPS) vs post (all with GPS after processing)
+        gps_with_result = sum(
+            1 for d in details
+            if d.get("success") and d.get("latitude") is not None
+        )
+        pre_rate = has_gps_total / total if total > 0 else 0
+        post_rate = gps_with_result / total if total > 0 else 0
+        delta = post_rate - pre_rate
+        delta_str = f"+{delta:.1%}" if delta >= 0 else f"{delta:.1%}"
+
+        # BUG-6: initial vs final success rate
+        review_methods = {"跟随上一个", "跟随下一个", "手动GPS", "手动坐标"}
+        initial_matched = sum(
+            1 for d in details
+            if d.get("success") and d.get("method", "") not in review_methods
+        )
+        initial_rate = initial_matched / total if total > 0 else 0
+
+        # Build stats text
+        coverage_line = f"GPS覆盖率: {pre_rate:.1%} → {post_rate:.1%} ({delta_str})"
+        if abs(initial_rate - final_rate) > 0.001:
+            success_line = f"成功率: {initial_matched}/{total} ({initial_rate:.1%}) → {matched}/{total} ({final_rate:.1%})"
+        else:
+            success_line = f"成功率: {matched}/{total} ({final_rate:.1%})"
+
         self._stats_label.setText(
-            f"总数: {total} | 已有GPS: {has_gps_total} | "
-            f"新匹配: {new_matched} | 跳过(已有): {skipped_existing} | "
-            f"覆盖: {overwritten} | 失败: {failed} | 成功率: {rate:.1%}"
+            f"总数: {total} | 新匹配: {new_matched} | 跳过(已有): {skipped_existing} | "
+            f"覆盖: {overwritten} | 失败: {failed} | {success_line} | {coverage_line}"
         )
 
     def _on_review_ready(self, review_data: dict):
@@ -871,9 +900,7 @@ class MainWindow(QMainWindow):
         skipped = result_dict.get("skipped", 0)
         rate = result_dict.get("success_rate", 0)
 
-        self._stats_label.setText(
-            f"总数: {total} | 成功: {matched} | 跳过: {skipped} | 失败: {failed} | 成功率: {rate:.1%}"
-        )
+        self._update_stats_card()
         self._progress_label.setText("完成")
         self.statusBar().showMessage(
             f"处理完成: {matched}/{total} 成功 | 选中行后按 ← → 快速跟随相邻GPS"
@@ -919,8 +946,9 @@ class MainWindow(QMainWindow):
             f"{self._scan_summary.text()} | 照片: {total}张 ({with_gps}有GPS)"
         )
         gps_ratio = with_gps / total if total > 0 else 0
+        no_gps = total - with_gps
         self._pre_stats_label.setText(
-            f"处理前: {total}张照片 | {with_gps}张有GPS ({gps_ratio:.1%})"
+            f"处理前: 总数: {total} | 已有GPS: {with_gps} | 待匹配: {no_gps} | GPS覆盖率: {gps_ratio:.1%}"
         )
 
     def _open_photo_browser(self):

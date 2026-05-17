@@ -28,6 +28,7 @@ src/gps_photo_tracker/gui/config_panel.py
 src/gps_photo_tracker/gui/detail_dialog.py
 src/gps_photo_tracker/gui/gps_point_picker.py
 src/gps_photo_tracker/gui/gpx_browser_dialog.py
+src/gps_photo_tracker/gui/log_viewer.py
 src/gps_photo_tracker/gui/main_window.py
 src/gps_photo_tracker/gui/photo_browser_dialog.py
 src/gps_photo_tracker/gui/photo_preview.py

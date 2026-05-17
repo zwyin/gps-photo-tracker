@@ -22,12 +22,12 @@ def build_result_panel() -> tuple[QWidget, QLabel, QLabel, QComboBox, QTableWidg
 
     # Pre-processing stats
     pre_stats_label = QLabel("")
-    pre_stats_label.setStyleSheet("padding: 4px 8px; color: #666; font-size: 12px;")
+    pre_stats_label.setStyleSheet("padding: 6px 8px; background: #f5f5f5; border-radius: 4px; font-size: 12px; color: #444;")
     layout.addWidget(pre_stats_label)
 
     # Stats card
     stats_label = QLabel("匹配结果将在此显示")
-    stats_label.setStyleSheet("padding: 8px; background: #f0f0f0; border-radius: 4px;")
+    stats_label.setStyleSheet("padding: 6px 8px; background: #f0f0f0; border-radius: 4px; font-size: 12px; color: #333;")
     layout.addWidget(stats_label)
 
     # Result filter

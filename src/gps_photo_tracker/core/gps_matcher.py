@@ -37,7 +37,13 @@ class GPSMatcher:
         sorted_photos = sorted(valid_photos, key=lambda p: p.timestamp)
         results: list[MatchResult] = []
         for i, photo in enumerate(sorted_photos):
-            results.append(self._match_one(photo, sorted_photos, i, segments))
+            if photo.has_gps and not self.config.overwrite_gps:
+                results.append(MatchResult(
+                    photo=photo, success=True, method="skipped",
+                    gps=photo.existing_gps,
+                ))
+            else:
+                results.append(self._match_one(photo, sorted_photos, i, segments))
         return results
 
     def _match_one(
