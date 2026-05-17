@@ -36,11 +36,40 @@ def clean():
             print(f"Removed {d}")
 
 
+def inject_commit():
+    """Write current git short hash into __init__.py.__commit__."""
+    init_file = ROOT / "src" / "gps_photo_tracker" / "__init__.py"
+    try:
+        short_hash = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, cwd=ROOT,
+        ).stdout.strip()
+    except Exception:
+        short_hash = ""
+
+    if not short_hash:
+        print("Warning: could not get git hash, skipping commit injection")
+        return
+
+    content = init_file.read_text()
+    # Replace the __commit__ line
+    import re
+    content = re.sub(
+        r'__commit__\s*=.*',
+        f'__commit__ = "{short_hash}"',
+        content,
+    )
+    init_file.write_text(content)
+    print(f"Injected commit: {short_hash}")
+
+
 def build(clean_first=False, onefile=False):
     check_pyinstaller()
 
     if clean_first:
         clean()
+
+    inject_commit()
 
     cmd = [sys.executable, "-m", "PyInstaller", str(SPEC_FILE), "--noconfirm"]
 

@@ -1158,11 +1158,13 @@ class MainWindow(QMainWindow):
 
     def _build_export_filename(self, ext: str) -> str:
         from datetime import date
+        from gps_photo_tracker import __version__, __commit__
         photo_dir = self._photo_dir_edit.currentText()
         dir_name = Path(photo_dir).name if photo_dir else "results"
         safe_name = self._sanitize_filename(dir_name)
         today = date.today().isoformat()
-        return f"GPS追踪_{safe_name}_{today}.{ext}"
+        suffix = f"_v{__version__}{f'_{__commit__}' if __commit__ else ''}"
+        return f"GPS追踪_{safe_name}_{today}{suffix}.{ext}"
 
     @staticmethod
     def _sanitize_filename(name: str) -> str:
