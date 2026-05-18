@@ -34,6 +34,7 @@ Existing tools with linear interpolation achieve **30-50% coverage** — many ph
 | Arrow-key quick follow | **Yes** | No | No | No | No | No |
 | Batch processing | **Yes** | Yes | Yes | Yes | Yes | Yes |
 | Write status tracking | **Yes** | No | No | No | No | No |
+| Last update | 2026 | ~2024 | 2025 | 2026 | 2026 | 2022 |
 
 > **Coverage**: All tools achieve high coverage with dense tracks (1 fix/sec). The gap widens with sparse tracks or GPS signal gaps — GPS Photo Tracker's neighbor following recovers photos that others leave unmatched.
 
