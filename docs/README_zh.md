@@ -24,7 +24,7 @@
 | 平台 | Win/Mac/Linux | 仅 Windows | 仅 Mac | Win/Mac | 命令行 | 仅 Windows |
 | 开源 | **是 (GPLv3)** | 否 | 否 | 否 | 是 | 否 |
 | 中文界面 | **支持** | 支持 | 不支持 | 支持 | 部分 | 不支持 |
-| 轨迹格式 | GPX<br>KML<br>TCX | GPX<br>NMEA<br>KML<br>TCX<br>PLT<br>IGC | GPX<br>NMEA<br>FIT<br>CSV | GPX | GPX<br>NMEA<br>KML<br>TCX<br>FIT<br>CSV | GPX |
+| 轨迹格式 | GPX<br>KML<br>TCX | GPX<br>NMEA<br>KML<br>+3 | GPX<br>NMEA<br>FIT<br>+1 | GPX | GPX<br>NMEA<br>KML<br>+3 | GPX |
 | 线性插值 | **支持** | 支持 | 支持 | 支持 | 支持 | 不支持 |
 | 二轮邻居跟随 | **支持** | 不支持 | 不支持 | 不支持 | 不支持 | 不支持 |
 | GPS 覆盖率（典型） | **~90%** | ~50-70% | ~60-80% | ~50-70% | ~50-70% | ~30-40% |
