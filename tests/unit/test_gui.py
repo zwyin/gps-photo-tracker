@@ -5029,3 +5029,321 @@ class TestOpenLogViewerSettingsDir:
                 MockQS.return_value.value.return_value = "/var/log/gps"
                 main_window._open_log_viewer()
                 MockDialog.return_value.exec.assert_called_once()
+
+
+# NOTE: remaining tests added below for last 25 lines coverage
+
+
+# ── MainWindow: keyPressEvent non-special key ─────────────────
+
+class TestKeyPressEventNonSpecial:
+    def test_regular_key_calls_super(self, main_window):
+        from PySide6.QtGui import QKeyEvent
+        event = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key_A, Qt.KeyboardModifier.NoModifier, "a")
+        main_window.keyPressEvent(event)
+
+
+# ── MainWindow: eventFilter period and escape ─────────────────
+
+class TestEventFilterPeriodEscape:
+    def _setup_row(self, mw):
+        mw._result_details = [
+            {"method": "interpolated", "success": True, "path": "/a.jpg",
+             "filename": "a.jpg", "has_gps": False}]
+        mw._original_details = [dict(mw._result_details[0])]
+        mw._results_table.setRowCount(1)
+        item = QTableWidgetItem("a.jpg")
+        item.setData(Qt.ItemDataRole.UserRole, 0)
+        mw._results_table.setItem(0, 0, item)
+        for col in range(1, 9):
+            mw._results_table.setItem(0, col, QTableWidgetItem(""))
+        mw._results_table.selectRow(0)
+
+    def test_period_key_calls_reset(self, main_window):
+        from PySide6.QtGui import QKeyEvent
+        self._setup_row(main_window)
+        event = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key_Period, Qt.KeyboardModifier.NoModifier, ".")
+        with patch.object(main_window, "_reset_row_gps") as mock_reset:
+            result = main_window.eventFilter(main_window._results_table, event)
+            assert result is True
+            mock_reset.assert_called_once()
+
+    def test_escape_key_calls_undo(self, main_window):
+        from PySide6.QtGui import QKeyEvent
+        self._setup_row(main_window)
+        event = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key_Escape, Qt.KeyboardModifier.NoModifier, "")
+        with patch.object(main_window, "_undo_row") as mock_undo:
+            result = main_window.eventFilter(main_window._results_table, event)
+            assert result is True
+            mock_undo.assert_called_once()
+
+
+# ── MainWindow: _quick_follow_gps candidate out-of-range ──────
+
+class TestQuickFollowCandidateOutOfRange:
+    def test_candidate_data_row_out_of_range(self, main_window):
+        details = [
+            {"filename": "a.jpg", "method": "interpolated", "success": True,
+             "capture_time_ts": 1000.0, "latitude": 25.0, "longitude": 100.0,
+             "has_gps": False, "path": "/photos/a.jpg"},
+            {"filename": "b.jpg", "method": "", "success": False,
+             "capture_time_ts": 2000.0, "has_gps": False, "path": "/photos/b.jpg"},
+        ]
+        main_window._result_details = details
+        main_window._original_details = [dict(d) for d in details]
+        main_window._results_table.setRowCount(3)
+        for i, d in enumerate(details):
+            item = QTableWidgetItem(d["filename"])
+            item.setData(Qt.ItemDataRole.UserRole, i)
+            main_window._results_table.setItem(i, 0, item)
+            main_window._results_table.setItem(i, 2, QTableWidgetItem("无"))
+            gps = f"{d['latitude']:.4f}, {d['longitude']:.4f}" if d.get("latitude") else "无"
+            main_window._results_table.setItem(i, 4, QTableWidgetItem(gps))
+            mi = QTableWidgetItem("")
+            mi.setData(Qt.ItemDataRole.UserRole, d.get("method", ""))
+            main_window._results_table.setItem(i, 5, mi)
+            main_window._results_table.setItem(i, 6, QTableWidgetItem(""))
+            main_window._results_table.setItem(i, 8, QTableWidgetItem(""))
+        orphan = QTableWidgetItem("orphan.jpg")
+        orphan.setData(Qt.ItemDataRole.UserRole, 99)
+        main_window._results_table.setItem(2, 0, orphan)
+        for col in range(1, 9):
+            main_window._results_table.setItem(2, col, QTableWidgetItem(""))
+        main_window._quick_follow_gps(1, -1)
+        assert main_window._results_table.item(1, 4).text() != "无"
+
+
+# ── MainWindow: _undo_row branches ────────────────────────────
+
+class TestUndoRowBranchesB:
+    def test_data_row_exceeds_original_details(self, main_window):
+        main_window._result_details = [{"method": "x"}]
+        main_window._original_details = []
+        main_window._results_table.setRowCount(1)
+        item = QTableWidgetItem("a.jpg")
+        item.setData(Qt.ItemDataRole.UserRole, 0)
+        main_window._results_table.setItem(0, 0, item)
+        main_window._undo_row(0)
+
+    def test_undo_has_gps_not_skipped(self, main_window):
+        original = {
+            "filename": "g.jpg", "path": "/g.jpg", "success": True,
+            "method": "interpolated", "has_gps": True,
+            "latitude": 25.5, "longitude": 100.5,
+        }
+        main_window._result_details = [
+            {"filename": "g.jpg", "path": "/g.jpg", "success": True,
+             "method": "follow_prev", "has_gps": True, "latitude": 26.0, "longitude": 101.0}]
+        main_window._original_details = [original]
+        main_window._protection_snapshots = {}
+        main_window._results_table.setRowCount(1)
+        item = QTableWidgetItem("g.jpg")
+        item.setData(Qt.ItemDataRole.UserRole, 0)
+        main_window._results_table.setItem(0, 0, item)
+        for col in range(1, 9):
+            main_window._results_table.setItem(0, col, QTableWidgetItem(""))
+        main_window._undo_row(0)
+        assert "25.5000" in main_window._results_table.item(0, 4).text()
+
+    def test_undo_overwritten_branch(self, main_window):
+        original = {
+            "filename": "o.jpg", "path": "/o.jpg", "success": True,
+            "method": "interpolated", "has_gps": True,
+            "latitude": 25.0, "longitude": 100.0, "overwritten": True,
+        }
+        main_window._result_details = [
+            {"filename": "o.jpg", "path": "/o.jpg", "success": True,
+             "method": "follow_prev", "has_gps": True, "latitude": 26.0, "longitude": 101.0}]
+        main_window._original_details = [original]
+        main_window._protection_snapshots = {}
+        main_window._results_table.setRowCount(1)
+        item = QTableWidgetItem("o.jpg")
+        item.setData(Qt.ItemDataRole.UserRole, 0)
+        main_window._results_table.setItem(0, 0, item)
+        for col in range(1, 9):
+            main_window._results_table.setItem(0, col, QTableWidgetItem(""))
+        main_window._undo_row(0)
+        assert "25.0000" in main_window._results_table.item(0, 4).text()
+
+
+# ── MainWindow: dropEvent no URLs ─────────────────────────────
+
+class TestDropEventNoURLs:
+    def test_drop_empty_urls_ignored(self, main_window):
+        from PySide6.QtCore import QMimeData, QPoint, Qt
+        from PySide6.QtGui import QDropEvent
+        mime = QMimeData()
+        event = QDropEvent(QPoint(0, 0), Qt.DropAction.CopyAction, mime,
+                           Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+        main_window.dropEvent(event)
+        assert not event.isAccepted()
+
+
+# ── MainWindow: dropEvent with photo_dir ──────────────────────
+
+class TestDropEventPhotoDir:
+    def test_drop_sets_photo_dir(self, main_window, tmp_path):
+        from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl
+        from PySide6.QtGui import QDropEvent
+        photo_dir = tmp_path / "photos"
+        photo_dir.mkdir()
+        (photo_dir / "test.jpg").write_bytes(b"\xff\xd8")
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(photo_dir / "test.jpg"))])
+        event = QDropEvent(QPoint(0, 0), Qt.DropAction.CopyAction, mime,
+                           Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+        with patch.object(main_window, "_classify_drop", return_value=(None, photo_dir)), \
+             patch.object(main_window, "_clear_results"), \
+             patch.object(main_window, "_auto_scan_photos"), \
+             patch.object(main_window, "_add_path_history"):
+            main_window.dropEvent(event)
+        assert event.isAccepted()
+
+
+# ── MainWindow: _classify_drop photo button ───────────────────
+
+class TestClassifyDropPhotoBtn:
+    def test_mixed_dir_click_photo_button(self, main_window, tmp_path):
+        from PySide6.QtCore import QUrl
+        mixed_dir = tmp_path / "mixed"
+        mixed_dir.mkdir()
+        (mixed_dir / "track.gpx").write_text("gpx")
+        (mixed_dir / "photo.jpg").write_bytes(b"\xff\xd8")
+        url = QUrl.fromLocalFile(str(mixed_dir))
+        actual_buttons = []
+
+        def fake_addButton(text, role):
+            btn = type('Btn', (), {'text': lambda self_=None: text})()
+            actual_buttons.append(btn)
+            return btn
+
+        with patch("gps_photo_tracker.gui.main_window.QMessageBox") as MockMB:
+            mock_msg = MockMB.return_value
+            mock_msg.addButton.side_effect = fake_addButton
+            mock_msg.exec.return_value = 0
+            mock_msg.clickedButton.side_effect = lambda: actual_buttons[1] if len(actual_buttons) >= 2 else None
+            gps_dir, photo_dir = main_window._classify_drop([url])
+            assert photo_dir == mixed_dir
+            assert gps_dir is None
+
+
+# ── MainWindow: _reopen_review with latitude and decisions ────
+
+class TestReopenReviewLatitudeAndDecisions:
+    def test_reopen_with_latitude_builds_gps(self, main_window, qtbot):
+        from gps_photo_tracker.core.models import (
+            ReviewState, ReviewDecision, ReviewAction, TrackPoint,
+        )
+        main_window._review_data = {
+            "gps_segments": [{
+                "filename": "t.gpx", "start": 900.0, "end": 1100.0,
+                "points": [{"timestamp": 1000.0, "latitude": 25.0, "longitude": 100.0}],
+            }],
+        }
+        main_window._result_details = [
+            {"filename": "fail.jpg", "path": "/f.jpg", "success": False,
+             "method": "", "has_gps": False, "reject_reason": "no_gps_coverage"},
+            {"filename": "ok.jpg", "path": "/ok.jpg", "success": True,
+             "method": "interpolated", "has_gps": False,
+             "latitude": 25.5, "longitude": 100.5, "altitude": 55},
+        ]
+        main_window._original_details = [dict(d) for d in main_window._result_details]
+        main_window._results_table.setRowCount(2)
+        for i, d in enumerate(main_window._result_details):
+            item = QTableWidgetItem(d["filename"])
+            item.setData(Qt.ItemDataRole.UserRole, i)
+            main_window._results_table.setItem(i, 0, item)
+            for col in range(1, 9):
+                main_window._results_table.setItem(i, col, QTableWidgetItem(""))
+
+        with patch("gps_photo_tracker.gui.main_window.ReviewDialog") as MockDlg:
+            dec = ReviewDecision(
+                photo_path="/f.jpg",
+                action=ReviewAction.MANUAL_GPS,
+                selected_point=TrackPoint(timestamp=1000.0, latitude=25.0, longitude=100.0),
+            )
+            state = ReviewState(failed_results=[], decisions={"/f.jpg": dec})
+            MockDlg.return_value.get_state.return_value = state
+            MockDlg.return_value.exec.return_value = 0
+            main_window._reopen_review_dialog()
+        assert "审核完成" in main_window.statusBar().currentMessage()
+
+
+# ── MainWindow: _auto_scan_photos GPS count ───────────────────
+
+class TestAutoScanPhotosGPSCount:
+    def test_read_gps_returns_gpsinfo(self, main_window, tmp_path):
+        """_auto_scan_photos counts photos with GPS from EXIFWriter.read_gps."""
+        from gps_photo_tracker.core.models import GPSInfo
+        photo = tmp_path / "test.jpg"
+        photo.write_bytes(b"\xff\xd8\xff\xe1")
+        with patch("gps_photo_tracker.core.file_provider.FileProvider.list_photos",
+                   return_value=[Path(str(photo))]), \
+             patch("gps_photo_tracker.core.exif_writer.EXIFWriter.read_gps",
+                   return_value=GPSInfo(25.0, 100.0)):
+            main_window._auto_scan_photos(tmp_path)
+        assert "1有GPS" in main_window._photo_browser_label.text()
+
+    def test_read_gps_exception_handled(self, main_window, tmp_path):
+        """_auto_scan_photos handles read_gps exceptions."""
+        photo = tmp_path / "bad.jpg"
+        photo.write_bytes(b"\xff\xd8\xff\xe1")
+        with patch("gps_photo_tracker.core.file_provider.FileProvider.list_photos",
+                   return_value=[Path(str(photo))]), \
+             patch("gps_photo_tracker.core.exif_writer.EXIFWriter.read_gps",
+                   side_effect=ValueError("corrupt")):
+            main_window._auto_scan_photos(tmp_path)
+        assert "0有GPS" in main_window._photo_browser_label.text()
+
+
+# ── MainWindow: _apply_review_to_table no UserRole ────────────
+
+class TestApplyReviewNoUserRoleB:
+    def test_item_with_none_userrole(self, main_window):
+        from gps_photo_tracker.core.models import (
+            ReviewState, ReviewDecision, ReviewAction, TrackPoint,
+            MatchResult, PhotoInfo, GPSInfo,
+        )
+        main_window._result_details = [
+            {"filename": "a.jpg", "path": "/photos/a.jpg", "success": False,
+             "method": "", "has_gps": False},
+        ]
+        main_window._original_details = [dict(main_window._result_details[0])]
+        main_window._results_table.setRowCount(1)
+        item = QTableWidgetItem("a.jpg")
+        item.setData(Qt.ItemDataRole.UserRole, None)
+        main_window._results_table.setItem(0, 0, item)
+        for col in range(1, 9):
+            main_window._results_table.setItem(0, col, QTableWidgetItem(""))
+        dec = ReviewDecision(
+            photo_path="/photos/a.jpg",
+            action=ReviewAction.MANUAL_GPS,
+            selected_point=TrackPoint(timestamp=1000.0, latitude=25.5, longitude=100.5),
+        )
+        state = ReviewState(failed_results=[], decisions={"/photos/a.jpg": dec})
+        all_results = [MatchResult(
+            photo=PhotoInfo(path=Path("/photos/a.jpg"), filename="a.jpg",
+                            timestamp=1000.0, has_gps=False),
+            success=True, gps=GPSInfo(25.0, 100.0), method="interpolated",
+        )]
+        main_window._apply_review_to_table(state, all_results)
+        assert not main_window._result_details[0].get("success", False)
+
+
+# ── MainWindow: export write exception ────────────────────────
+
+class TestExportWriteException:
+    def test_write_raises_shows_warning(self, main_window, tmp_path):
+        main_window._results_table.setRowCount(2)
+        for col in range(main_window._results_table.columnCount()):
+            if not main_window._results_table.horizontalHeaderItem(col):
+                main_window._results_table.setHorizontalHeaderItem(col, QTableWidgetItem(f"c{col}"))
+        for row in range(2):
+            for col in range(main_window._results_table.columnCount()):
+                main_window._results_table.setItem(row, col, QTableWidgetItem(f"r{row}c{col}"))
+        bad_path = str(tmp_path)  # directory path, will raise on write
+        with patch("gps_photo_tracker.gui.main_window.QFileDialog.getSaveFileName",
+                   return_value=(bad_path, "CSV (*.csv)")), \
+             patch("gps_photo_tracker.gui.main_window.QMessageBox.warning") as mock_warn:
+            main_window._on_export_results()
+            mock_warn.assert_called_once()
