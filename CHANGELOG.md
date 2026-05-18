@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-05-18
+
+### Added
+
+- **Write status column**: New "写入状态" column in result table showing per-photo write outcome (已复制 / 已覆盖 / 跳过 / 失败 / 已取消)
+- **Write signal separation**: Worker emits dedicated `write_signal` during write phase instead of reusing `photo_signal`, preventing duplicate rows after COPY/OVERWRITE
+
+### Changed
+
+- **Write mode tracking**: `MainWindow` stores the selected write mode (copy/overwrite) to correctly determine write status labels
+- **Result table expanded**: 9 columns (was 8), export CSV/Markdown includes write status
+
+### Fixed
+
+- **Completion popup delay**: Write-phase completion notification no longer blocks or delays when user starts a new preview cycle; `_done_pending` flag prevents duplicate popups
+- **Stats card protected counting**: Protected photos counted correctly in stats display
+- **Removed dead `_METHOD_CODES` constant** that was superseded by `Qt.UserRole` storage
+
+### Tested
+
+- 510+ tests passing
+- Write status column verified in COPY and OVERWRITE modes
+- Completion popup suppression tested with timer mock
+
+## [0.18.0] - 2026-05-17
+
+### Added
+
+- **Esc undo mechanism**: Press Esc to restore a photo to its original matched state (undoes follow, protection, or any edit)
+- **Source column double-click menu**: Double-click the "来源" column to open context menu with follow/protect/undo actions, dynamically generated based on current row state
+- **Original state snapshot**: `_original_details` deep-copy preserved at preview completion for reliable undo
+
+### Changed
+
+- **Protection toggle refined**: `.` key still toggles protection, but Esc now serves as the ultimate undo — restores original match regardless of how many operations were applied
+- **Shortcut hint updated**: `←→ 跟随GPS | . 保护/取消 | Esc 撤销 | ↑↓ 导航`
+
+### Fixed
+
+- **Protection toggle**: Unprotecting a photo now correctly restores the pre-protection GPS value (not the original match)
+
+### Tested
+
+- 506 tests passing
+- Undo logic verified: follow→undo→restore, protect→undo→restore
+
 ## [0.17.0] - 2026-05-17
 
 ### Added

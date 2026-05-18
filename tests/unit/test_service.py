@@ -21,6 +21,9 @@ from gps_photo_tracker.core.models import (
     ProgressPhase,
     ProgressUpdate,
     RejectReason,
+    ReviewAction,
+    ReviewDecision,
+    ReviewState,
 )
 from gps_photo_tracker.service.cancel_token import CancellationToken
 from gps_photo_tracker.service.tagging_service import GPSTaggingService
@@ -1412,4 +1415,264 @@ class TestSequentialWriteError:
             assert result.matched == 0
             assert result.failed == 1
             assert (output / tmp_path.name / "photo.jpg").exists()
+
+
+class TestApplyReviewDecisions:
+    """Cover apply_review with FOLLOW_PREV/FOLLOW_NEXT and _apply_follow."""
+
+    def _make_results(self, tmp_path):
+        """Create 3 photos: p0 success, p1 failed, p2 success."""
+        p0 = PhotoInfo(path=tmp_path / "p0.jpg", filename="p0.jpg", timestamp=100.0, has_gps=False)
+        p1 = PhotoInfo(path=tmp_path / "p1.jpg", filename="p1.jpg", timestamp=200.0, has_gps=False)
+        p2 = PhotoInfo(path=tmp_path / "p2.jpg", filename="p2.jpg", timestamp=300.0, has_gps=False)
+        r0 = MatchResult(photo=p0, success=True, gps=GPSInfo(25.0, 100.0), method="interpolated", time_diff=5.0)
+        r1 = MatchResult(photo=p1, success=False, reject_reason=RejectReason.NO_GPS_COVERAGE)
+        r2 = MatchResult(photo=p2, success=True, gps=GPSInfo(25.1, 100.1), method="interpolated", time_diff=5.0)
+        return [r0, r1, r2]
+
+    def test_follow_prev_assigns_gps(self, tmp_path):
+        """FOLLOW_PREV: failed photo follows prev neighbor's GPS."""
+        results = self._make_results(tmp_path)
+        state = ReviewState(
+            failed_results=[results[1]],
+            gps_segments=[],
+            all_results=results,
+            decisions={str(tmp_path / "p1.jpg"): ReviewDecision(
+                photo_path=str(tmp_path / "p1.jpg"),
+                action=ReviewAction.FOLLOW_PREV,
+            )},
+        )
+        service = GPSTaggingService()
+        updated = service.apply_review(results, state)
+        assert updated[1].success
+        assert updated[1].method == "follow_prev"
+        assert updated[1].review_gps.latitude == 25.0
+
+    def test_follow_next_assigns_gps(self, tmp_path):
+        """FOLLOW_NEXT: failed photo follows next neighbor's GPS."""
+        results = self._make_results(tmp_path)
+        state = ReviewState(
+            failed_results=[results[1]],
+            gps_segments=[],
+            all_results=results,
+            decisions={str(tmp_path / "p1.jpg"): ReviewDecision(
+                photo_path=str(tmp_path / "p1.jpg"),
+                action=ReviewAction.FOLLOW_NEXT,
+            )},
+        )
+        service = GPSTaggingService()
+        updated = service.apply_review(results, state)
+        assert updated[1].success
+        assert updated[1].method == "follow_next"
+        assert updated[1].review_gps.latitude == 25.1
+
+    def test_follow_skips_protected_neighbor(self, tmp_path):
+        """FOLLOW_PREV skips protected neighbor, finds next valid."""
+        p0 = PhotoInfo(path=tmp_path / "p0.jpg", filename="p0.jpg", timestamp=100.0, has_gps=False)
+        p1 = PhotoInfo(path=tmp_path / "p1.jpg", filename="p1.jpg", timestamp=200.0, has_gps=False)
+        p2 = PhotoInfo(path=tmp_path / "p2.jpg", filename="p2.jpg", timestamp=300.0, has_gps=False)
+        p3 = PhotoInfo(path=tmp_path / "p3.jpg", filename="p3.jpg", timestamp=400.0, has_gps=False)
+        r0 = MatchResult(photo=p0, success=True, gps=GPSInfo(25.0, 100.0), method="interpolated", time_diff=5.0)
+        r1 = MatchResult(photo=p1, success=True, gps=GPSInfo(25.05, 100.05), method="protected", time_diff=5.0)
+        r2 = MatchResult(photo=p2, success=False, reject_reason=RejectReason.NO_GPS_COVERAGE)
+        r3 = MatchResult(photo=p3, success=True, gps=GPSInfo(25.1, 100.1), method="interpolated", time_diff=5.0)
+        results = [r0, r1, r2, r3]
+        state = ReviewState(
+            failed_results=[r2],
+            gps_segments=[],
+            all_results=results,
+            decisions={str(tmp_path / "p2.jpg"): ReviewDecision(
+                photo_path=str(tmp_path / "p2.jpg"),
+                action=ReviewAction.FOLLOW_PREV,
+            )},
+        )
+        service = GPSTaggingService()
+        updated = service.apply_review(results, state)
+        assert updated[2].success
+        assert updated[2].review_gps.latitude == 25.0  # skipped protected p1, found p0
+
+    def test_follow_no_valid_neighbor_leaves_failed(self, tmp_path):
+        """FOLLOW_PREV with no valid neighbor: photo stays failed."""
+        p0 = PhotoInfo(path=tmp_path / "p0.jpg", filename="p0.jpg", timestamp=100.0, has_gps=False)
+        p1 = PhotoInfo(path=tmp_path / "p1.jpg", filename="p1.jpg", timestamp=200.0, has_gps=False)
+        r0 = MatchResult(photo=p0, success=False, reject_reason=RejectReason.NO_GPS_COVERAGE)
+        r1 = MatchResult(photo=p1, success=False, reject_reason=RejectReason.NO_GPS_COVERAGE)
+        results = [r0, r1]
+        state = ReviewState(
+            failed_results=results,
+            gps_segments=[],
+            all_results=results,
+            decisions={str(tmp_path / "p1.jpg"): ReviewDecision(
+                photo_path=str(tmp_path / "p1.jpg"),
+                action=ReviewAction.FOLLOW_PREV,
+            )},
+        )
+        service = GPSTaggingService()
+        updated = service.apply_review(results, state)
+        assert not updated[1].success
+
+    def test_successful_results_skipped(self, tmp_path):
+        """apply_review skips already-successful results (L69)."""
+        results = self._make_results(tmp_path)
+        state = ReviewState(
+            failed_results=[],
+            gps_segments=[],
+            all_results=results,
+            decisions={},
+        )
+        service = GPSTaggingService()
+        updated = service.apply_review(results, state)
+        assert updated[0].success
+        assert updated[0].method == "interpolated"  # unchanged
+
+
+class TestWritePhaseCancelAndProgress:
+    """Cover write_phase cancel (L148) and progress callback (L162-165)."""
+
+    def test_write_phase_cancel_stops_early(self, tmp_path):
+        """CancellationToken breaks the write loop."""
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0),
+            method="interpolated", time_diff=10.0,
+        )
+        opts = ProcessOptions(mode=ProcessMode.OVERWRITE)
+        cancel = CancellationToken()
+        cancel.cancel()
+
+        service = GPSTaggingService()
+        batch = service.write_phase([result], opts, cancel=cancel)
+        assert batch.total == 1
+        assert batch.matched == 0  # cancelled before processing
+
+    def test_write_phase_skips_protected(self, tmp_path):
+        """write_phase counts protected method as skipped (L161-165)."""
+        img = Image.new("RGB", (10, 10))
+        img.save(str(tmp_path / "photo.jpg"), "JPEG")
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0),
+            method="protected", time_diff=10.0,
+        )
+        opts = ProcessOptions(mode=ProcessMode.COPY, output_dir=tmp_path / "out")
+        (tmp_path / "out").mkdir()
+
+        service = GPSTaggingService()
+        batch = service.write_phase([result], opts)
+        assert batch.skipped == 1
+        assert batch.matched == 0
+
+    def test_write_phase_overwrite_counts(self, tmp_path):
+        """write_phase increments overwritten when photo has existing GPS (L174-175)."""
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=True,
+            existing_gps=GPSInfo(30.0, 120.0),
+        )
+        result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0),
+            method="interpolated", time_diff=10.0,
+        )
+        opts = ProcessOptions(mode=ProcessMode.OVERWRITE, overwrite_gps=True)
+
+        from unittest.mock import patch
+        with patch("gps_photo_tracker.service.tagging_service.EXIFWriter") as MockWriter:
+            MockWriter.write_gps.return_value = True
+            service = GPSTaggingService()
+            batch = service.write_phase([result], opts)
+            assert batch.overwritten == 1
+
+    def test_write_phase_progress_callback(self, tmp_path):
+        """write_phase calls on_progress callback."""
+        img = Image.new("RGB", (10, 10))
+        img.save(str(tmp_path / "photo.jpg"), "JPEG")
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0),
+            method="interpolated", time_diff=10.0,
+        )
+        opts = ProcessOptions(mode=ProcessMode.PREVIEW)
+        progress_calls = []
+
+        def on_progress(update):
+            progress_calls.append(update)
+
+        service = GPSTaggingService()
+        service.write_phase([result], opts, on_progress=on_progress)
+        assert len(progress_calls) >= 1
+
+
+class TestWritePhaseWithOpLogger:
+    """Cover write_phase op_logger paths (L178-196)."""
+
+    def test_write_success_logs(self, tmp_path):
+        """Successful write logs via op_logger (L178-179)."""
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0),
+            method="interpolated", time_diff=10.0,
+        )
+        opts = ProcessOptions(mode=ProcessMode.OVERWRITE)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+
+        from unittest.mock import patch, MagicMock
+        with patch("gps_photo_tracker.service.tagging_service.EXIFWriter") as MockWriter:
+            MockWriter.write_gps.return_value = True
+            service = GPSTaggingService(log_dir=log_dir)
+            batch = service.write_phase([result], opts)
+            assert batch.matched == 1
+            assert service._op_logger is not None
+
+    def test_write_failure_copies_and_logs(self, tmp_path):
+        """Write failure in COPY mode copies original and logs error (L180-196)."""
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0),
+            method="interpolated", time_diff=10.0,
+        )
+        output = tmp_path / "output"
+        output.mkdir()
+        opts = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+
+        from unittest.mock import patch
+        with patch("gps_photo_tracker.service.tagging_service.EXIFWriter") as MockWriter:
+            MockWriter.write_gps.side_effect = OSError("disk full")
+            service = GPSTaggingService(log_dir=log_dir)
+            batch = service.write_phase([result], opts, photo_dir=tmp_path)
+            assert batch.matched == 0
+            assert batch.failed == 1
 
