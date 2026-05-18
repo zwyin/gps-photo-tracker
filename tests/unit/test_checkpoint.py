@@ -45,3 +45,8 @@ class TestCheckpointManager:
         CheckpointManager.mark(tmp_path, "a.jpg")
         CheckpointManager.complete(tmp_path)
         assert CheckpointManager.is_interrupted(tmp_path) is False
+
+    def test_mark_without_checkpoint_is_noop(self, tmp_path):
+        """mark() on dir with no checkpoint file should be a no-op."""
+        CheckpointManager.mark(tmp_path, "a.jpg")
+        assert not (tmp_path / ".checkpoint.json").exists()

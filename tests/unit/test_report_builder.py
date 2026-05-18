@@ -93,3 +93,25 @@ class TestReportBuilder:
         output = tmp_path / "report.html"
         content = ReportBuilder.build(result, config, [], output).read_text(encoding="utf-8")
         assert "Success Rate" in content or "success" in content.lower()
+
+
+class TestReportBuilderRejectTruncation:
+
+    def test_reject_groups_truncated_at_20(self, tmp_path):
+        """When reject_groups has >20 files, file list should be truncated."""
+        total = 25
+        photos = [
+            PhotoInfo(path=Path(f"/photo{i}.jpg"), filename=f"photo{i}.jpg",
+                      timestamp=float(i), has_gps=False)
+            for i in range(total)
+        ]
+        results = [MatchResult(photo=p, success=False, reject_reason="no_gps_coverage") for p in photos]
+        result = BatchResult(
+            total=total, matched=0, failed=total, skipped=0,
+            overwritten=0, success_rate=0.0, results=results,
+            reject_groups={"no_gps_coverage": [f"photo{i}.jpg" for i in range(total)]},
+        )
+        config = MatcherConfig()
+        output = tmp_path / "report.html"
+        content = ReportBuilder.build(result, config, [], output).read_text(encoding="utf-8")
+        assert "25 total" in content
