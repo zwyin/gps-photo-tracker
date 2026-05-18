@@ -3688,3 +3688,149 @@ class TestOnCancel:
         main_window._on_cancel()
         assert token.is_cancelled
         main_window._worker = None  # clean up so closeEvent doesn't crash
+
+
+# ── MainWindow: toggle panel ───────────────────────────────
+
+class TestToggleLeftPanel:
+    def test_show_panel(self, main_window):
+        main_window._toggle_left_panel(True)
+        sizes = main_window._splitter.sizes()
+        assert sizes[0] > 0
+
+    def test_hide_panel(self, main_window):
+        main_window._toggle_left_panel(False)
+        sizes = main_window._splitter.sizes()
+        assert sizes[0] == 0
+
+
+# ── MainWindow: browse directories ─────────────────────────
+
+class TestBrowseDirectories:
+    def test_browse_gps_dir_sets_text(self, main_window, tmp_path):
+        with patch("gps_photo_tracker.gui.main_window.QFileDialog.getExistingDirectory",
+                   return_value=str(tmp_path)), \
+             patch.object(main_window, '_auto_scan_gpx'):
+            main_window._browse_gps_dir()
+        assert main_window._gps_dir_edit.currentText() == str(tmp_path)
+
+    def test_browse_gps_dir_cancelled(self, main_window):
+        with patch("gps_photo_tracker.gui.main_window.QFileDialog.getExistingDirectory",
+                   return_value=""):
+            main_window._browse_gps_dir()
+        # Should not change
+
+    def test_browse_photo_dir_sets_text(self, main_window, tmp_path):
+        with patch("gps_photo_tracker.gui.main_window.QFileDialog.getExistingDirectory",
+                   return_value=str(tmp_path)), \
+             patch.object(main_window, '_clear_results'), \
+             patch.object(main_window, '_auto_scan_photos'):
+            main_window._browse_photo_dir()
+        assert main_window._photo_dir_edit.currentText() == str(tmp_path)
+
+    def test_browse_output_dir_sets_text(self, main_window, tmp_path):
+        with patch("gps_photo_tracker.gui.main_window.QFileDialog.getExistingDirectory",
+                   return_value=str(tmp_path)):
+            main_window._browse_output_dir()
+        assert main_window._output_dir_edit.currentText() == str(tmp_path)
+
+
+# ── MainWindow: clear results ──────────────────────────────
+
+class TestClearResults:
+    def test_clears_table_and_details(self, main_window):
+        main_window._result_details = [{"a": 1}]
+        main_window._original_details = [{"a": 1}]
+        main_window._results_table.setRowCount(3)
+        main_window._clear_results()
+        assert main_window._results_table.rowCount() == 0
+        assert len(main_window._result_details) == 0
+        assert len(main_window._original_details) == 0
+
+
+# ── MainWindow: auto scan ──────────────────────────────────
+
+class TestAutoScan:
+    def test_auto_scan_gpx_updates_labels(self, main_window, tmp_path):
+        from gps_photo_tracker.core.models import GPXSegment, TrackPoint
+        seg = GPXSegment(filename="t.gpx", start=0.0, end=1.0,
+                         points=[TrackPoint(timestamp=0.0, latitude=25.0, longitude=100.0)])
+        with patch("gps_photo_tracker.core.file_provider.FileProvider") as MockFP, \
+             patch("gps_photo_tracker.core.track_parser.TrackParser") as MockTP:
+            MockFP.return_value.list_tracks.return_value = [tmp_path / "t.gpx"]
+            MockTP.return_value.parse_file.return_value = [seg]
+            main_window._auto_scan_gpx(tmp_path)
+        assert "1 段" in main_window._gpx_browser_label.text()
+        assert "1 点" in main_window._gpx_browser_label.text()
+
+    def test_auto_scan_gpx_handles_parse_error(self, main_window, tmp_path):
+        with patch("gps_photo_tracker.core.file_provider.FileProvider") as MockFP, \
+             patch("gps_photo_tracker.core.track_parser.TrackParser") as MockTP:
+            MockFP.return_value.list_tracks.return_value = [tmp_path / "bad.gpx"]
+            MockTP.return_value.parse_file.side_effect = ValueError("bad file")
+            main_window._auto_scan_gpx(tmp_path)  # should not crash
+
+    def test_auto_scan_photos_updates_labels(self, main_window, tmp_path):
+        img = __import__("PIL.Image", fromlist=["Image"]).new("RGB", (10, 10))
+        img.save(str(tmp_path / "photo.jpg"), "JPEG")
+        main_window._auto_scan_photos(tmp_path)
+        assert "1张" in main_window._photo_browser_label.text()
+
+    def test_auto_scan_photos_empty_dir(self, main_window, tmp_path):
+        main_window._auto_scan_photos(tmp_path)
+        assert "0张" in main_window._photo_browser_label.text()
+
+
+# ── MainWindow: path history ───────────────────────────────
+
+class TestPathHistory:
+    def test_add_and_load_history(self, main_window):
+        QSettings().remove("test_history_key")
+        main_window._add_path_history("test_history_key", "/tmp/a", main_window._gps_dir_edit)
+        assert main_window._gps_dir_edit.currentText() == "/tmp/a"
+        assert main_window._gps_dir_edit.count() >= 1
+        QSettings().remove("test_history_key")
+
+    def test_load_path_history(self, main_window):
+        QSettings().setValue("gps_dir_history", ["/tmp/x"])
+        main_window._load_path_history()
+        assert main_window._gps_dir_edit.count() >= 1
+        QSettings().remove("gps_dir_history")
+
+
+# ── MainWindow: auto tune ──────────────────────────────────
+
+class TestAutoTune:
+    def test_auto_tune_updates_spins(self, main_window, tmp_path):
+        from PySide6.QtWidgets import QMessageBox as QMB
+        main_window._gps_dir_edit.setCurrentText(str(tmp_path))
+        main_window._photo_dir_edit.setCurrentText(str(tmp_path))
+        from gps_photo_tracker.core.models import MatcherConfig
+        with patch("gps_photo_tracker.gui.main_window.QMessageBox.question",
+                   return_value=QMB.StandardButton.Yes), \
+             patch("gps_photo_tracker.gui.main_window.QMessageBox.information"), \
+             patch("gps_photo_tracker.service.tagging_service.GPSTaggingService") as MockSvc:
+            MockSvc.return_value.scan_gpx.return_value = []
+            MockSvc.return_value.scan_photos.return_value = []
+            MockSvc.return_value.auto_tune.return_value = MatcherConfig(
+                isolated_window=999, middle_time_window=888,
+                context_window=777, max_gps_distance=666,
+                time_offset=5, match_isolated=False,
+            )
+            main_window._on_auto_tune()
+        assert main_window._isolated_spin.value() == 999
+        assert main_window._middle_spin.value() == 888
+
+    def test_auto_tune_no_dirs_shows_info(self, main_window):
+        main_window._gps_dir_edit.setCurrentText("")
+        main_window._photo_dir_edit.setCurrentText("")
+        with patch("gps_photo_tracker.gui.main_window.QMessageBox.information"):
+            main_window._on_auto_tune()
+
+    def test_auto_tune_declined(self, main_window, tmp_path):
+        from PySide6.QtWidgets import QMessageBox as QMB
+        main_window._gps_dir_edit.setCurrentText(str(tmp_path))
+        main_window._photo_dir_edit.setCurrentText(str(tmp_path))
+        with patch("gps_photo_tracker.gui.main_window.QMessageBox.question",
+                   return_value=QMB.StandardButton.No):
+            main_window._on_auto_tune()
