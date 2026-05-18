@@ -1346,4 +1346,40 @@ class TestAutoFollowSkipsProtected:
         if results[1].success and results[1].method.startswith("auto_follow"):
             assert results[1].method == "auto_follow_next"
 
+    def test_auto_follow_skips_skipped_neighbor_no_other(self):
+        """auto_follow with only a skipped neighbor stays failed (L72)."""
+        from gps_photo_tracker.core.models import MatchResult, GPSInfo
+        skipped = MatchResult(
+            photo=make_photo("skip.jpg", utc(8, 0), has_gps=True, lat=25.0, lon=100.0),
+            success=True, gps=GPSInfo(25.0, 100.0), method="skipped",
+        )
+        failed = MatchResult(
+            photo=make_photo("fail.jpg", utc(8, 5)),
+            success=False, reject_reason="no_gps_coverage",
+        )
+        matcher = GPSMatcher(MatcherConfig())
+        matcher.auto_follow([skipped, failed])
+        assert not failed.success
+
+
+class TestMiddleSingleSidedTimeDiff:
+    """Cover L239: middle + single-sided + time_diff > middle_time_window → TIME_DIFF."""
+
+    def test_middle_single_sided_exceeds_window(self):
+        seg = make_segment([make_point(25.0, 100.0, utc(8, 0), 100)])
+        photos = [
+            make_photo("prev.jpg", utc(8, 4)),
+            make_photo("target.jpg", utc(8, 5)),
+            make_photo("next.jpg", utc(8, 6)),
+        ]
+        matcher = GPSMatcher(MatcherConfig(
+            context_window=300,
+            middle_time_window=60,
+            isolated_window=600,
+        ))
+        results = matcher.match(photos, [seg])
+        target = results[1]
+        assert not target.success
+        assert target.reject_reason == RejectReason.TIME_DIFF
+
 

@@ -2909,3 +2909,34 @@ class TestWorkerDirectWrite:
         assert d["interpolation_prev"]["lat"] == 24.5
         assert "interpolation_next" in d
         assert d["interpolation_next"]["lat"] == 25.5
+
+    def test_preview_path_generic_error(self, qapp, monkeypatch, tmp_path):
+        """Preview path: generic exception emits error dict (L241-242)."""
+        from gps_photo_tracker.gui.worker import Worker
+        from gps_photo_tracker.core.models import (
+            ProcessOptions, ProcessMode, MatcherConfig,
+        )
+
+        class MockErrPreviewSvc:
+            def scan_gpx(self, *a, **kw):
+                return []
+            def scan_photos(self, *a, **kw):
+                return []
+            def preview(self, *a, **kw):
+                raise RuntimeError("preview crash")
+
+        monkeypatch.setattr(
+            "gps_photo_tracker.gui.worker.GPSTaggingService",
+            lambda *a, **k: MockErrPreviewSvc(),
+        )
+
+        config = MatcherConfig()
+        options = ProcessOptions(mode=ProcessMode.PREVIEW)
+        worker = Worker(
+            gps_dir=tmp_path, photo_dir=tmp_path,
+            config=config, options=options, log_dir=tmp_path,
+        )
+        captured = []
+        worker.done_signal.connect(lambda d: captured.append(d))
+        worker.run()
+        assert any("error" in c for c in captured)

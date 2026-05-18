@@ -24,7 +24,7 @@ Existing tools with linear interpolation achieve **30-50% coverage** — many ph
 | Platform | Win/Mac/Linux | Win only | Mac only | Win/Mac | CLI (all) | Win only |
 | Open source | **Yes (GPLv3)** | No | No | No | Yes (Artistic) | No |
 | Chinese UI | **Yes** | Yes | No | Yes | Partial | No |
-| GPS track formats | GPX/KML/TCX | GPX/NMEA/KML/TCX/PLT/IGC/... | GPX/NMEA/FIT/CSV/... | GPX only | GPX/NMEA/KML/TCX/FIT/CSV/... | GPX |
+| GPS track formats | GPX<br>KML<br>TCX | GPX<br>NMEA<br>KML<br>+3 | GPX<br>NMEA<br>FIT<br>+1 | GPX | GPX<br>NMEA<br>KML<br>+3 | GPX |
 | Linear interpolation | **Yes** | Yes | Yes | Yes | Yes | No |
 | Two-pass neighbor follow | **Yes** | No | No | No | No | No |
 | GPS coverage (typical) | **~90%** | ~50-70% | ~60-80% | ~50-70% | ~50-70% | ~30-40% |
@@ -34,6 +34,7 @@ Existing tools with linear interpolation achieve **30-50% coverage** — many ph
 | Arrow-key quick follow | **Yes** | No | No | No | No | No |
 | Batch processing | **Yes** | Yes | Yes | Yes | Yes | Yes |
 | Write status tracking | **Yes** | No | No | No | No | No |
+| Last update | 2026 | 2019 | 2025 | 2026 | 2026 | 2022 |
 
 > **Coverage**: All tools achieve high coverage with dense tracks (1 fix/sec). The gap widens with sparse tracks or GPS signal gaps — GPS Photo Tracker's neighbor following recovers photos that others leave unmatched.
 
