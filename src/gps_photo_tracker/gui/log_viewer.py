@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -101,7 +102,7 @@ class LogViewerDialog(QDialog):
             lines = self._raw_lines
         self._text.setPlainText("\n".join(lines))
         self._summary.setText(f"共 {len(self._raw_lines)} 行, 筛选后 {len(lines)} 行")
-        self._text.moveCursor(self._text.textCursor().End)
+        self._text.moveCursor(QTextCursor.MoveOperation.End)
 
     def _export(self):
         path, _ = QFileDialog.getSaveFileName(
