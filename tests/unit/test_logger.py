@@ -211,3 +211,20 @@ class TestOperationLogger:
         os.utime(log_file, (old_time, old_time))
         # Should not raise
         logger._cleanup_time()
+
+    def test_cleanup_size_oserror(self, logger, log_dir, monkeypatch):
+        """_cleanup_size should handle OSError in unlink gracefully."""
+        original_unlink = Path.unlink
+
+        def failing_unlink(self, *args, **kwargs):
+            raise OSError("permission denied")
+
+        # Make total exceed limit by setting max to 0
+        logger._max_total_bytes = 0
+        logger.log_operation_start({})
+        log_file = log_dir / "operations.log"
+        assert log_file.exists()
+
+        monkeypatch.setattr(Path, "unlink", failing_unlink)
+        # Should not raise
+        logger._cleanup_size()

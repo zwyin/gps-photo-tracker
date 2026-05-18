@@ -2777,3 +2777,135 @@ class TestWorkerDirectWrite:
         worker.run()
 
         assert any(c.get("cancelled") for c in captured)
+
+    def test_run_direct_write_error(self, qapp, monkeypatch, tmp_path):
+        """Worker emits error dict when direct write raises generic exception."""
+        from gps_photo_tracker.gui.worker import Worker
+        from gps_photo_tracker.core.models import (
+            ProcessOptions, ProcessMode, MatcherConfig,
+        )
+
+        class MockErrService:
+            def write_phase(self, *a, **kw):
+                raise RuntimeError("disk full")
+
+        monkeypatch.setattr(
+            "gps_photo_tracker.gui.worker.GPSTaggingService",
+            lambda *a, **k: MockErrService(),
+        )
+
+        config = MatcherConfig()
+        options = ProcessOptions(mode=ProcessMode.PREVIEW)
+        worker = Worker(
+            gps_dir=tmp_path, photo_dir=tmp_path,
+            config=config, options=options, log_dir=tmp_path,
+            pre_computed_results=[],
+        )
+        captured = []
+        worker.done_signal.connect(lambda d: captured.append(d))
+        worker.run()
+        assert any("error" in c for c in captured)
+
+    def test_run_direct_write_cancelled(self, qapp, monkeypatch, tmp_path):
+        """Worker emits cancelled when direct write raises OperationCancelledError."""
+        from gps_photo_tracker.gui.worker import Worker
+        from gps_photo_tracker.core.models import (
+            ProcessOptions, ProcessMode, MatcherConfig, OperationCancelledError,
+        )
+        from gps_photo_tracker.service.cancel_token import CancellationToken
+
+        token = CancellationToken()
+        token.cancel()
+
+        class MockCancelService:
+            def write_phase(self, *a, **kw):
+                raise OperationCancelledError()
+
+        monkeypatch.setattr(
+            "gps_photo_tracker.gui.worker.GPSTaggingService",
+            lambda *a, **k: MockCancelService(),
+        )
+
+        config = MatcherConfig()
+        options = ProcessOptions(mode=ProcessMode.PREVIEW)
+        worker = Worker(
+            gps_dir=tmp_path, photo_dir=tmp_path,
+            config=config, options=options, log_dir=tmp_path,
+            pre_computed_results=[],
+        )
+        worker._token = token
+
+        captured = []
+        worker.done_signal.connect(lambda d: captured.append(d))
+        worker.run()
+        assert any(c.get("cancelled") for c in captured)
+
+    def test_preview_path_with_interpolation_and_existing_gps(self, qapp, monkeypatch, tmp_path):
+        """Preview path: on_photo callback with existing_gps + interpolation points."""
+        from gps_photo_tracker.gui.worker import Worker
+        from gps_photo_tracker.core.models import (
+            PhotoInfo, GPSInfo, MatchResult, BatchResult,
+            ProcessOptions, ProcessMode, MatcherConfig, GPXSegment,
+        )
+
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1700000000.0, has_gps=True,
+            existing_gps=GPSInfo(24.0, 99.0, 40),
+        )
+        match_result = MatchResult(
+            photo=photo, success=True,
+            gps=GPSInfo(25.0, 100.0, 50),
+            method="interpolated", time_diff=5.0,
+            interpolation_prev=GPSInfo(24.5, 99.5, 45),
+            interpolation_next=GPSInfo(25.5, 100.5, 55),
+        )
+        batch = BatchResult(
+            total=1, matched=1, failed=0, skipped=0,
+            overwritten=1, success_rate=1.0, results=[match_result],
+        )
+        segment = GPXSegment(
+            filename="track.gpx", start=1699999000.0, end=1700001000.0,
+            points=[],
+        )
+
+        class MockPreviewSvc:
+            def scan_gpx(self, *a, **kw):
+                return [segment]
+            def scan_photos(self, *a, **kw):
+                return [photo]
+            def preview(self, segments, photos, config, on_progress=None, on_photo_processed=None, cancel=None):
+                if on_photo_processed:
+                    on_photo_processed(match_result)
+                return batch
+
+        monkeypatch.setattr(
+            "gps_photo_tracker.gui.worker.GPSTaggingService",
+            lambda *a, **k: MockPreviewSvc(),
+        )
+
+        config = MatcherConfig()
+        options = ProcessOptions(mode=ProcessMode.PREVIEW)
+        worker = Worker(
+            gps_dir=tmp_path, photo_dir=tmp_path,
+            config=config, options=options, log_dir=tmp_path,
+        )
+
+        photo_signals = []
+        worker.photo_signal.connect(lambda d: photo_signals.append(d))
+
+        done_signals = []
+        worker.done_signal.connect(lambda d: done_signals.append(d))
+
+        worker.run()
+
+        assert len(photo_signals) == 1
+        d = photo_signals[0]
+        assert d["gps_before"] == "24.0000, 99.0000"
+        assert d["gps_old"] == "24.0000, 99.0000"
+        assert d["gps_new"] == "25.0000, 100.0000"
+        assert d["source_gpx"] == "track.gpx"
+        assert "interpolation_prev" in d
+        assert d["interpolation_prev"]["lat"] == 24.5
+        assert "interpolation_next" in d
+        assert d["interpolation_next"]["lat"] == 25.5
