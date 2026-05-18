@@ -24,7 +24,7 @@ Existing tools with linear interpolation achieve **30-50% coverage** — many ph
 | Platform | Win/Mac/Linux | Win only | Mac only | Win/Mac | CLI (all) | Win only |
 | Open source | **Yes (GPLv3)** | No | No | No | Yes (Artistic) | No |
 | Chinese UI | **Yes** | Yes | No | Yes | Partial | No |
-| GPS track formats | GPX/KML/TCX | GPX/KML/TCX +4 | GPX/NMEA/FIT +2 | GPX only | GPX/KML/TCX +4 | GPX |
+| GPS track formats | GPX<br>KML<br>TCX | GPX<br>NMEA<br>KML<br>TCX<br>PLT<br>IGC | GPX<br>NMEA<br>FIT<br>CSV | GPX | GPX<br>NMEA<br>KML<br>TCX<br>FIT<br>CSV | GPX |
 | Linear interpolation | **Yes** | Yes | Yes | Yes | Yes | No |
 | Two-pass neighbor follow | **Yes** | No | No | No | No | No |
 | GPS coverage (typical) | **~90%** | ~50-70% | ~60-80% | ~50-70% | ~50-70% | ~30-40% |
