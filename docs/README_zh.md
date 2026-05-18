@@ -115,7 +115,7 @@ src/gps_photo_tracker/
 ├── gui/            # PySide6 图形界面：主窗口、面板、对话框
 └── logging_/       # 结构化日志
 tests/
-├── unit/           # 548+ 单元测试
+├── unit/           # 565+ 单元测试
 ├── integration/    # 端到端测试
 └── batch/          # 大批量测试
 ```
