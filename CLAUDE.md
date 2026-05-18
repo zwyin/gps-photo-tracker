@@ -23,7 +23,7 @@ logging_/     → OperationLogger (4 log files + debug)
 
 - Run: `pytest tests/unit/ -q`
 - Coverage: `pytest tests/unit/ --cov --cov-report=term-missing`
-- Current: 859 tests, 99.55% overall coverage
+- Current: 859 tests, 99.80% overall coverage
 
 ### Coverage Gates
 
@@ -31,13 +31,13 @@ logging_/     → OperationLogger (4 log files + debug)
 |-------|--------|--------|
 | core/models | ≥95% | 100% |
 | core/* (algorithms) | ≥90% | 100% |
-| service | ≥85% | 99% |
-| gui/main_window | ≥85% | 99% |
-| gui/* (widgets) | ≥80% | 95-100% |
+| service | ≥85% | 100% |
+| gui/main_window | ≥85% | 100% |
+| gui/* (widgets) | ≥80% | 100% |
 | logging_ | ≥90% | 100% |
-| **Overall** | **≥95%** | **99.55%** |
+| **Overall** | **≥95%** | **99.80%** |
 
-18 uncovered lines are confirmed dead code or untestable GUI entry points (`if __name__` guards, impossible branches).
+8 uncovered lines in `gui/__init__.py` (event loop entry) and `__main__.py` (`if __name__` guard) — untestable by design.
 
 ## Versioning
 
