@@ -1676,3 +1676,336 @@ class TestWritePhaseWithOpLogger:
             assert batch.matched == 0
             assert batch.failed == 1
 
+
+class TestApplyFollowPathNotFound:
+    """Cover L113: _apply_follow with path not in ordered list."""
+
+    def test_path_not_in_all_results(self, tmp_path):
+        """Photo not in all_results → _apply_follow returns without change."""
+        p_failed = PhotoInfo(path=tmp_path / "orphan.jpg", filename="orphan.jpg", timestamp=200.0, has_gps=False)
+        p_other = PhotoInfo(path=tmp_path / "other.jpg", filename="other.jpg", timestamp=100.0, has_gps=False)
+        r_failed = MatchResult(photo=p_failed, success=False, reject_reason=RejectReason.NO_GPS_COVERAGE)
+        r_other = MatchResult(photo=p_other, success=True, gps=GPSInfo(25.0, 100.0), method="interpolated", time_diff=5.0)
+        results = [r_failed]
+
+        # all_results only has r_other, so orphan.jpg is not in path_to_idx
+        state = ReviewState(
+            failed_results=[r_failed],
+            gps_segments=[],
+            all_results=[r_other],
+            decisions={str(tmp_path / "orphan.jpg"): ReviewDecision(
+                photo_path=str(tmp_path / "orphan.jpg"),
+                action=ReviewAction.FOLLOW_PREV,
+            )},
+        )
+        service = GPSTaggingService()
+        updated = service.apply_review(results, state)
+        assert not updated[0].success
+
+
+class TestWritePhaseSkipAndCopyFallback:
+    """Cover L189-196: write_phase skip path and copy fallback after double failure."""
+
+    def test_should_write_false_skips_and_copies(self, tmp_path):
+        """Photo has_gps + overwrite_gps=False → _should_write returns False → skip + copy (L192-196)."""
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=True, existing_gps=GPSInfo(30.0, 120.0),
+        )
+        # Method is NOT "skipped" — could happen via manual review override
+        result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0),
+            method="interpolated", time_diff=10.0,
+        )
+        output = tmp_path / "output"
+        output.mkdir()
+        opts = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
+
+        service = GPSTaggingService()
+        batch = service.write_phase([result], opts, photo_dir=tmp_path)
+        assert batch.skipped == 1
+        assert (output / tmp_path.name / "photo.jpg").exists()
+
+    def test_write_and_copy_both_fail(self, tmp_path):
+        """Write fails AND copy also fails — both errors logged (L189-191)."""
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0),
+            method="interpolated", time_diff=10.0,
+        )
+        output = tmp_path / "output"
+        output.mkdir()
+        opts = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+
+        from unittest.mock import patch
+        with patch("gps_photo_tracker.service.tagging_service.EXIFWriter") as MockWriter, \
+             patch.object(FileProvider, "copy_file", side_effect=OSError("copy failed")):
+            MockWriter.write_gps.side_effect = OSError("write failed")
+            service = GPSTaggingService(log_dir=log_dir)
+            batch = service.write_phase([result], opts, photo_dir=tmp_path)
+            assert batch.failed == 1
+            assert batch.matched == 0
+
+
+class TestProcessWithOpLogger:
+    """Cover L407-442: _run_pipeline op_logger + checkpoint paths."""
+
+    def test_process_log_match_success(self, tmp_path):
+        """process() with log_dir logs match_success (L407)."""
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+
+        from unittest.mock import patch
+        photo = PhotoInfo(path=tmp_path / "photo.jpg", filename="photo.jpg", timestamp=1000.0, has_gps=False)
+        match_result = MatchResult(photo=photo, success=True, gps=GPSInfo(25.0, 100.0), method="interpolated", time_diff=10.0)
+        opts = ProcessOptions(mode=ProcessMode.OVERWRITE)
+
+        with patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher, \
+             patch("gps_photo_tracker.service.tagging_service.EXIFWriter") as MockWriter:
+            MockMatcher.return_value.match.return_value = [match_result]
+            MockMatcher.return_value.auto_follow.return_value = 0
+            MockWriter.write_gps.return_value = True
+            service = GPSTaggingService(log_dir=log_dir)
+            result = service.process([], [photo], MatcherConfig(), opts, photo_dir=tmp_path)
+            assert result.matched == 1
+            assert service._op_logger is not None
+
+    def test_process_overwrite_gps_with_existing(self, tmp_path):
+        """process() counts overwritten when photo has existing GPS (L411-413)."""
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=True, existing_gps=GPSInfo(30.0, 120.0),
+        )
+        match_result = MatchResult(photo=photo, success=True, gps=GPSInfo(25.0, 100.0), method="interpolated", time_diff=10.0)
+        opts = ProcessOptions(mode=ProcessMode.OVERWRITE, overwrite_gps=True)
+
+        from unittest.mock import patch
+        with patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher, \
+             patch("gps_photo_tracker.service.tagging_service.EXIFWriter") as MockWriter:
+            MockMatcher.return_value.match.return_value = [match_result]
+            MockMatcher.return_value.auto_follow.return_value = 0
+            MockWriter.write_gps.return_value = True
+            service = GPSTaggingService(log_dir=log_dir)
+            result = service.process([], [photo], MatcherConfig(), opts, photo_dir=tmp_path)
+            assert result.overwritten == 1
+
+    def test_process_write_failure_with_copy(self, tmp_path):
+        """process() write failure copies original and adjusts counters (L425-442)."""
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        output = tmp_path / "output"
+        output.mkdir()
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        photo = PhotoInfo(path=tmp_path / "photo.jpg", filename="photo.jpg", timestamp=1000.0, has_gps=False)
+        match_result = MatchResult(photo=photo, success=True, gps=GPSInfo(25.0, 100.0), method="interpolated", time_diff=10.0)
+        opts = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
+
+        from unittest.mock import patch
+        with patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher, \
+             patch("gps_photo_tracker.service.tagging_service.EXIFWriter") as MockWriter:
+            MockMatcher.return_value.match.return_value = [match_result]
+            MockMatcher.return_value.auto_follow.return_value = 0
+            MockWriter.write_gps.side_effect = OSError("write failed")
+            service = GPSTaggingService(log_dir=log_dir)
+            result = service.process([], [photo], MatcherConfig(), opts, photo_dir=tmp_path)
+            assert result.failed == 1
+            assert result.matched == 0
+            assert (output / tmp_path.name / "photo.jpg").exists()
+
+    def test_process_checkpoint_marks_completed(self, tmp_path):
+        """process() with resume marks checkpoint after successful write (L458)."""
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        output = tmp_path / "output"
+        output.mkdir()
+        photo = PhotoInfo(path=tmp_path / "photo.jpg", filename="photo.jpg", timestamp=1000.0, has_gps=False)
+        match_result = MatchResult(photo=photo, success=True, gps=GPSInfo(25.0, 100.0), method="interpolated", time_diff=10.0)
+        opts = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, resume=True)
+
+        from unittest.mock import patch
+        with patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher, \
+             patch("gps_photo_tracker.service.tagging_service.EXIFWriter") as MockWriter:
+            MockMatcher.return_value.match.return_value = [match_result]
+            MockMatcher.return_value.auto_follow.return_value = 0
+            MockWriter.write_gps.return_value = True
+            service = GPSTaggingService()
+            result = service.process([], [photo], MatcherConfig(), opts, photo_dir=tmp_path)
+            assert result.matched == 1
+
+
+class TestParallelWriteWithLogger:
+    """Cover parallel write callbacks with op_logger (L473, 486-489, 495, 497, 505-507, 516-527)."""
+
+    def test_parallel_write_success_logs(self, tmp_path):
+        """Parallel write success calls op_logger.log_write_success (L473, 486-489)."""
+        from unittest.mock import patch, MagicMock
+        from gps_photo_tracker.core.concurrency import WriteResult
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(path=tmp_path / "photo.jpg", filename="photo.jpg", timestamp=1000.0, has_gps=False)
+        match_result = MatchResult(photo=photo, success=True, gps=GPSInfo(25.0, 100.0), method="interpolated", time_diff=10.0)
+        output = tmp_path / "output"
+        output.mkdir()
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, workers=2)
+
+        def fake_submit_all(tasks, on_progress=None, on_result=None, cancel=None):
+            if on_progress:
+                on_progress(0, len(tasks))
+            if on_result:
+                for t in tasks:
+                    on_result(WriteResult(
+                        success=True, filename=t.match_result.photo.filename,
+                        dest_path=output / t.match_result.photo.filename,
+                    ))
+                on_progress(len(tasks), len(tasks))
+            return []
+
+        mock_instance = MagicMock()
+        mock_instance.submit_all.side_effect = fake_submit_all
+
+        with patch("gps_photo_tracker.service.tagging_service.BatchProcessor", return_value=mock_instance), \
+             patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher:
+            MockMatcher.return_value.match.return_value = [match_result]
+            MockMatcher.return_value.auto_follow.return_value = 0
+            service = GPSTaggingService(log_dir=log_dir)
+            result = service.process([], [photo], MatcherConfig(), options, photo_dir=tmp_path)
+            assert result.matched == 1
+
+    def test_parallel_write_failure_logs_and_copies(self, tmp_path):
+        """Parallel write failure logs error and copies original (L495, 497, 505-507)."""
+        from unittest.mock import patch, MagicMock
+        from gps_photo_tracker.core.concurrency import WriteResult
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(path=tmp_path / "photo.jpg", filename="photo.jpg", timestamp=1000.0, has_gps=False)
+        match_result = MatchResult(photo=photo, success=True, gps=GPSInfo(25.0, 100.0), method="interpolated", time_diff=10.0)
+        output = tmp_path / "output"
+        output.mkdir()
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, workers=2)
+
+        def fake_submit_all_fail(tasks, on_progress=None, on_result=None, cancel=None):
+            if on_result:
+                for t in tasks:
+                    on_result(WriteResult(
+                        success=False, filename=t.match_result.photo.filename,
+                        error=OSError("parallel write failed"),
+                    ))
+            return []
+
+        mock_instance = MagicMock()
+        mock_instance.submit_all.side_effect = fake_submit_all_fail
+
+        with patch("gps_photo_tracker.service.tagging_service.BatchProcessor", return_value=mock_instance), \
+             patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher:
+            MockMatcher.return_value.match.return_value = [match_result]
+            MockMatcher.return_value.auto_follow.return_value = 0
+            service = GPSTaggingService(log_dir=log_dir)
+            result = service.process([], [photo], MatcherConfig(), options, photo_dir=tmp_path)
+            assert result.failed == 1
+            assert result.matched == 0
+
+    def test_parallel_overwrite_failure_decrements(self, tmp_path):
+        """Parallel write failure on photo with existing GPS decrements overwritten (L494-495)."""
+        from unittest.mock import patch, MagicMock
+        from gps_photo_tracker.core.concurrency import WriteResult
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=True, existing_gps=GPSInfo(30.0, 120.0),
+        )
+        match_result = MatchResult(photo=photo, success=True, gps=GPSInfo(25.0, 100.0), method="interpolated", time_diff=10.0)
+        output = tmp_path / "output"
+        output.mkdir()
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, workers=2, overwrite_gps=True)
+
+        def fake_submit_all_fail(tasks, on_progress=None, on_result=None, cancel=None):
+            if on_result:
+                for t in tasks:
+                    on_result(WriteResult(
+                        success=False, filename=t.match_result.photo.filename,
+                        error=OSError("failed"),
+                    ))
+            return []
+
+        mock_instance = MagicMock()
+        mock_instance.submit_all.side_effect = fake_submit_all_fail
+
+        with patch("gps_photo_tracker.service.tagging_service.BatchProcessor", return_value=mock_instance), \
+             patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher:
+            MockMatcher.return_value.match.return_value = [match_result]
+            MockMatcher.return_value.auto_follow.return_value = 0
+            service = GPSTaggingService()
+            result = service.process([], [photo], MatcherConfig(), options, photo_dir=tmp_path)
+            assert result.failed == 1
+            assert result.overwritten == 0
+
+    def test_parallel_submit_exception_fallback(self, tmp_path):
+        """BatchProcessor.submit_all raises → fallback copy all photos (L516-527)."""
+        from unittest.mock import patch, MagicMock
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(path=tmp_path / "photo.jpg", filename="photo.jpg", timestamp=1000.0, has_gps=False)
+        match_result = MatchResult(photo=photo, success=True, gps=GPSInfo(25.0, 100.0), method="interpolated", time_diff=10.0)
+        output = tmp_path / "output"
+        output.mkdir()
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, workers=2)
+
+        mock_instance = MagicMock()
+        mock_instance.submit_all.side_effect = RuntimeError("infrastructure failure")
+
+        with patch("gps_photo_tracker.service.tagging_service.BatchProcessor", return_value=mock_instance), \
+             patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher:
+            MockMatcher.return_value.match.return_value = [match_result]
+            MockMatcher.return_value.auto_follow.return_value = 0
+            service = GPSTaggingService(log_dir=log_dir)
+            result = service.process([], [photo], MatcherConfig(), options, photo_dir=tmp_path)
+            # Infrastructure failure → fallback copy, matched stays 1
+            assert result.matched == 1
+

@@ -1733,3 +1733,81 @@ class TestWriteStatusColumn:
 
         # Popup should NOT appear because step1 is disabled (new task in progress)
         assert not informed, "Popup should be suppressed when new task started"
+
+
+class TestLogViewerDialog:
+    """Tests for LogViewerDialog: load, filter, export."""
+
+    def test_load_existing_log(self, tmp_path, qtbot):
+        """Load a log file that exists."""
+        from gps_photo_tracker.gui.log_viewer import LogViewerDialog
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        (log_dir / "operations.log").write_text("line1\nline2\nline3", encoding="utf-8")
+
+        dialog = LogViewerDialog(log_dir, parent=None)
+        qtbot.addWidget(dialog)
+        assert dialog._raw_lines == ["line1", "line2", "line3"]
+
+    def test_load_missing_log(self, tmp_path, qtbot):
+        """Load a log file that doesn't exist."""
+        from gps_photo_tracker.gui.log_viewer import LogViewerDialog
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+
+        dialog = LogViewerDialog(log_dir, parent=None)
+        qtbot.addWidget(dialog)
+        assert any("不存在" in line for line in dialog._raw_lines)
+
+    def test_filter_text(self, tmp_path, qtbot):
+        """Search filter narrows displayed lines."""
+        from gps_photo_tracker.gui.log_viewer import LogViewerDialog
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        (log_dir / "operations.log").write_text("INFO hello\nERROR failed\nINFO ok", encoding="utf-8")
+
+        dialog = LogViewerDialog(log_dir, parent=None)
+        qtbot.addWidget(dialog)
+
+        dialog._search_edit.setText("error")
+        text = dialog._text.toPlainText()
+        assert "ERROR failed" in text
+        assert "INFO hello" not in text
+
+    def test_switch_log_file(self, tmp_path, qtbot):
+        """Switching combo box loads different file."""
+        from gps_photo_tracker.gui.log_viewer import LogViewerDialog
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        (log_dir / "operations.log").write_text("ops content", encoding="utf-8")
+        (log_dir / "errors.log").write_text("error content", encoding="utf-8")
+
+        dialog = LogViewerDialog(log_dir, parent=None)
+        qtbot.addWidget(dialog)
+        assert dialog._raw_lines == ["ops content"]
+
+        # Switch to errors log (index 4)
+        dialog._file_cb.setCurrentIndex(4)
+        assert dialog._raw_lines == ["error content"]
+
+    def test_export_writes_file(self, tmp_path, qtbot):
+        """Export button writes current text to file."""
+        from gps_photo_tracker.gui.log_viewer import LogViewerDialog
+        from unittest.mock import patch
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        (log_dir / "operations.log").write_text("export me", encoding="utf-8")
+
+        dialog = LogViewerDialog(log_dir, parent=None)
+        qtbot.addWidget(dialog)
+
+        export_path = str(tmp_path / "exported.txt")
+        with patch("gps_photo_tracker.gui.log_viewer.QFileDialog.getSaveFileName",
+                   return_value=(export_path, "文本文件 (*.txt)")):
+            dialog._export()
+        assert (tmp_path / "exported.txt").read_text() == "export me"
