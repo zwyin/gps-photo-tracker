@@ -2940,3 +2940,524 @@ class TestWorkerDirectWrite:
         worker.done_signal.connect(lambda d: captured.append(d))
         worker.run()
         assert any("error" in c for c in captured)
+
+
+# ── MainWindow: static helpers ─────────────────────────────
+
+class TestSanitizeFilename:
+    def test_spaces_replaced(self):
+        assert MainWindow._sanitize_filename("my folder") == "my_folder"
+
+    def test_special_chars_removed(self):
+        result = MainWindow._sanitize_filename(r'file/\:*?"<>|name')
+        assert result == "filename"
+
+    def test_no_changes_needed(self):
+        assert MainWindow._sanitize_filename("simple_name") == "simple_name"
+
+
+class TestClassifyDrop:
+    """Cover _classify_drop (L1769-1804)."""
+
+    def test_gpx_file_classified_as_gps(self, main_window, tmp_path):
+        from PySide6.QtCore import QUrl
+        gpx = tmp_path / "track.gpx"
+        gpx.write_text("<gpx/>")
+        urls = [QUrl.fromLocalFile(str(gpx))]
+        gps_dir, photo_dir = main_window._classify_drop(urls)
+        assert gps_dir == tmp_path
+        assert photo_dir is None
+
+    def test_jpg_file_classified_as_photo(self, main_window, tmp_path):
+        from PySide6.QtCore import QUrl
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff")
+        urls = [QUrl.fromLocalFile(str(img))]
+        gps_dir, photo_dir = main_window._classify_drop(urls)
+        assert gps_dir is None
+        assert photo_dir == tmp_path
+
+    def test_gps_dir_classified_by_track_files(self, main_window, tmp_path):
+        from PySide6.QtCore import QUrl
+        gps_dir = tmp_path / "gps"
+        gps_dir.mkdir()
+        (gps_dir / "track.gpx").write_text("<gpx/>")
+        urls = [QUrl.fromLocalFile(str(gps_dir))]
+        gps, photo = main_window._classify_drop(urls)
+        assert gps == gps_dir
+        assert photo is None
+
+    def test_photo_dir_classified_by_images(self, main_window, tmp_path):
+        from PySide6.QtCore import QUrl
+        photo_dir = tmp_path / "photos"
+        photo_dir.mkdir()
+        (photo_dir / "img.jpg").write_bytes(b"\xff\xd8\xff")
+        urls = [QUrl.fromLocalFile(str(photo_dir))]
+        gps, photo = main_window._classify_drop(urls)
+        assert gps is None
+        assert photo == photo_dir
+
+    def test_empty_dir_not_classified(self, main_window, tmp_path):
+        from PySide6.QtCore import QUrl
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        urls = [QUrl.fromLocalFile(str(empty))]
+        gps, photo = main_window._classify_drop(urls)
+        assert gps is None
+        assert photo is None
+
+
+# ── MainWindow: drag/drop events ────────────────────────────
+
+class TestDragDropEvents:
+    def test_drag_enter_accepts_local_file(self, main_window, tmp_path):
+        from PySide6.QtGui import QDragEnterEvent
+        from PySide6.QtCore import QUrl, QMimeData, QPoint
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(tmp_path / "test.gpx"))])
+        event = QDragEnterEvent(
+            QPoint(0, 0), Qt.DropAction.CopyAction, mime,
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+        )
+        main_window.dragEnterEvent(event)
+        assert event.isAccepted()
+
+    def test_drag_enter_rejects_no_urls(self, main_window):
+        from PySide6.QtGui import QDragEnterEvent
+        from PySide6.QtCore import QMimeData, QPoint
+        mime = QMimeData()
+        event = QDragEnterEvent(
+            QPoint(0, 0), Qt.DropAction.CopyAction, mime,
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+        )
+        main_window.dragEnterEvent(event)
+        assert not event.isAccepted()
+
+    def test_drag_move_accepts_urls(self, main_window):
+        from PySide6.QtGui import QDragMoveEvent
+        from PySide6.QtCore import QUrl, QMimeData, QPoint
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile("/tmp/test.gpx")])
+        event = QDragMoveEvent(
+            QPoint(0, 0), Qt.DropAction.CopyAction, mime,
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+        )
+        main_window.dragMoveEvent(event)
+        assert event.isAccepted()
+
+    def test_drop_sets_gps_dir(self, main_window, tmp_path):
+        from PySide6.QtGui import QDropEvent
+        from PySide6.QtCore import QUrl, QMimeData, QPoint
+        gps_dir = tmp_path / "gps"
+        gps_dir.mkdir()
+        (gps_dir / "track.gpx").write_text("<gpx/>")
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(gps_dir))])
+        event = QDropEvent(
+            QPoint(0, 0), Qt.DropAction.CopyAction, mime,
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+        )
+        with patch.object(main_window, '_auto_scan_gpx'):
+            main_window.dropEvent(event)
+        assert main_window._gps_dir_edit.currentText() == str(gps_dir)
+
+    def test_close_event_saves_geometry(self, main_window):
+        from PySide6.QtGui import QCloseEvent
+        event = QCloseEvent()
+        main_window.closeEvent(event)
+        assert event.isAccepted()
+
+
+# ── MainWindow: result filter ────────────────────────────────
+
+class TestResultFilter:
+    def _populate_table(self, mw, details):
+        mw._result_details = details
+        mw._results_table.setRowCount(len(details))
+        for i, d in enumerate(details):
+            item = QTableWidgetItem(d.get("filename", f"row{i}"))
+            item.setData(Qt.ItemDataRole.UserRole, i)
+            mw._results_table.setItem(i, 0, item)
+            method_item = QTableWidgetItem(d.get("method", ""))
+            method_item.setData(Qt.ItemDataRole.UserRole, d.get("method", ""))
+            mw._results_table.setItem(i, 5, method_item)
+
+    def test_filter_show_all(self, main_window):
+        self._populate_table(main_window, [
+            {"filename": "a.jpg", "success": True, "method": "interpolated"},
+            {"filename": "b.jpg", "success": False, "method": ""},
+        ])
+        main_window._result_filter.setCurrentIndex(0)
+        main_window._apply_result_filter()
+        assert not main_window._results_table.isRowHidden(0)
+        assert not main_window._results_table.isRowHidden(1)
+
+    def test_filter_success_only(self, main_window):
+        self._populate_table(main_window, [
+            {"filename": "a.jpg", "success": True, "method": "interpolated"},
+            {"filename": "b.jpg", "success": False, "method": ""},
+        ])
+        main_window._result_filter.setCurrentIndex(1)
+        main_window._apply_result_filter()
+        assert not main_window._results_table.isRowHidden(0)
+        assert main_window._results_table.isRowHidden(1)
+
+    def test_filter_failed_only(self, main_window):
+        self._populate_table(main_window, [
+            {"filename": "a.jpg", "success": True, "method": "interpolated"},
+            {"filename": "b.jpg", "success": False, "method": ""},
+        ])
+        main_window._result_filter.setCurrentIndex(2)
+        main_window._apply_result_filter()
+        assert main_window._results_table.isRowHidden(0)
+        assert not main_window._results_table.isRowHidden(1)
+
+    def test_filter_skipped_only(self, main_window):
+        self._populate_table(main_window, [
+            {"filename": "a.jpg", "success": True, "method": "skipped"},
+            {"filename": "b.jpg", "success": True, "method": "interpolated"},
+        ])
+        main_window._result_filter.setCurrentIndex(3)
+        main_window._apply_result_filter()
+        assert not main_window._results_table.isRowHidden(0)
+        assert main_window._results_table.isRowHidden(1)
+
+    def test_filter_protected_only(self, main_window):
+        self._populate_table(main_window, [
+            {"filename": "a.jpg", "success": True, "method": "protected"},
+            {"filename": "b.jpg", "success": True, "method": "interpolated"},
+        ])
+        main_window._result_filter.setCurrentIndex(4)
+        main_window._apply_result_filter()
+        assert not main_window._results_table.isRowHidden(0)
+        assert main_window._results_table.isRowHidden(1)
+
+
+# ── MainWindow: scan done callback ──────────────────────────
+
+class TestOnScanDone:
+    def test_updates_labels(self, main_window):
+        segments = [
+            {"filename": "a.gpx", "point_count": 50},
+            {"filename": "b.gpx", "point_count": 30},
+        ]
+        main_window._on_scan_done(segments)
+        assert main_window._cached_segments == segments
+        assert "2 段" in main_window._gpx_browser_label.text()
+        assert "80 点" in main_window._gpx_browser_label.text()
+
+
+# ── MainWindow: key events ──────────────────────────────────
+
+class TestKeyEvents:
+    def _add_row(self, mw, row=0):
+        mw._results_table.setRowCount(1)
+        item = QTableWidgetItem("test.jpg")
+        item.setData(Qt.ItemDataRole.UserRole, 0)
+        mw._results_table.setItem(row, 0, item)
+        mw._results_table.selectRow(row)
+
+    def test_escape_calls_undo(self, main_window):
+        self._add_row(main_window)
+        with patch.object(main_window, '_undo_row') as mock_undo:
+            from PySide6.QtGui import QKeyEvent
+            event = QKeyEvent(
+                QKeyEvent.Type.KeyPress, Qt.Key_Escape,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            main_window.keyPressEvent(event)
+            mock_undo.assert_called_once()
+
+    def test_period_calls_reset(self, main_window):
+        self._add_row(main_window)
+        with patch.object(main_window, '_reset_row_gps') as mock_reset:
+            from PySide6.QtGui import QKeyEvent
+            event = QKeyEvent(
+                QKeyEvent.Type.KeyPress, Qt.Key_Period,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            main_window.keyPressEvent(event)
+            mock_reset.assert_called_once()
+
+    def test_left_arrow_calls_follow(self, main_window):
+        self._add_row(main_window)
+        with patch.object(main_window, '_quick_follow_gps') as mock_follow:
+            from PySide6.QtGui import QKeyEvent
+            event = QKeyEvent(
+                QKeyEvent.Type.KeyPress, Qt.Key_Left,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            main_window.keyPressEvent(event)
+            mock_follow.assert_called_once_with(0, -1)
+
+    def test_right_arrow_calls_follow(self, main_window):
+        self._add_row(main_window)
+        with patch.object(main_window, '_quick_follow_gps') as mock_follow:
+            from PySide6.QtGui import QKeyEvent
+            event = QKeyEvent(
+                QKeyEvent.Type.KeyPress, Qt.Key_Right,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            main_window.keyPressEvent(event)
+            mock_follow.assert_called_once_with(0, 1)
+
+    def test_event_filter_consumes_left(self, main_window):
+        self._add_row(main_window)
+        from PySide6.QtGui import QKeyEvent
+        event = QKeyEvent(
+            QKeyEvent.Type.KeyPress, Qt.Key_Left,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        with patch.object(main_window, '_quick_follow_gps'):
+            result = main_window.eventFilter(main_window._results_table, event)
+        assert result is True
+
+
+# ── MainWindow: export filename ─────────────────────────────
+
+class TestExportFilename:
+    def test_builds_filename_with_dir(self, main_window):
+        main_window._photo_dir_edit.setCurrentText("/photos/Tokyo Trip")
+        name = main_window._build_export_filename("csv")
+        assert "Tokyo_Trip" in name
+        assert name.endswith(".csv")
+
+    def test_builds_filename_no_dir(self, main_window):
+        main_window._photo_dir_edit.setCurrentText("")
+        name = main_window._build_export_filename("md")
+        assert name.startswith("GPS追踪_results_")
+        assert name.endswith(".md")
+
+
+# ── MainWindow: collect table results ───────────────────────
+
+class TestCollectTableResults:
+    def _add_result_row(self, mw, row, detail, gps_text="25.0, 100.0",
+                        method="interpolated", status="成功"):
+        mw._result_details.append(detail)
+        mw._results_table.setRowCount(max(mw._results_table.rowCount(), row + 1))
+
+        item = QTableWidgetItem(detail.get("filename", ""))
+        item.setData(Qt.ItemDataRole.UserRole, row)
+        mw._results_table.setItem(row, 0, item)
+
+        gps_item = QTableWidgetItem(gps_text)
+        mw._results_table.setItem(row, 4, gps_item)
+
+        method_item = QTableWidgetItem(method)
+        method_item.setData(Qt.ItemDataRole.UserRole, method)
+        mw._results_table.setItem(row, 5, method_item)
+
+        status_item = QTableWidgetItem(status)
+        mw._results_table.setItem(row, 6, status_item)
+
+    def test_collects_success_result(self, main_window):
+        detail = {
+            "path": "/photos/test.jpg", "filename": "test.jpg",
+            "has_gps": False, "altitude": 500.0,
+        }
+        self._add_result_row(main_window, 0, detail)
+        results = main_window._collect_table_results()
+        assert len(results) == 1
+        assert results[0].success is True
+        assert results[0].gps is not None
+        assert results[0].method == "interpolated"
+
+    def test_collects_failed_result(self, main_window):
+        detail = {
+            "path": "/photos/fail.jpg", "filename": "fail.jpg",
+            "has_gps": False, "reject_reason": "no_gps_coverage",
+        }
+        self._add_result_row(main_window, 0, detail, gps_text="无",
+                             method="", status="失败")
+        results = main_window._collect_table_results()
+        assert len(results) == 1
+        assert results[0].success is False
+        assert results[0].reject_reason == "no_gps_coverage"
+
+    def test_collects_with_existing_gps(self, main_window):
+        detail = {
+            "path": "/photos/existing.jpg", "filename": "existing.jpg",
+            "has_gps": True, "gps_before": "30.0, 120.0",
+        }
+        self._add_result_row(main_window, 0, detail)
+        results = main_window._collect_table_results()
+        assert results[0].photo.has_gps is True
+        assert results[0].photo.existing_gps is not None
+
+
+# ── MainWindow: reset defaults ─────────────────────────────
+
+class TestResetDefaults:
+    def test_resets_to_default_values(self, main_window):
+        main_window._isolated_spin.setValue(999)
+        main_window._on_reset_defaults()
+        assert main_window._isolated_spin.value() == 300
+        assert main_window._middle_spin.value() == 3600
+        assert main_window._context_spin.value() == 300
+        assert main_window._distance_spin.value() == 200
+        assert main_window._offset_spin.value() == 0
+        assert main_window._match_isolated_cb.isChecked() is True
+        assert main_window._overwrite_gps_cb.isChecked() is False
+        assert main_window._keep_struct_cb.isChecked() is True
+
+
+# ── MainWindow: set processing ─────────────────────────────
+
+class TestSetProcessing:
+    def test_active_disables_step_enables_cancel(self, main_window):
+        main_window._result_details = [{"success": True}]
+        main_window._set_processing(True)
+        assert not main_window._step1_btn.isEnabled()
+        assert not main_window._step2_btn.isEnabled()
+        assert main_window._cancel_btn.isEnabled()
+
+    def test_inactive_enables_step_disables_cancel(self, main_window):
+        main_window._result_details = [{"success": True}]
+        main_window._set_processing(False)
+        assert main_window._step1_btn.isEnabled()
+        assert main_window._cancel_btn.isEnabled() is False
+
+
+# ── MainWindow: on_done callback ───────────────────────────
+
+class TestOnDone:
+    def test_cancelled_shows_message(self, main_window):
+        main_window._set_processing(True)
+        main_window._on_done({"cancelled": True})
+        assert "取消" in main_window._progress_label.text()
+
+    def test_error_shows_warning(self, main_window):
+        main_window._set_processing(True)
+        with patch("gps_photo_tracker.gui.main_window.QMessageBox.warning"):
+            main_window._on_done({"error": "something broke"})
+        assert main_window._progress_label.text() == "错误"
+
+    def test_success_enables_buttons(self, main_window, qtbot):
+        main_window._result_details = [{"success": True}, {"success": False}]
+        main_window._set_processing(True)
+        with patch("gps_photo_tracker.gui.main_window.QMessageBox.information"):
+            main_window._on_done({"total": 2, "matched": 1, "failed": 1, "skipped": 0, "success_rate": 0.5})
+            # Process the QTimer.singleShot(100ms) from _on_done
+            qtbot.wait(200)
+        assert main_window._step3_copy_btn.isEnabled()
+        assert main_window._step2_btn.isEnabled()
+
+
+# ── MainWindow: photos scanned ─────────────────────────────
+
+class TestOnPhotosScanned:
+    def test_updates_labels(self, main_window):
+        photos = [
+            {"filename": "a.jpg", "has_gps": True},
+            {"filename": "b.jpg", "has_gps": False},
+            {"filename": "c.jpg", "has_gps": True},
+        ]
+        main_window._on_photos_scanned(photos)
+        assert main_window._cached_photos == photos
+        assert "3张" in main_window._photo_browser_label.text()
+        assert "2有GPS" in main_window._photo_browser_label.text()
+        assert "待匹配: 1" in main_window._pre_stats_label.text()
+
+
+# ── MainWindow: table double click ─────────────────────────
+
+class TestTableDoubleClick:
+    def test_source_column_shows_menu(self, main_window):
+        main_window._result_details = [{"method": "interpolated"}]
+        main_window._results_table.setRowCount(1)
+        item = QTableWidgetItem("test.jpg")
+        item.setData(Qt.ItemDataRole.UserRole, 0)
+        main_window._results_table.setItem(0, 0, item)
+        with patch.object(main_window, '_show_source_menu') as mock_menu:
+            from PySide6.QtCore import QModelIndex
+            index = main_window._results_table.model().index(0, 5)
+            main_window._on_table_double_click(index)
+            mock_menu.assert_called_once()
+
+    def test_other_column_shows_detail(self, main_window):
+        main_window._result_details = [{"method": "interpolated", "filename": "test.jpg"}]
+        main_window._results_table.setRowCount(1)
+        item = QTableWidgetItem("test.jpg")
+        item.setData(Qt.ItemDataRole.UserRole, 0)
+        main_window._results_table.setItem(0, 0, item)
+        with patch("gps_photo_tracker.gui.main_window.DetailDialog") as MockDialog:
+            mock_instance = MockDialog.return_value
+            mock_instance.exec.return_value = 0
+            index = main_window._results_table.model().index(0, 0)
+            main_window._on_table_double_click(index)
+            MockDialog.assert_called_once()
+
+
+# ── MainWindow: collect visible + export ────────────────────
+
+class TestCollectVisibleData:
+    def _setup_table(self, mw):
+        mw._results_table.setRowCount(2)
+        for col in range(mw._results_table.columnCount()):
+            if not mw._results_table.horizontalHeaderItem(col):
+                from PySide6.QtWidgets import QTableWidgetItem as TI
+                mw._results_table.setHorizontalHeaderItem(col, TI(f"col{col}"))
+        for row in range(2):
+            for col in range(mw._results_table.columnCount()):
+                mw._results_table.setItem(row, col, QTableWidgetItem(f"r{row}c{col}"))
+
+    def test_collects_all_visible_rows(self, main_window):
+        self._setup_table(main_window)
+        headers, rows = main_window._collect_visible_table_data()
+        assert len(headers) > 0
+        assert len(rows) == 2
+
+    def test_skips_hidden_rows(self, main_window):
+        self._setup_table(main_window)
+        main_window._results_table.setRowHidden(1, True)
+        _, rows = main_window._collect_visible_table_data()
+        assert len(rows) == 1
+
+    def test_write_csv_creates_file(self, main_window, tmp_path):
+        out = tmp_path / "test.csv"
+        main_window._write_csv(str(out), ["name", "val"], [["a", "1"]])
+        assert out.exists()
+        content = out.read_text(encoding="utf-8-sig")
+        assert "name" in content
+        assert "a,1" in content
+
+    def test_write_markdown_creates_file(self, main_window, tmp_path):
+        out = tmp_path / "test.md"
+        main_window._write_markdown(str(out), ["name", "val"], [["a", "1"]])
+        assert out.exists()
+        content = out.read_text(encoding="utf-8")
+        assert "| name |" in content
+        assert "| a | 1 |" in content
+
+    def test_write_markdown_escapes_pipes(self, main_window, tmp_path):
+        out = tmp_path / "test.md"
+        main_window._write_markdown(str(out), ["h"], [["a|b"]])
+        content = out.read_text(encoding="utf-8")
+        assert r"a\|b" in content
+
+    def test_export_results_no_data(self, main_window):
+        """Export with empty table shows info message."""
+        with patch("gps_photo_tracker.gui.main_window.QMessageBox.information"):
+            main_window._on_export_results()
+            # Table empty → returns early, no file created
+
+    def test_export_results_csv(self, main_window, tmp_path):
+        """Export writes CSV when user selects path."""
+        self._setup_table(main_window)
+        out_file = tmp_path / "export.csv"
+        with patch("gps_photo_tracker.gui.main_window.QMessageBox"), \
+             patch("gps_photo_tracker.gui.main_window.QFileDialog.getSaveFileName",
+                   return_value=(str(out_file), "CSV (*.csv)")):
+            main_window._on_export_results()
+        assert out_file.exists()
+
+    def test_export_results_markdown(self, main_window, tmp_path):
+        """Export writes Markdown when user selects .md."""
+        self._setup_table(main_window)
+        out_file = tmp_path / "export.md"
+        with patch("gps_photo_tracker.gui.main_window.QMessageBox"), \
+             patch("gps_photo_tracker.gui.main_window.QFileDialog.getSaveFileName",
+                   return_value=(str(out_file), "Markdown (*.md)")):
+            main_window._on_export_results()
+        assert out_file.exists()
