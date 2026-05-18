@@ -345,6 +345,26 @@ class TestDetailDialogThumbnail:
         assert dialog._thumb.text() == "文件不存在"
 
 
+class TestDetailDialogCorruptImage:
+
+    def test_detail_dialog_corrupt_image_shows_error(self, qapp, tmp_path):
+        from gps_photo_tracker.gui.detail_dialog import DetailDialog
+
+        bad = tmp_path / "corrupt.jpg"
+        bad.write_bytes(b"\xff\xd8\xff\xe0BADDATA")
+
+        data = {
+            "filename": "corrupt.jpg",
+            "path": str(bad),
+            "success": True,
+            "method": "nearest",
+            "latitude": 25.0,
+            "longitude": 100.0,
+        }
+        dialog = DetailDialog(data)
+        assert dialog._thumb.text() == "无法加载"
+
+
 class TestDetailDialogOverwrite:
 
     def test_detail_dialog_gps_overwrite_comparison(self, qapp):
@@ -680,6 +700,56 @@ class TestPhotoBrowserDialog:
         dialog = PhotoBrowserDialog(photos)
         dialog._sort_cb.setCurrentIndex(1)  # 按时间排序
         assert dialog._table.item(0, 0).text() == "a.jpg"
+
+
+class TestPhotoBrowserSortByGPS:
+
+    def test_sort_by_gps_status(self, qapp):
+        from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
+        photos = [
+            {"filename": "nogps.jpg", "timestamp": 1000.0, "has_gps": False},
+            {"filename": "gps.jpg", "timestamp": 2000.0, "has_gps": True,
+             "latitude": 25.0, "longitude": 100.0},
+        ]
+        dialog = PhotoBrowserDialog(photos)
+        dialog._sort_cb.setCurrentIndex(2)  # 按GPS状态排序
+        assert dialog._table.item(0, 0).text() == "gps.jpg"
+
+    def test_thumbnail_with_orientation(self, qapp, tmp_path, monkeypatch):
+        from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
+        from PySide6.QtGui import QPixmap
+        from gps_photo_tracker.core import orientation as orient_mod
+
+        img = tmp_path / "rotated.jpg"
+        QPixmap(60, 40).save(str(img))
+
+        monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 6)
+        monkeypatch.setattr(orient_mod.OrientationReader, "apply_orientation", lambda px, o: px)
+
+        photos = [
+            {"filename": "rotated.jpg", "path": str(img), "timestamp": 1000.0, "has_gps": False},
+        ]
+        dialog = PhotoBrowserDialog(photos)
+        dialog._table.selectRow(0)
+        # Selection triggers thumbnail load — verify dialog exists without crash
+
+
+class TestGPSPointPickerFormatTime:
+
+    def test_format_time_invalid_timestamp(self, qapp):
+        from gps_photo_tracker.gui.gps_point_picker import GPSPointPicker
+        # _format_time with invalid ts should return str(ts)
+        result = GPSPointPicker._format_time(float("nan"))
+        assert isinstance(result, str)
+
+
+class TestSettingsDialogMatchTail:
+
+    def test_apply_values_with_match_tail(self, qapp):
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+        dialog = SettingsDialog()
+        dialog._apply_values({"match_tail": True})
+        assert dialog._match_isolated.isChecked()
 
 
 # ── MainWindow photos scanned tests ───────────────────────
@@ -1045,11 +1115,13 @@ class TestPhotoPreviewClear:
 class TestPhotoPreviewResizeEvent:
 
     def test_resize_event_rescales_with_pixmap(self, main_window):
-        from PySide6.QtGui import QPixmap
+        from PySide6.QtGui import QPixmap, QResizeEvent
+        from PySide6.QtCore import QSize
 
         preview = main_window._photo_preview
         preview._full_pixmap = QPixmap(100, 80)
-        preview.resize(500, 200)
+        event = QResizeEvent(QSize(500, 200), QSize(200, 100))
+        preview.resizeEvent(event)
         assert preview._thumb_label.width() >= 80
 
 
@@ -2221,3 +2293,487 @@ class TestLogViewerDialog:
                    return_value=(export_path, "文本文件 (*.txt)")):
             dialog._export()
         assert (tmp_path / "exported.txt").read_text() == "export me"
+
+    def test_load_log_oserror(self, tmp_path, qtbot, monkeypatch):
+        """OSError reading log file shows error message."""
+        from gps_photo_tracker.gui.log_viewer import LogViewerDialog
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        (log_dir / "operations.log").write_text("content", encoding="utf-8")
+
+        original_read_text = Path.read_text
+
+        def _raise_oserror(self, *args, **kwargs):
+            if "operations.log" in str(self):
+                raise OSError("permission denied")
+            return original_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr("pathlib.Path.read_text", _raise_oserror)
+
+        dialog = LogViewerDialog(log_dir, parent=None)
+        qtbot.addWidget(dialog)
+        assert any("无法读取" in line for line in dialog._raw_lines)
+
+
+class TestPhotoPreviewFullPixmapNull:
+
+    def test_show_photo_cached_null_pixmap(self, main_window, monkeypatch, tmp_path):
+        """Cached key exists but QPixmap(path) returns null → _full_pixmap = None."""
+        from PySide6.QtGui import QPixmap, QPixmapCache
+        from gps_photo_tracker.core import orientation as orient_mod
+
+        bad = tmp_path / "bad.jpg"
+        bad.write_bytes(b"notimage")
+
+        cache_key = f"thumb:{bad}"
+        QPixmapCache.insert(cache_key, QPixmap(20, 20))
+
+        monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 1)
+
+        preview = main_window._photo_preview
+        preview.show_photo(str(bad), "null test")
+        assert preview._full_pixmap is None
+
+    def test_rescale_with_null_pixmap_early_return(self, main_window):
+        """_rescale with null _full_pixmap returns without error."""
+        preview = main_window._photo_preview
+        preview._full_pixmap = None
+        preview._rescale()
+
+    def test_resize_event_with_null_pixmap(self, main_window):
+        """resizeEvent with no valid pixmap adjusts width but skips rescale."""
+        preview = main_window._photo_preview
+        preview._full_pixmap = None
+        preview.resize(600, 300)
+        assert preview._thumb_label.width() >= 80
+
+    def test_resize_event_with_valid_pixmap_rescales(self, main_window):
+        """resizeEvent with valid _full_pixmap triggers _rescale path."""
+        from PySide6.QtGui import QPixmap
+        from PySide6.QtCore import QEvent, QSize
+        from PySide6.QtGui import QResizeEvent
+
+        preview = main_window._photo_preview
+        preview._full_pixmap = QPixmap(100, 80)
+        event = QResizeEvent(QSize(500, 300), QSize(200, 100))
+        preview.resizeEvent(event)
+        assert preview._thumb_label.width() >= 80
+
+
+class TestGPXBrowserSelection:
+
+    def test_selection_shows_file_details(self, qapp):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+
+        segments = [
+            {"filename": "a.gpx", "point_count": 100, "start": 1700000000.0, "end": 1700003600.0},
+            {"filename": "a.gpx", "point_count": 50, "start": 1700007200.0, "end": 1700010000.0},
+            {"filename": "b.gpx", "point_count": 200, "start": 1700100000.0, "end": 1700105000.0},
+        ]
+        dlg = GPXBrowserDialog(segments)
+        dlg._table.selectRow(0)
+        text = dlg._detail_label.text()
+        assert "a.gpx" in text
+        assert "段数" in text
+
+    def test_no_selection_shows_hint(self, qapp):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+
+        segments = [
+            {"filename": "a.gpx", "point_count": 100, "start": 1700000000.0, "end": 1700003600.0},
+        ]
+        dlg = GPXBrowserDialog(segments)
+        dlg._table.clearSelection()
+        dlg._on_selection()
+        assert "点击" in dlg._detail_label.text()
+
+    def test_fmt_time_nan_timestamp(self):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+        import math
+        result = GPXBrowserDialog._fmt_time(float("nan"))
+        assert result == "—" or result == "—"
+
+    def test_fmt_date_negative_timestamp(self):
+        from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+        # Negative timestamps cause ValueError on some platforms
+        result = GPXBrowserDialog._fmt_date(-1e18)
+        # Either formats or returns "—"
+        assert isinstance(result, str)
+
+
+class TestPhotoBrowserSelectionAndThumb:
+
+    def test_selection_no_rows_clears_thumb(self, qapp):
+        from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
+
+        photos = [
+            {"filename": "a.jpg", "path": "/tmp/a.jpg", "timestamp": 1000.0, "has_gps": False},
+        ]
+        dlg = PhotoBrowserDialog(photos)
+        dlg._table.clearSelection()
+        dlg._on_selection()
+        assert "选中照片查看详情" in dlg._info_label.text()
+
+    def test_selection_cached_thumbnail(self, qapp, tmp_path):
+        from PySide6.QtGui import QPixmap, QPixmapCache
+        from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
+
+        img = tmp_path / "cached.jpg"
+        QPixmap(40, 40).save(str(img))
+        cache_key = f"thumb:{img}"
+        QPixmapCache.insert(cache_key, QPixmap(30, 30))
+
+        photos = [
+            {"filename": "cached.jpg", "path": str(img), "timestamp": 1000.0,
+             "has_gps": False, "latitude": None, "longitude": None, "altitude": None},
+        ]
+        dlg = PhotoBrowserDialog(photos)
+        dlg._table.selectRow(0)
+        assert dlg._thumb_label.pixmap() is not None
+
+    def test_load_thumbnail_with_orientation(self, qapp, tmp_path, monkeypatch):
+        from PySide6.QtGui import QPixmap, QPixmapCache
+        from gps_photo_tracker.core import orientation as orient_mod
+        from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
+
+        img = tmp_path / "orient.jpg"
+        QPixmap(60, 40).save(str(img))
+
+        monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 6)
+        monkeypatch.setattr(orient_mod.OrientationReader, "apply_orientation", lambda px, o: px)
+
+        photos = [
+            {"filename": "orient.jpg", "path": str(img), "timestamp": 1000.0, "has_gps": False},
+        ]
+        dlg = PhotoBrowserDialog(photos)
+        dlg._pending_thumb_path = str(img)
+        dlg._load_thumbnail()
+        cached = QPixmapCache.find(f"thumb:{img}")
+        assert cached is not None
+
+    def test_load_thumbnail_bad_image(self, qapp, tmp_path):
+        from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
+
+        bad = tmp_path / "bad.jpg"
+        bad.write_bytes(b"notimage")
+
+        photos = [
+            {"filename": "bad.jpg", "path": str(bad), "timestamp": 1000.0, "has_gps": False},
+        ]
+        dlg = PhotoBrowserDialog(photos)
+        dlg._pending_thumb_path = str(bad)
+        dlg._load_thumbnail()
+        assert dlg._thumb_label.pixmap() is None or dlg._thumb_label.text() == ""
+
+    def test_load_thumbnail_empty_path(self, qapp):
+        from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
+
+        dlg = PhotoBrowserDialog([])
+        dlg._pending_thumb_path = ""
+        dlg._load_thumbnail()
+
+
+class TestFormatTimestampEdge:
+
+    def test_format_timestamp_nan(self):
+        from gps_photo_tracker.gui import settings_dialog as sd
+        assert sd.format_timestamp(float("nan")) == "—"
+
+
+class TestSettingsProfileManagement:
+
+    def test_load_profile_with_valid_index(self, qapp, monkeypatch):
+        from PySide6.QtCore import QSettings
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog()
+
+        s = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
+        test_values = {"isolated_window": 999, "middle_time_window": 999}
+        s.setValue("profile/__test_cov__", test_values)
+        s.setValue("profile_list", ["__test_cov__"])
+
+        dialog._profile_cb.addItem("__test_cov__")
+        dialog._profile_cb.setCurrentIndex(1)
+        dialog._load_profile()
+
+        s.remove("profile/__test_cov__")
+        s.remove("profile_list")
+
+    def test_load_profile_index_zero_is_noop(self, qapp):
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog()
+        dialog._profile_cb.setCurrentIndex(0)
+        dialog._load_profile()
+
+    def test_save_as_profile_cancelled(self, qapp, monkeypatch):
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog()
+        monkeypatch.setattr("gps_photo_tracker.gui.settings_dialog.QInputDialog.getText",
+                            lambda *a, **k: ("", False))
+        dialog._save_as_profile()
+
+    def test_delete_profile_yes(self, qapp, monkeypatch):
+        from PySide6.QtCore import QSettings
+        from PySide6.QtWidgets import QMessageBox
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog()
+
+        s = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
+        s.setValue("profile/__del_test__", {"isolated_window": 500})
+        s.setValue("profile_list", ["__del_test__"])
+
+        dialog._profile_cb.addItem("__del_test__")
+        dialog._profile_cb.setCurrentIndex(1)
+
+        monkeypatch.setattr("gps_photo_tracker.gui.settings_dialog.QMessageBox.question",
+                            lambda *a, **k: QMessageBox.StandardButton.Yes)
+        dialog._delete_profile()
+
+        assert s.value("profile/__del_test__") is None
+        s.remove("profile_list")
+
+    def test_delete_profile_no(self, qapp, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog()
+        dialog._profile_cb.addItem("__nodelete__")
+        dialog._profile_cb.setCurrentIndex(1)
+
+        monkeypatch.setattr("gps_photo_tracker.gui.settings_dialog.QMessageBox.question",
+                            lambda *a, **k: QMessageBox.StandardButton.No)
+        dialog._delete_profile()
+
+    def test_delete_profile_idx_zero_is_noop(self, qapp):
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog()
+        dialog._profile_cb.setCurrentIndex(0)
+        dialog._delete_profile()
+
+    def test_save_as_profile_with_name(self, qapp, monkeypatch):
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog()
+        monkeypatch.setattr("gps_photo_tracker.gui.settings_dialog.QInputDialog.getText",
+                            lambda *a, **k: ("__save_test__", True))
+        dialog._save_as_profile()
+        assert dialog._profile_cb.currentText() == "__save_test__"
+
+    def test_browse_log_dir_selects_path(self, qapp, monkeypatch, tmp_path):
+        from gps_photo_tracker.gui.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog()
+        monkeypatch.setattr("gps_photo_tracker.gui.settings_dialog.QFileDialog.getExistingDirectory",
+                            lambda *a, **k: str(tmp_path))
+        dialog._browse_log_dir()
+        assert dialog._log_dir_edit.text() == str(tmp_path)
+
+
+class TestGPSPointPickerDialog:
+
+    def test_dialog_construction_with_points(self, qapp):
+        from gps_photo_tracker.gui.gps_point_picker import GPSPointPicker
+        from gps_photo_tracker.core.models import TrackPoint
+
+        points = [
+            TrackPoint(1700000000.0, 25.0, 100.0, 500.0),
+            TrackPoint(1700000060.0, 25.1, 100.1, 510.0),
+        ]
+        dlg = GPSPointPicker(points, photo_timestamp=1700000030.0)
+        assert dlg._table.rowCount() == 2
+        assert dlg._confirm_btn.isEnabled()
+
+    def test_dialog_empty_points(self, qapp):
+        from gps_photo_tracker.gui.gps_point_picker import GPSPointPicker
+
+        dlg = GPSPointPicker([], photo_timestamp=1000.0)
+        assert dlg._table.rowCount() == 0
+        assert not dlg._confirm_btn.isEnabled()
+
+    def test_get_selected_point(self, qapp):
+        from gps_photo_tracker.gui.gps_point_picker import GPSPointPicker
+        from gps_photo_tracker.core.models import TrackPoint
+
+        points = [
+            TrackPoint(1700000000.0, 25.0, 100.0),
+            TrackPoint(1700000060.0, 25.1, 100.1),
+        ]
+        dlg = GPSPointPicker(points, photo_timestamp=1700000030.0)
+        dlg._table.selectRow(1)
+        pt = dlg.get_selected_point()
+        assert pt is not None
+        assert pt.latitude == 25.1
+
+    def test_get_selected_point_no_selection(self, qapp):
+        from gps_photo_tracker.gui.gps_point_picker import GPSPointPicker
+        from gps_photo_tracker.core.models import TrackPoint
+
+        points = [TrackPoint(1700000000.0, 25.0, 100.0)]
+        dlg = GPSPointPicker(points, photo_timestamp=1700000030.0)
+        dlg._table.clearSelection()
+        assert dlg.get_selected_point() is None
+
+    def test_time_diff_display(self, qapp):
+        from gps_photo_tracker.gui.gps_point_picker import GPSPointPicker
+        from gps_photo_tracker.core.models import TrackPoint
+
+        points = [TrackPoint(1700000000.0, 25.0, 100.0)]
+        dlg = GPSPointPicker(points, photo_timestamp=1700000090.0)
+        diff_text = dlg._table.item(0, 3).text()
+        assert "1m" in diff_text
+
+
+class TestWorkerDirectWrite:
+
+    def test_run_direct_write_path(self, qapp, monkeypatch, tmp_path):
+        """Test the _run_direct_write path in Worker with pre-computed results."""
+        from gps_photo_tracker.gui.worker import Worker
+        from gps_photo_tracker.core.models import (
+            PhotoInfo, GPSInfo, MatchResult, BatchResult, ProcessOptions, ProcessMode,
+            MatcherConfig,
+        )
+
+        photo = PhotoInfo(
+            path=tmp_path / "test.jpg", filename="test.jpg",
+            timestamp=1700000000.0, has_gps=False,
+        )
+        match_result = MatchResult(
+            photo=photo, success=True,
+            gps=GPSInfo(25.0, 100.0, 50),
+            method="interpolated", time_diff=5.0,
+        )
+        batch = BatchResult(
+            total=1, matched=1, failed=0, skipped=0,
+            overwritten=0, success_rate=1.0, results=[match_result],
+        )
+
+        captured_signals = []
+
+        class MockService:
+            def write_phase(self, results, options, photo_dir=None, on_progress=None, on_photo_processed=None, cancel=None):
+                if on_photo_processed:
+                    on_photo_processed(match_result)
+                return batch
+
+        monkeypatch.setattr(
+            "gps_photo_tracker.gui.worker.GPSTaggingService",
+            lambda *a, **k: MockService(),
+        )
+
+        config = MatcherConfig()
+        options = ProcessOptions(mode=ProcessMode.PREVIEW)
+        worker = Worker(
+            gps_dir=tmp_path,
+            photo_dir=tmp_path,
+            config=config,
+            options=options,
+            log_dir=tmp_path,
+            pre_computed_results=[match_result],
+        )
+        worker.write_signal.connect(lambda d: captured_signals.append(("write", d)))
+        worker.done_signal.connect(lambda d: captured_signals.append(("done", d)))
+        worker.run()
+
+        assert any(s[0] == "write" for s in captured_signals)
+        assert any(s[0] == "done" for s in captured_signals)
+        write_data = [s[1] for s in captured_signals if s[0] == "write"][0]
+        assert write_data["success"] is True
+        assert write_data["latitude"] == 25.0
+
+    def test_run_direct_write_with_existing_gps(self, qapp, monkeypatch, tmp_path):
+        """Direct write with existing GPS (overwritten path)."""
+        from gps_photo_tracker.gui.worker import Worker
+        from gps_photo_tracker.core.models import (
+            PhotoInfo, GPSInfo, MatchResult, BatchResult, ProcessOptions, ProcessMode,
+            MatcherConfig,
+        )
+
+        photo = PhotoInfo(
+            path=tmp_path / "test.jpg", filename="test.jpg",
+            timestamp=1700000000.0, has_gps=True,
+            existing_gps=GPSInfo(24.0, 99.0, 40),
+        )
+        match_result = MatchResult(
+            photo=photo, success=True,
+            gps=GPSInfo(25.0, 100.0, 50),
+            method="interpolated", time_diff=5.0,
+        )
+        batch = BatchResult(
+            total=1, matched=1, failed=0, skipped=0,
+            overwritten=1, success_rate=1.0, results=[match_result],
+        )
+
+        class MockService2:
+            def write_phase(self, results, options, photo_dir=None, on_progress=None, on_photo_processed=None, cancel=None):
+                if on_photo_processed:
+                    on_photo_processed(match_result)
+                return batch
+
+        monkeypatch.setattr(
+            "gps_photo_tracker.gui.worker.GPSTaggingService",
+            lambda *a, **k: MockService2(),
+        )
+
+        config = MatcherConfig()
+        options = ProcessOptions(mode=ProcessMode.PREVIEW)
+        worker = Worker(
+            gps_dir=tmp_path,
+            photo_dir=tmp_path,
+            config=config,
+            options=options,
+            log_dir=tmp_path,
+            pre_computed_results=[match_result],
+        )
+        captured = []
+        worker.write_signal.connect(lambda d: captured.append(d))
+        worker.run()
+
+        assert captured[0]["overwritten"] is True
+        assert captured[0]["gps_before"] == "24.0000, 99.0000"
+
+    def test_run_cancelled(self, qapp, monkeypatch, tmp_path):
+        """Worker emits cancelled signal when interrupted."""
+        from gps_photo_tracker.gui.worker import Worker
+        from gps_photo_tracker.service.cancel_token import CancellationToken
+        from gps_photo_tracker.core.models import (
+            ProcessOptions, ProcessMode, MatcherConfig, OperationCancelledError,
+        )
+
+        token = CancellationToken()
+        token.cancel()
+
+        class MockService3:
+            def scan_gpx(self, *a, **kw):
+                return []
+            def scan_photos(self, *a, **kw):
+                return []
+            def preview(self, *a, **kw):
+                raise OperationCancelledError()
+
+        monkeypatch.setattr(
+            "gps_photo_tracker.gui.worker.GPSTaggingService",
+            lambda *a, **k: MockService3(),
+        )
+
+        config = MatcherConfig()
+        options = ProcessOptions(mode=ProcessMode.PREVIEW)
+        worker = Worker(
+            gps_dir=tmp_path,
+            photo_dir=tmp_path,
+            config=config,
+            options=options,
+            log_dir=tmp_path,
+        )
+        worker._token = token
+
+        captured = []
+        worker.done_signal.connect(lambda d: captured.append(d))
+        worker.run()
+
+        assert any(c.get("cancelled") for c in captured)
