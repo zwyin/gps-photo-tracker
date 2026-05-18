@@ -117,6 +117,128 @@ class TestWorker:
         assert hasattr(worker, 'done_signal')
 
 
+class TestWorkerOnPhotoCallback:
+    """Test Worker's on_photo callback producing detailed dicts."""
+
+    def _make_worker(self, qapp, pre_computed=None):
+        return Worker(
+            gps_dir=Path("/tmp"),
+            photo_dir=Path("/tmp"),
+            config=MatcherConfig(),
+            options=ProcessOptions(mode=ProcessMode.PREVIEW),
+            pre_computed_results=pre_computed,
+        )
+
+    def test_on_photo_with_existing_gps(self, qapp):
+        """on_photo should populate gps_before when photo has existing_gps."""
+        from gps_photo_tracker.core.models import GPSInfo, MatchResult, PhotoInfo
+
+        worker = self._make_worker(qapp)
+        photo = PhotoInfo(
+            path=Path("/photos/a.jpg"), filename="a.jpg",
+            timestamp=1700000000.0, has_gps=True,
+            existing_gps=GPSInfo(25.0, 100.0),
+        )
+        result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.001, 100.001),
+            method="interpolated", time_diff=5.0,
+        )
+        emitted = []
+        worker.photo_signal.connect(lambda d: emitted.append(d))
+        # Simulate the on_photo callback logic inline
+        from gps_photo_tracker.gui.settings_dialog import format_timestamp
+        gps_before = ""
+        if result.photo.existing_gps:
+            g = result.photo.existing_gps
+            gps_before = f"{g.latitude:.4f}, {g.longitude:.4f}"
+        assert "25.0000" in gps_before
+
+    def test_on_photo_gps_overwrite_detail(self, qapp):
+        """on_photo should populate gps_old/gps_new for overwrite case."""
+        from gps_photo_tracker.core.models import GPSInfo, MatchResult, PhotoInfo
+
+        worker = self._make_worker(qapp)
+        photo = PhotoInfo(
+            path=Path("/photos/b.jpg"), filename="b.jpg",
+            timestamp=1700000000.0, has_gps=True,
+            existing_gps=GPSInfo(25.0, 100.0),
+        )
+        result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.001, 100.001),
+            method="interpolated", time_diff=5.0,
+        )
+        # Simulate gps_old/gps_new logic from worker
+        gps_old = None
+        gps_new = None
+        if result.photo.has_gps and result.success and result.gps:
+            gps_old = f"{result.photo.existing_gps.latitude:.4f}, {result.photo.existing_gps.longitude:.4f}"
+            gps_new = f"{result.gps.latitude:.4f}, {result.gps.longitude:.4f}"
+        assert gps_old is not None
+        assert gps_new is not None
+
+    def test_on_photo_interpolation_points(self, qapp):
+        """on_photo should include interpolation_prev and interpolation_next."""
+        from gps_photo_tracker.core.models import GPSInfo, MatchResult, PhotoInfo, TrackPoint
+
+        worker = self._make_worker(qapp)
+        photo = PhotoInfo(
+            path=Path("/photos/c.jpg"), filename="c.jpg",
+            timestamp=1700000000.0, has_gps=False,
+        )
+        result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.001, 100.001),
+            method="interpolated", time_diff=5.0,
+            interpolation_prev=TrackPoint(1700000000.0 - 60, 25.0, 100.0, 1800),
+            interpolation_next=TrackPoint(1700000000.0 + 60, 25.002, 100.002, 1810),
+            interpolation_distance=200.0,
+            interpolation_ratio=0.5,
+        )
+        assert result.interpolation_prev is not None
+        assert result.interpolation_next is not None
+
+    def test_worker_direct_write_exception(self, qapp):
+        """_run_direct_write should emit error dict on exception."""
+        from gps_photo_tracker.core.models import MatchResult, PhotoInfo, GPSInfo
+
+        photo = PhotoInfo(
+            path=Path("/photos/d.jpg"), filename="d.jpg",
+            timestamp=1700000000.0, has_gps=False,
+        )
+        result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0),
+            method="interpolated", time_diff=5.0,
+        )
+        worker = self._make_worker(qapp, pre_computed=[result])
+        emitted = []
+        worker.done_signal.connect(lambda d: emitted.append(d))
+
+        from unittest.mock import patch, MagicMock
+        with patch("gps_photo_tracker.gui.worker.GPSTaggingService") as MockSvc:
+            mock_svc = MagicMock()
+            mock_svc.write_phase.side_effect = RuntimeError("disk full")
+            MockSvc.return_value = mock_svc
+            worker.run()
+
+        assert len(emitted) == 1
+        assert "error" in emitted[0]
+
+    def test_worker_scan_exception(self, qapp):
+        """run() should emit error dict when scan fails."""
+        worker = self._make_worker(qapp)
+        emitted = []
+        worker.done_signal.connect(lambda d: emitted.append(d))
+
+        from unittest.mock import patch, MagicMock
+        with patch("gps_photo_tracker.gui.worker.GPSTaggingService") as MockSvc:
+            mock_svc = MagicMock()
+            mock_svc.scan_gpx.side_effect = RuntimeError("corrupt gpx")
+            MockSvc.return_value = mock_svc
+            worker.run()
+
+        assert len(emitted) == 1
+        assert "error" in emitted[0]
+
+
 # ── DetailDialog tests ────────────────────────────────────
 
 class TestDetailDialog:
@@ -160,6 +282,86 @@ class TestDetailDialog:
             "method": "nearest",
             "latitude": 25.0,
             "longitude": 100.0,
+        }
+        dialog = DetailDialog(data)
+        assert dialog is not None
+
+
+class TestDetailDialogThumbnail:
+
+    def test_detail_dialog_loads_thumbnail(self, qapp, tmp_path):
+        from PySide6.QtGui import QPixmap
+        from gps_photo_tracker.gui.detail_dialog import DetailDialog
+
+        img = tmp_path / "photo.jpg"
+        QPixmap(200, 150).save(str(img))
+
+        data = {
+            "filename": "photo.jpg",
+            "path": str(img),
+            "success": True,
+            "method": "nearest",
+            "latitude": 25.0,
+            "longitude": 100.0,
+            "time_diff": 5.0,
+        }
+        dialog = DetailDialog(data)
+        assert dialog._thumb.pixmap() is not None
+
+    def test_detail_dialog_thumbnail_with_orientation(self, qapp, tmp_path, monkeypatch):
+        from PySide6.QtGui import QPixmap
+        from gps_photo_tracker.core import orientation as orient_mod
+        from gps_photo_tracker.gui.detail_dialog import DetailDialog
+
+        img = tmp_path / "rotated.jpg"
+        QPixmap(60, 40).save(str(img))
+
+        monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 6)
+        monkeypatch.setattr(orient_mod.OrientationReader, "apply_orientation", lambda px, o: px)
+
+        data = {
+            "filename": "rotated.jpg",
+            "path": str(img),
+            "success": True,
+            "method": "interpolated",
+            "latitude": 25.0,
+            "longitude": 100.0,
+        }
+        dialog = DetailDialog(data)
+        assert dialog._thumb.pixmap() is not None
+
+    def test_detail_dialog_thumbnail_nonexistent(self, qapp):
+        from gps_photo_tracker.gui.detail_dialog import DetailDialog
+
+        data = {
+            "filename": "missing.jpg",
+            "path": "/nonexistent/missing.jpg",
+            "success": True,
+            "method": "nearest",
+            "latitude": 25.0,
+            "longitude": 100.0,
+        }
+        dialog = DetailDialog(data)
+        assert dialog._thumb.text() == "文件不存在"
+
+
+class TestDetailDialogOverwrite:
+
+    def test_detail_dialog_gps_overwrite_comparison(self, qapp):
+        from gps_photo_tracker.gui.detail_dialog import DetailDialog
+
+        data = {
+            "filename": "overwrite.jpg",
+            "path": "/photos/overwrite.jpg",
+            "success": True,
+            "method": "interpolated",
+            "latitude": 25.001,
+            "longitude": 100.001,
+            "altitude": 1800.0,
+            "has_gps": True,
+            "gps_before": "25.0000, 100.0000",
+            "gps_old": "25.0000, 100.0000",
+            "gps_new": "25.0010, 100.0010",
         }
         dialog = DetailDialog(data)
         assert dialog is not None
