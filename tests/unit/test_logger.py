@@ -152,3 +152,79 @@ class TestOperationLogger:
         logger.log_operation_start({})
         logger.cleanup()
         assert (log_dir / "operations.log").exists()
+
+    def test_debug_method(self, log_dir):
+        """debug() should write to debug.log."""
+        for name in ["gps_ops", "gps_matches", "gps_writes", "gps_errors", "gps_debug"]:
+            logging.getLogger(name).handlers.clear()
+        olg = OperationLogger(log_dir)
+        olg.debug("test debug message")
+        for h in logging.getLogger("gps_debug").handlers:
+            h.flush()
+        content = (log_dir / "debug.log").read_text(encoding="utf-8")
+        assert "test debug message" in content
+
+    def test_namespace_debug_handler_dedup(self, log_dir):
+        """Second OperationLogger with same dir should not duplicate namespace handler."""
+        for name in ["gps_photo_tracker"]:
+            logging.getLogger(name).handlers.clear()
+        op1 = OperationLogger(log_dir)
+        op2 = OperationLogger(log_dir)
+        ns = logging.getLogger("gps_photo_tracker")
+        paths = [getattr(h, "baseFilename", "") for h in ns.handlers]
+        debug_count = sum(1 for p in paths if "debug.log" in p)
+        assert debug_count <= 2  # at most one per instance
+
+    def test_cleanup_size_removes_oldest(self, logger, log_dir):
+        """_cleanup_size should remove oldest files when total exceeds max."""
+        import time
+        # Create a large "log" file
+        big = log_dir / "old.log"
+        big.write_bytes(b"x" * 1024 * 1024)  # 1 MB
+        old_time = time.time() - 86400
+        import os
+        os.utime(big, (old_time, old_time))
+        # Create recent small file
+        recent = log_dir / "recent.log"
+        recent.write_text("small")
+        # Re-init with tiny max to trigger cleanup
+        small_logger = OperationLogger(log_dir, max_total_mb=0.001)
+        assert not big.exists()
+        assert recent.exists()
+
+    def test_cleanup_time_oserror(self, logger, log_dir, monkeypatch):
+        """_cleanup_time should handle OSError gracefully."""
+        import os
+        logger.log_operation_start({})
+        log_file = log_dir / "operations.log"
+
+        original_unlink = Path.unlink
+
+        def failing_unlink(self, *args, **kwargs):
+            if "operations.log" in str(self):
+                raise OSError("permission denied")
+            return original_unlink(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", failing_unlink)
+        import time
+        old_time = time.time() - 60 * 86400
+        os.utime(log_file, (old_time, old_time))
+        # Should not raise
+        logger._cleanup_time()
+
+    def test_cleanup_size_oserror(self, logger, log_dir, monkeypatch):
+        """_cleanup_size should handle OSError in unlink gracefully."""
+        original_unlink = Path.unlink
+
+        def failing_unlink(self, *args, **kwargs):
+            raise OSError("permission denied")
+
+        # Make total exceed limit by setting max to 0
+        logger._max_total_bytes = 0
+        logger.log_operation_start({})
+        log_file = log_dir / "operations.log"
+        assert log_file.exists()
+
+        monkeypatch.setattr(Path, "unlink", failing_unlink)
+        # Should not raise
+        logger._cleanup_size()

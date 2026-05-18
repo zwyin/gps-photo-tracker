@@ -171,3 +171,23 @@ class TestParseDirectory:
         _write_gpx(tmp_path, "upper.GPX", SINGLE_SEGMENT)
         segments = GPXParser().parse_directory(tmp_path)
         assert len(segments) == 1
+
+
+class TestParseFilePointFiltering:
+
+    def test_skips_trkpt_without_time(self, tmp_path):
+        """trkpt with no <time> element should be skipped."""
+        no_time = textwrap.dedent("""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="25.0" lon="100.0"><time>2026-02-17T08:00:00Z</time></trkpt>
+            <trkpt lat="25.1" lon="100.1"></trkpt>
+            <trkpt lat="25.2" lon="100.2"><time>2026-02-17T08:20:00Z</time></trkpt>
+          </trkseg></trk>
+        </gpx>
+        """)
+        path = _write_gpx(tmp_path, "notime.gpx", no_time)
+        segments = GPXParser().parse_file(path)
+        assert len(segments) == 1
+        assert len(segments[0].points) == 2  # middle point skipped

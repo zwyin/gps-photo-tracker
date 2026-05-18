@@ -2,7 +2,17 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from gps_photo_tracker.core.orientation import OrientationReader
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    return app
 
 
 class TestGetOrientation:
@@ -60,3 +70,25 @@ class TestTransformMatrix:
         for val in range(1, 9):
             t = OrientationReader.transform_matrix(val)
             assert t is not None
+
+
+class TestApplyOrientation:
+    """Cover apply_orientation: early return for None/1, transform for 2-8."""
+
+    def test_apply_none_returns_same_pixmap(self, qapp):
+        from PySide6.QtGui import QPixmap
+        px = QPixmap(40, 30)
+        result = OrientationReader.apply_orientation(px, None)
+        assert result is px
+
+    def test_apply_orientation_1_returns_same_pixmap(self, qapp):
+        from PySide6.QtGui import QPixmap
+        px = QPixmap(40, 30)
+        result = OrientationReader.apply_orientation(px, 1)
+        assert result is px
+
+    def test_apply_orientation_6_returns_transformed(self, qapp):
+        from PySide6.QtGui import QPixmap
+        px = QPixmap(40, 30)
+        result = OrientationReader.apply_orientation(px, 6)
+        assert result is not px  # new pixmap returned

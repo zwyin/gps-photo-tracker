@@ -1324,3 +1324,26 @@ class TestHypothesisProperties:
                     f"Method mismatch for {name}: {orig_by_name[name].method} vs {shuf_by_name[name].method}"
 
         check()
+
+
+class TestAutoFollowSkipsProtected:
+    """Cover L72: auto_follow skips results with method 'skipped' or 'protected'."""
+
+    def test_auto_follow_skips_skipped_method(self):
+        matcher = GPSMatcher(MatcherConfig(isolated_window=300, match_isolated=True))
+        seg = make_segment([make_point(25.0, 100.0, utc(8, 0))])
+        photos = [
+            make_photo("skip.jpg", utc(8, 1), has_gps=True),  # has GPS → skipped
+            make_photo("fail.jpg", utc(8, 2)),                  # fails
+            make_photo("ok.jpg", utc(8, 3)),                    # matches
+        ]
+        results = matcher.match(photos, [seg])
+        # The skipped photo should be method="skipped"
+        assert results[0].method == "skipped"
+        matcher.auto_follow(results)
+        # The failed photo should NOT follow the skipped one
+        # It may follow the ok one if within window
+        if results[1].success and results[1].method.startswith("auto_follow"):
+            assert results[1].method == "auto_follow_next"
+
+
