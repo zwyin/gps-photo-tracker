@@ -3461,3 +3461,230 @@ class TestCollectVisibleData:
                    return_value=(str(out_file), "Markdown (*.md)")):
             main_window._on_export_results()
         assert out_file.exists()
+
+
+# ── MainWindow: quick follow GPS ───────────────────────────
+
+def _setup_follow_rows(mw):
+    """Set up 3 rows: row 0 has GPS, row 1 is empty (target), row 2 has GPS later."""
+    details = [
+        {"filename": "a.jpg", "method": "interpolated", "success": True,
+         "capture_time_ts": 1000.0, "latitude": 25.0, "longitude": 100.0, "altitude": 50,
+         "has_gps": False, "path": "/photos/a.jpg"},
+        {"filename": "b.jpg", "method": "", "success": False,
+         "capture_time_ts": 2000.0, "has_gps": False, "path": "/photos/b.jpg"},
+        {"filename": "c.jpg", "method": "interpolated", "success": True,
+         "capture_time_ts": 3000.0, "latitude": 26.0, "longitude": 101.0, "altitude": 60,
+         "has_gps": False, "path": "/photos/c.jpg"},
+    ]
+    mw._result_details = details
+    mw._original_details = [dict(d) for d in details]
+    mw._results_table.setRowCount(3)
+    for i, d in enumerate(details):
+        item = QTableWidgetItem(d["filename"])
+        item.setData(Qt.ItemDataRole.UserRole, i)
+        mw._results_table.setItem(i, 0, item)
+
+        # GPS(前)
+        mw._results_table.setItem(i, 2, QTableWidgetItem("无"))
+        # GPS(后)
+        gps_text = f"{d['latitude']:.4f}, {d['longitude']:.4f}" if d.get("latitude") else "无"
+        mw._results_table.setItem(i, 4, QTableWidgetItem(gps_text))
+        # Method
+        method_item = QTableWidgetItem(mw._METHOD_LABELS.get(d.get("method", ""), ""))
+        method_item.setData(Qt.ItemDataRole.UserRole, d.get("method", ""))
+        mw._results_table.setItem(i, 5, method_item)
+        # Status
+        status = "成功" if d.get("success") else "失败"
+        mw._results_table.setItem(i, 6, QTableWidgetItem(status))
+        # Remark
+        mw._results_table.setItem(i, 8, QTableWidgetItem(""))
+
+
+class TestQuickFollowGPS:
+    def test_follow_prev_assigns_gps(self, main_window):
+        _setup_follow_rows(main_window)
+        main_window._quick_follow_gps(1, -1)  # look earlier
+        gps_item = main_window._results_table.item(1, 4)
+        assert gps_item.text() != "无"
+        assert "25.0000" in gps_item.text()
+        method_item = main_window._results_table.item(1, 5)
+        assert method_item.data(Qt.ItemDataRole.UserRole) == "follow_prev"
+
+    def test_follow_next_assigns_gps(self, main_window):
+        _setup_follow_rows(main_window)
+        main_window._quick_follow_gps(1, 1)  # look later
+        gps_item = main_window._results_table.item(1, 4)
+        assert "26.0000" in gps_item.text()
+        method_item = main_window._results_table.item(1, 5)
+        assert method_item.data(Qt.ItemDataRole.UserRole) == "follow_next"
+
+    def test_protected_row_not_followed(self, main_window):
+        _setup_follow_rows(main_window)
+        main_window._result_details[1]["method"] = "protected"
+        main_window._quick_follow_gps(1, -1)
+        # Should not change — protected rows can't receive follow
+        gps_item = main_window._results_table.item(1, 4)
+        assert gps_item.text() == "无"
+
+    def test_row_with_gps_not_followed(self, main_window):
+        _setup_follow_rows(main_window)
+        main_window._results_table.setItem(1, 4, QTableWidgetItem("30.0, 120.0"))
+        main_window._quick_follow_gps(1, -1)
+        # Should not change — already has GPS
+        assert main_window._results_table.item(1, 4).text() == "30.0, 120.0"
+
+    def test_no_timestamp_returns(self, main_window):
+        _setup_follow_rows(main_window)
+        main_window._result_details[1]["capture_time_ts"] = None
+        main_window._quick_follow_gps(1, -1)
+        gps_item = main_window._results_table.item(1, 4)
+        assert gps_item.text() == "无"
+
+    def test_skipped_neighbor_ignored(self, main_window):
+        _setup_follow_rows(main_window)
+        main_window._result_details[0]["method"] = "skipped"
+        main_window._quick_follow_gps(1, -1)  # only skipped neighbor available
+        gps_item = main_window._results_table.item(1, 4)
+        assert gps_item.text() == "无"
+
+    def test_advances_selection(self, main_window):
+        _setup_follow_rows(main_window)
+        main_window._quick_follow_gps(1, 1)
+        selected = main_window._results_table.selectionModel().selectedRows()
+        assert len(selected) == 1
+        assert selected[0].row() == 2
+
+
+# ── MainWindow: protect/unprotect ──────────────────────────
+
+class TestResetRowGPS:
+    def test_protect_saves_snapshot(self, main_window):
+        _setup_follow_rows(main_window)
+        main_window._reset_row_gps(0)  # protect row 0
+        assert 0 in main_window._protection_snapshots
+        method_item = main_window._results_table.item(0, 5)
+        assert method_item.data(Qt.ItemDataRole.UserRole) == "protected"
+        status_item = main_window._results_table.item(0, 6)
+        assert status_item.text() == "已保护"
+
+    def test_unprotect_restores(self, main_window):
+        _setup_follow_rows(main_window)
+        main_window._reset_row_gps(0)  # protect
+        main_window._reset_row_gps(0)  # unprotect
+        assert 0 not in main_window._protection_snapshots
+        method_item = main_window._results_table.item(0, 5)
+        assert method_item.data(Qt.ItemDataRole.UserRole) == "interpolated"
+
+
+# ── MainWindow: undo row ───────────────────────────────────
+
+class TestUndoRow:
+    def test_undo_restores_original(self, main_window):
+        _setup_follow_rows(main_window)
+        # Modify row 1 via follow
+        main_window._quick_follow_gps(1, -1)
+        assert main_window._result_details[1]["method"] == "follow_prev"
+        # Undo
+        main_window._undo_row(1)
+        assert main_window._result_details[1]["method"] == ""
+        assert not main_window._result_details[1]["success"]
+
+    def test_undo_clears_protection(self, main_window):
+        _setup_follow_rows(main_window)
+        main_window._reset_row_gps(0)  # protect
+        assert 0 in main_window._protection_snapshots
+        main_window._undo_row(0)
+        assert 0 not in main_window._protection_snapshots
+
+    def test_undo_skipped_status(self, main_window):
+        details = [{"filename": "a.jpg", "method": "skipped", "success": True,
+                     "has_gps": True, "latitude": 25.0, "longitude": 100.0,
+                     "capture_time_ts": 1000.0, "path": "/photos/a.jpg"}]
+        mw = main_window
+        mw._result_details = [dict(d) for d in details]
+        mw._original_details = [dict(d) for d in details]
+        mw._results_table.setRowCount(1)
+        item = QTableWidgetItem("a.jpg")
+        item.setData(Qt.ItemDataRole.UserRole, 0)
+        mw._results_table.setItem(0, 0, item)
+        mw._results_table.setItem(0, 2, QTableWidgetItem("25.0000, 100.0000"))
+        mw._results_table.setItem(0, 4, QTableWidgetItem("25.0000, 100.0000"))
+        method_item = QTableWidgetItem("—")
+        method_item.setData(Qt.ItemDataRole.UserRole, "skipped")
+        mw._results_table.setItem(0, 5, method_item)
+        mw._results_table.setItem(0, 6, QTableWidgetItem("已跳过"))
+        mw._results_table.setItem(0, 8, QTableWidgetItem(""))
+
+        # Modify then undo
+        mw._results_table.setItem(0, 6, QTableWidgetItem("成功"))
+        mw._undo_row(0)
+        status = mw._results_table.item(0, 6).text()
+        assert "跳过" in status
+
+
+# ── MainWindow: source menu ────────────────────────────────
+
+class TestShowSourceMenu:
+    def test_shows_protect_option(self, main_window):
+        detail = {"method": "interpolated", "success": True}
+        mw = main_window
+        mw._result_details = [detail]
+        mw._results_table.setRowCount(1)
+        item = QTableWidgetItem("test.jpg")
+        item.setData(Qt.ItemDataRole.UserRole, 0)
+        mw._results_table.setItem(0, 0, item)
+        mw._results_table.setItem(0, 4, QTableWidgetItem("25.0, 100.0"))
+
+        with patch("gps_photo_tracker.gui.main_window.QMenu") as MockMenu:
+            mock_menu = MockMenu.return_value
+            mock_menu.addAction.return_value = None
+            mock_menu.exec.return_value = None
+            mw._show_source_menu(0, 0)
+            # Should add "保护" action (not "取消保护")
+            calls = [str(c) for c in mock_menu.addAction.call_args_list]
+            assert any("保护" in c for c in calls)
+
+    def test_shows_unprotect_for_protected(self, main_window):
+        detail = {"method": "protected", "success": True}
+        mw = main_window
+        mw._result_details = [detail]
+        mw._results_table.setRowCount(1)
+        item = QTableWidgetItem("test.jpg")
+        item.setData(Qt.ItemDataRole.UserRole, 0)
+        mw._results_table.setItem(0, 0, item)
+        mw._results_table.setItem(0, 4, QTableWidgetItem("25.0, 100.0"))
+
+        with patch("gps_photo_tracker.gui.main_window.QMenu") as MockMenu:
+            mock_menu = MockMenu.return_value
+            mock_menu.addAction.return_value = None
+            mock_menu.exec.return_value = None
+            mw._show_source_menu(0, 0)
+            calls = [str(c) for c in mock_menu.addAction.call_args_list]
+            assert any("取消保护" in c for c in calls)
+
+    def test_invalid_data_row_returns(self, main_window):
+        mw = main_window
+        mw._result_details = []
+        mw._results_table.setRowCount(1)
+        item = QTableWidgetItem("test.jpg")
+        item.setData(Qt.ItemDataRole.UserRole, 0)
+        mw._results_table.setItem(0, 0, item)
+        mw._show_source_menu(0, 0)  # should not crash
+
+
+# ── MainWindow: cancel ─────────────────────────────────────
+
+class TestOnCancel:
+    def test_cancel_stops_worker(self, main_window):
+        from gps_photo_tracker.service.cancel_token import CancellationToken
+        token = CancellationToken()
+        mock_worker = type("W", (), {
+            "cancel": token.cancel,
+            "isRunning": lambda self_: True,
+            "wait": lambda self_, ms=0: None,
+        })()
+        main_window._worker = mock_worker
+        main_window._on_cancel()
+        assert token.is_cancelled
+        main_window._worker = None  # clean up so closeEvent doesn't crash
