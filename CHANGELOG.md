@@ -25,7 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tested
 
-- 510+ tests passing
+- 859 tests passing, 99.55% overall coverage
+- `__main__.py` entry point: 0→99% (crash log, error dialog, dependency check)
+- `main_window.py`: 78→99% coverage (99 new test classes)
 - Write status column verified in COPY and OVERWRITE modes
 - Completion popup suppression tested with timer mock
 
