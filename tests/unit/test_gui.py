@@ -775,6 +775,214 @@ class TestThumbnailSize:
         assert main_window._photo_preview._thumb_label.minimumHeight() != 120
 
 
+# ── PhotoPreview unit tests ────────────────────────────────
+
+class TestPhotoPreviewShowPhoto:
+
+    def test_show_photo_empty_path_clears_thumb(self, main_window):
+        preview = main_window._photo_preview
+        preview._info_label.setText("old info")
+        preview.show_photo("", "new info")
+        assert preview._info_label.text() == "new info"
+        assert preview._thumb_label.pixmap() is None or preview._thumb_label.pixmap().isNull()
+
+    def test_show_photo_cached_triggers_rescale(self, main_window, monkeypatch, tmp_path):
+        from PySide6.QtGui import QPixmap, QPixmapCache
+        from gps_photo_tracker.core import orientation as orient_mod
+
+        img = tmp_path / "test.jpg"
+        QPixmap(40, 40).save(str(img))
+
+        cache_key = f"thumb:{img}"
+        QPixmapCache.insert(cache_key, QPixmap(20, 20))
+
+        monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 1)
+
+        preview = main_window._photo_preview
+        preview.show_photo(str(img), "cached photo")
+        assert preview._info_label.text() == "cached photo"
+        assert preview._full_pixmap is not None
+
+    def test_show_photo_cached_with_orientation(self, main_window, monkeypatch, tmp_path):
+        from PySide6.QtGui import QPixmap, QPixmapCache
+        from gps_photo_tracker.core import orientation as orient_mod
+
+        img = tmp_path / "rotated.jpg"
+        QPixmap(40, 60).save(str(img))
+
+        cache_key = f"thumb:{img}"
+        QPixmapCache.insert(cache_key, QPixmap(20, 20))
+
+        monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 6)
+        monkeypatch.setattr(orient_mod.OrientationReader, "apply_orientation", lambda px, o: px)
+
+        preview = main_window._photo_preview
+        preview.show_photo(str(img), "rotated")
+        assert preview._full_pixmap is not None
+
+    def test_show_photo_uncached_shows_loading(self, main_window, monkeypatch):
+        preview = main_window._photo_preview
+        preview._pending_thumb_path = ""
+        monkeypatch.setattr("PySide6.QtCore.QTimer.singleShot", lambda ms, fn: None)
+        preview.show_photo("/nonexistent/photo.jpg", "loading test")
+        assert preview._thumb_label.text() == "加载中..."
+        assert preview._pending_thumb_path == "/nonexistent/photo.jpg"
+
+
+class TestPhotoPreviewClear:
+
+    def test_clear_resets_state(self, main_window):
+        preview = main_window._photo_preview
+        preview._info_label.setText("some info")
+        preview._full_pixmap = None
+        preview.clear()
+        assert "选中" in preview._info_label.text()
+        assert preview._full_pixmap is None
+
+
+class TestPhotoPreviewResizeEvent:
+
+    def test_resize_event_rescales_with_pixmap(self, main_window):
+        from PySide6.QtGui import QPixmap
+
+        preview = main_window._photo_preview
+        preview._full_pixmap = QPixmap(100, 80)
+        preview.resize(500, 200)
+        assert preview._thumb_label.width() >= 80
+
+
+class TestPhotoPreviewLoadThumbnail:
+
+    def test_load_thumbnail_valid_image(self, main_window, monkeypatch, tmp_path):
+        from PySide6.QtGui import QPixmap, QPixmapCache
+        from gps_photo_tracker.core import orientation as orient_mod
+
+        img = tmp_path / "valid.jpg"
+        QPixmap(60, 40).save(str(img))
+
+        monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 1)
+
+        preview = main_window._photo_preview
+        preview._pending_thumb_path = str(img)
+        preview._load_thumbnail()
+        assert preview._full_pixmap is not None
+
+    def test_load_thumbnail_with_orientation(self, main_window, monkeypatch, tmp_path):
+        from PySide6.QtGui import QPixmap, QPixmapCache
+        from gps_photo_tracker.core import orientation as orient_mod
+
+        img = tmp_path / "orient.jpg"
+        QPixmap(60, 40).save(str(img))
+
+        monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 8)
+        monkeypatch.setattr(orient_mod.OrientationReader, "apply_orientation", lambda px, o: px)
+
+        preview = main_window._photo_preview
+        preview._pending_thumb_path = str(img)
+        preview._load_thumbnail()
+        assert preview._full_pixmap is not None
+
+    def test_load_thumbnail_empty_path(self, main_window):
+        preview = main_window._photo_preview
+        preview._pending_thumb_path = ""
+        preview._load_thumbnail()
+        assert preview._full_pixmap is None
+
+    def test_load_thumbnail_invalid_image(self, main_window, monkeypatch, tmp_path):
+        bad = tmp_path / "bad.jpg"
+        bad.write_bytes(b"not an image")
+
+        preview = main_window._photo_preview
+        preview._pending_thumb_path = str(bad)
+        preview._load_thumbnail()
+        assert preview._full_pixmap is None
+
+
+class TestPhotoPreviewPreload:
+
+    def test_preload_photos_schedules_loads(self, main_window, monkeypatch, tmp_path):
+        from PySide6.QtGui import QPixmap
+
+        img1 = tmp_path / "a.jpg"
+        img2 = tmp_path / "b.jpg"
+        QPixmap(30, 30).save(str(img1))
+        QPixmap(30, 30).save(str(img2))
+
+        timers = []
+        monkeypatch.setattr("PySide6.QtCore.QTimer.singleShot", lambda ms, fn: timers.append((ms, fn)))
+
+        preview = main_window._photo_preview
+        preview.preload_photos([str(img1), str(img2)])
+        assert len(timers) == 2
+
+    def test_preload_skips_empty_paths(self, main_window, monkeypatch):
+        timers = []
+        monkeypatch.setattr("PySide6.QtCore.QTimer.singleShot", lambda ms, fn: timers.append((ms, fn)))
+
+        preview = main_window._photo_preview
+        preview.preload_photos(["", "/some/image.jpg"])
+        assert len(timers) == 1
+
+    def test_preload_skips_cached(self, main_window, monkeypatch, tmp_path):
+        from PySide6.QtGui import QPixmap, QPixmapCache
+
+        img = tmp_path / "cached.jpg"
+        QPixmap(30, 30).save(str(img))
+        QPixmapCache.insert(f"thumb:{img}", QPixmap(20, 20))
+
+        timers = []
+        monkeypatch.setattr("PySide6.QtCore.QTimer.singleShot", lambda ms, fn: timers.append((ms, fn)))
+
+        preview = main_window._photo_preview
+        preview.preload_photos([str(img)])
+        assert len(timers) == 0
+
+    def test_preload_one_valid(self, main_window, monkeypatch, tmp_path):
+        from PySide6.QtGui import QPixmap, QPixmapCache
+        from gps_photo_tracker.core import orientation as orient_mod
+
+        img = tmp_path / "preload.jpg"
+        QPixmap(60, 40).save(str(img))
+        QPixmapCache.remove(f"thumb:{img}")
+
+        monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 1)
+
+        preview = main_window._photo_preview
+        preview._preload_one(str(img))
+        cached = QPixmapCache.find(f"thumb:{img}")
+        assert cached is not None
+
+    def test_preload_one_with_orientation(self, main_window, monkeypatch, tmp_path):
+        from PySide6.QtGui import QPixmap, QPixmapCache
+        from gps_photo_tracker.core import orientation as orient_mod
+
+        img = tmp_path / "orient_pre.jpg"
+        QPixmap(60, 40).save(str(img))
+        QPixmapCache.remove(f"thumb:{img}")
+
+        monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 3)
+        monkeypatch.setattr(orient_mod.OrientationReader, "apply_orientation", lambda px, o: px)
+
+        preview = main_window._photo_preview
+        preview._preload_one(str(img))
+        cached = QPixmapCache.find(f"thumb:{img}")
+        assert cached is not None
+
+    def test_preload_one_skips_cached(self, main_window, monkeypatch, tmp_path):
+        from PySide6.QtGui import QPixmap, QPixmapCache
+
+        img = tmp_path / "already.jpg"
+        QPixmap(30, 30).save(str(img))
+        QPixmapCache.insert(f"thumb:{img}", QPixmap(20, 20))
+
+        timers = []
+        monkeypatch.setattr("PySide6.QtCore.QTimer.singleShot", lambda ms, fn: timers.append((ms, fn)))
+
+        preview = main_window._photo_preview
+        preview._preload_one(str(img))
+        assert len(timers) == 0
+
+
 # ── Fix #5: Settings mode persistence tests ────────────────
 
 class TestSettingsModePersistence:
