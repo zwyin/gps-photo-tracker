@@ -229,9 +229,6 @@ class ReviewDialog(QDialog):
                     best_diff = diff
                     best_idx = j
 
-            if best_idx < 0:
-                continue
-
             # Only suggest if within 5 minutes
             if best_diff > 300:
                 continue

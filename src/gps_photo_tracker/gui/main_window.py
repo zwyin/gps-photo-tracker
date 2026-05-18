@@ -115,7 +115,7 @@ class MainWindow(QMainWindow):
         # Restore splitter state (only if previously saved)
         settings = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
         splitter_state = settings.value("main_splitter_state")
-        if splitter_state and isinstance(splitter_state, (bytes, bytearray)):
+        if splitter_state:
             self._splitter.restoreState(splitter_state)
         self._splitter.splitterMoved.connect(
             lambda: QSettings("GPSPhotoTracker", "GPSPhotoTracker").setValue(

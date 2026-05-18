@@ -161,30 +161,8 @@ class GPSMatcher:
             if can_interpolate:
                 # Linear interpolation
                 span = next_point.timestamp - prev_point.timestamp
-                logger.debug("  → 插值 | span=%.1fs dist=%.0fm ratio=%.3f", span, distance,
-                             (adjusted_time - prev_point.timestamp) / span if span else 0.5)
-                if span == 0:
-                    # Same timestamp — use midpoint
-                    lat = (prev_point.latitude + next_point.latitude) / 2
-                    lon = (prev_point.longitude + next_point.longitude) / 2
-                    prev_alt = prev_point.altitude if prev_point.altitude is not None else 0.0
-                    next_alt = next_point.altitude if next_point.altitude is not None else 0.0
-                    alt = None if (prev_point.altitude is None and next_point.altitude is None) else (prev_alt + next_alt) / 2
-                    seg_distance = geodesic(
-                        (prev_point.latitude, prev_point.longitude),
-                        (next_point.latitude, next_point.longitude),
-                    ).meters
-                    return MatchResult(
-                        photo=photo, success=True,
-                        gps=GPSInfo(latitude=lat, longitude=lon, altitude=alt),
-                        method="interpolated",
-                        time_diff=time_diff,
-                        interpolation_prev=prev_point,
-                        interpolation_next=next_point,
-                        interpolation_distance=seg_distance,
-                        interpolation_ratio=0.5,
-                    )
                 ratio = (adjusted_time - prev_point.timestamp) / span
+                logger.debug("  → 插值 | span=%.1fs dist=%.0fm ratio=%.3f", span, distance, ratio)
                 lat = prev_point.latitude + ratio * (next_point.latitude - prev_point.latitude)
                 lon = prev_point.longitude + ratio * (next_point.longitude - prev_point.longitude)
 
@@ -288,10 +266,8 @@ class GPSMatcher:
         for seg in segments:
             if ts < seg.start:
                 diff = seg.start - ts
-            elif ts > seg.end:
-                diff = ts - seg.end
             else:
-                continue
+                diff = ts - seg.end
             if diff < best_diff:
                 best_diff = diff
                 best_seg = seg
