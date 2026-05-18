@@ -132,6 +132,12 @@ The app uses a step-based guided workflow:
 
 What you see in the preview table is exactly what gets written — all manual corrections (arrow-key follows, review edits, resets) carry forward to execution.
 
+### Data Safety
+
+- Writing GPS metadata changes the file's modification time. If you need to preserve original timestamps, use **copy mode**.
+- **Overwrite mode** replaces existing GPS metadata in the original files. Photos that already have GPS data are skipped by default, but if you enable "overwrite existing GPS", incorrect GPS data cannot be recovered once written. Image files themselves are never affected — only metadata changes.
+- **Copy mode** is recommended: writes GPS to copies in a separate output folder, leaving originals untouched. Supports resume if interrupted.
+
 ## Development
 
 ### Setup
@@ -182,6 +188,55 @@ Matching parameters can be adjusted in the GUI or programmatically:
 | `max_gps_distance` | 200m | 50-1000 | Max distance between consecutive GPS points |
 | `match_tail` | True | — | Match photos at track boundaries |
 | `time_offset` | 0s | -3600~3600 | Camera clock correction |
+
+### Parameter Guide
+
+**`time_offset` — Camera clock correction**
+
+Most common reason for matching failure. Your camera clock may differ from GPS time (wrong timezone, daylight saving, or simply inaccurate). Adjust this to compensate.
+
+- Camera 5 minutes ahead → set to `-300` (subtract 5 min)
+- Camera in wrong timezone (e.g. Japan UTC+9, GPS in UTC+8) → set to `3600` (add 1 hour)
+- Unsure → leave at 0, check the preview; if all photos are unmatched, try adjusting in ±300s steps
+
+**`isolated_window` — How far to reach for a GPS point**
+
+When a photo has no nearby GPS points before or after it (e.g. GPS signal lost, or photo taken at track start/end), this controls how far back/forward to search for the nearest GPS point.
+
+- Dense track (phone recording every second) → default 300s is fine
+- Sparse track (smartwatch recording every 5-10 min) → increase to 600-900s
+- Very sparse or GPS signal gaps during hiking → increase to 1800-3600s (accepts lower accuracy for more coverage)
+
+**`middle_time_window` — Max gap for interpolation**
+
+When a photo falls between two GPS points, the tool interpolates the position. This limits how far apart those two GPS points can be. Larger values = more photos matched, but less accurate.
+
+- City walk with frequent GPS fixes → default 3600s (1 hour) is fine
+- Long road trip with GPS gaps → increase to 7200s
+- Want only high-accuracy matches → decrease to 600-1200s
+
+**`context_window` — How close neighbors must be to count as "middle"**
+
+Determines whether a photo is treated as "between neighbors" (eligible for interpolation) or "isolated" (uses nearest GPS point). A photo is "middle" only if both the previous and next photos are within this window.
+
+- Continuous shooting (burst mode) → default 300s is fine
+- Spaced out shooting (landscapes, every few minutes) → increase to 600s
+- Very irregular intervals → leave at default; the isolated path will handle edge cases
+
+**`max_gps_distance` — Prevent GPS jumps**
+
+When interpolating, if the two GPS points are very far apart (e.g. flight between cities), the interpolated position is unreliable. This rejects interpolation when GPS points are too distant.
+
+- Walking/hiking (slow movement) → default 200m is fine
+- Driving or cycling → increase to 500m
+- Want to be conservative → decrease to 100m
+
+**`match_tail` — Match photos at track boundaries**
+
+Whether to match photos taken before the GPS track started or after it ended, using the nearest track endpoint.
+
+- Turn on (default) — photos at the beginning/end of your trip get matched to the first/last GPS point
+- Turn off — strict matching only; useful when track boundaries are unreliable (e.g. GPS turned on late)
 
 ## Building
 
