@@ -188,3 +188,47 @@ class TestCopyTimeout:
 
         assert call_count[0] == 3
         assert dst.exists()
+
+
+class TestListGPXNotFound:
+
+    def test_nonexistent_directory_raises(self):
+        provider = FileProvider()
+        with pytest.raises(FileAccessError):
+            provider.list_gpx(Path("/nonexistent/dir"))
+
+
+class TestListTracks:
+
+    def test_finds_track_files(self, tmp_path):
+        (tmp_path / "a.gpx").write_text("gpx")
+        (tmp_path / "b.kml").write_text("kml")
+        (tmp_path / "c.tcx").write_text("tcx")
+        (tmp_path / "d.txt").write_text("skip")
+
+        provider = FileProvider()
+        tracks = provider.list_tracks(tmp_path)
+        names = {p.name for p in tracks}
+        assert names == {"a.gpx", "b.kml", "c.tcx"}
+
+    def test_nonexistent_directory_raises(self):
+        provider = FileProvider()
+        with pytest.raises(FileAccessError):
+            provider.list_tracks(Path("/nonexistent/dir"))
+
+
+class TestCopyDiskFull:
+
+    def test_disk_full_error_wrapped(self, tmp_path):
+        from gps_photo_tracker.core.models import DiskFullError
+
+        src = tmp_path / "src.jpg"
+        dst = tmp_path / "dst.jpg"
+        src.write_bytes(b"data")
+
+        err = OSError("No space left on device")
+        err.errno = 28
+        provider = FileProvider()
+        with patch("gps_photo_tracker.core.file_provider.shutil.copy2", side_effect=err):
+            with pytest.raises(DiskFullError):
+                provider.copy_file(src, dst)

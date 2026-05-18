@@ -126,3 +126,88 @@ class TestTCXParser:
         assert seg.start < seg.end
         for i in range(1, len(seg.points)):
             assert seg.points[i].timestamp >= seg.points[i - 1].timestamp
+
+
+class TestTCXParserEdgeCases:
+    """Cover: missing Time/Position, missing Lat/Lon, empty Lap."""
+
+    def test_trackpoint_without_time_or_position_skipped(self, tmp_path):
+        tcx = """<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
+  <Activities><Activity Sport="Running">
+    <Lap StartTime="2026-01-01T08:00:00Z">
+      <Track>
+        <Trackpoint>
+          <Time>2026-01-01T08:00:00Z</Time>
+          <Position>
+            <LatitudeDegrees>35.0</LatitudeDegrees>
+            <LongitudeDegrees>139.0</LongitudeDegrees>
+          </Position>
+        </Trackpoint>
+        <Trackpoint>
+          <HeartRateBpm><Value>120</Value></HeartRateBpm>
+        </Trackpoint>
+      </Track>
+    </Lap>
+  </Activity></Activities>
+</TrainingCenterDatabase>"""
+        f = tmp_path / "notime.tcx"
+        f.write_text(tcx, encoding="utf-8")
+        segments = TCXParser().parse_file(f)
+        assert len(segments) == 1
+        assert len(segments[0].points) == 1
+
+    def test_trackpoint_without_latlon_skipped(self, tmp_path):
+        tcx = """<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
+  <Activities><Activity Sport="Running">
+    <Lap StartTime="2026-01-01T08:00:00Z">
+      <Track>
+        <Trackpoint>
+          <Time>2026-01-01T08:00:00Z</Time>
+          <Position>
+            <AltitudeMeters>50</AltitudeMeters>
+          </Position>
+        </Trackpoint>
+        <Trackpoint>
+          <Time>2026-01-01T08:05:00Z</Time>
+          <Position>
+            <LatitudeDegrees>35.0</LatitudeDegrees>
+            <LongitudeDegrees>139.0</LongitudeDegrees>
+          </Position>
+        </Trackpoint>
+      </Track>
+    </Lap>
+  </Activity></Activities>
+</TrainingCenterDatabase>"""
+        f = tmp_path / "nolatlon.tcx"
+        f.write_text(tcx, encoding="utf-8")
+        segments = TCXParser().parse_file(f)
+        assert len(segments) == 1
+        assert len(segments[0].points) == 1
+
+    def test_empty_lap_skipped(self, tmp_path):
+        tcx = """<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
+  <Activities><Activity Sport="Running">
+    <Lap StartTime="2026-01-01T08:00:00Z">
+      <Track>
+      </Track>
+    </Lap>
+    <Lap StartTime="2026-01-01T09:00:00Z">
+      <Track>
+        <Trackpoint>
+          <Time>2026-01-01T09:00:00Z</Time>
+          <Position>
+            <LatitudeDegrees>35.0</LatitudeDegrees>
+            <LongitudeDegrees>139.0</LongitudeDegrees>
+          </Position>
+        </Trackpoint>
+      </Track>
+    </Lap>
+  </Activity></Activities>
+</TrainingCenterDatabase>"""
+        f = tmp_path / "emptylap.tcx"
+        f.write_text(tcx, encoding="utf-8")
+        segments = TCXParser().parse_file(f)
+        assert len(segments) == 1  # only the non-empty lap

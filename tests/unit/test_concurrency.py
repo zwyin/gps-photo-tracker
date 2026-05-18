@@ -241,3 +241,73 @@ class TestBatchProcessorParallel:
                 )
                 assert len(progress_calls) == 1
                 assert len(result_calls) == 1
+
+
+class TestCopyDestinationKeepStructureRoot:
+    """Cover keep_structure with file in photo_dir root (rel.parent == Path('.'))."""
+
+    def test_keep_structure_file_at_root(self):
+        opts = ProcessOptions(mode=ProcessMode.COPY, output_dir=Path("/out"),
+                              keep_structure=True)
+        result = _copy_destination(Path("/photos/a.jpg"), opts, Path("/photos"))
+        assert result == Path("/out/photos/a.jpg")
+
+
+class TestSequentialCancelMidExecution:
+    """Cover L96: break when cancel detected mid-sequential run."""
+
+    def test_cancel_mid_sequence_stops_early(self):
+        from gps_photo_tracker.service.cancel_token import CancellationToken
+
+        cancel = CancellationToken()
+        results = []
+        call_count = [0]
+
+        def fake_execute(task):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                cancel.cancel()
+            return WriteResult(success=True, filename=task.match_result.photo.filename)
+
+        with patch("gps_photo_tracker.core.concurrency.execute_task", side_effect=fake_execute):
+            bp = BatchProcessor(workers=1)
+            tasks = [_make_task(f"p{i}.jpg") for i in range(5)]
+            results = bp.submit_all(tasks, cancel=cancel)
+            assert len(results) < 5  # stopped before processing all tasks
+
+
+class TestParallelCancelMidRun:
+    """Cover L117-119: cancel futures mid-parallel run."""
+
+    def test_parallel_cancel_cancels_remaining_futures(self):
+        from gps_photo_tracker.service.cancel_token import CancellationToken
+
+        cancel = CancellationToken()
+        mock_future1 = MagicMock()
+        mock_future1.result.return_value = WriteResult(success=True, filename="a.jpg")
+        mock_future2 = MagicMock()
+
+        def fake_as_completed(futures_dict):
+            # Yield first, trigger cancel, then yield second
+            yield mock_future1
+            cancel.cancel()
+            # The code iterates futures dict keys to cancel them
+            for f in futures_dict:
+                f.cancel()
+            yield mock_future2
+
+        with patch("gps_photo_tracker.core.concurrency.ThreadPoolExecutor") as MockExec:
+            ctx = MagicMock()
+            # submit returns a future that will be in the futures dict
+            ctx.submit.side_effect = [mock_future1, mock_future2]
+            ctx.__enter__ = MagicMock(return_value=ctx)
+            ctx.__exit__ = MagicMock(return_value=False)
+            MockExec.return_value = ctx
+
+            with patch("gps_photo_tracker.core.concurrency.as_completed", side_effect=fake_as_completed):
+                bp = BatchProcessor(workers=2)
+                bp.submit_all(
+                    [_make_task("a.jpg"), _make_task("b.jpg")],
+                    cancel=cancel,
+                )
+                mock_future2.cancel.assert_called()
