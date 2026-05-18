@@ -254,3 +254,103 @@ class TestWriteGPS:
         assert result is not None
         assert abs(result.latitude - gps.latitude) < 0.001
         assert abs(result.longitude - gps.longitude) < 0.001
+
+
+class TestEXIFWriterEdgeCases:
+    """Cover: DateTime fallback, piexif.load failure, GPS key missing,
+    piexif.dump failure, verification failures."""
+
+    def test_read_datetime_fallback_0th_ifd(self, tmp_path):
+        """DateTime in 0th IFD (not Exif) should be read."""
+        exif = {"0th": {piexif.ImageIFD.DateTime: "2026:03:15 10:30:00"}}
+        jpg = _create_jpeg(tmp_path / "dt_0th.jpg", exif)
+        ts = EXIFWriter.read_datetime(jpg)
+        assert ts is not None
+
+    def test_write_gps_piexif_load_failure(self, tmp_path, monkeypatch):
+        """When piexif.load fails on write, should use fresh exif_dict."""
+        jpg = _create_jpeg(tmp_path / "src.jpg")
+        dst = tmp_path / "out.jpg"
+        gps = GPSInfo(latitude=25.0, longitude=100.0)
+
+        original_load = piexif.load
+        call_count = [0]
+
+        def flaky_load(path):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("corrupt")
+            return original_load(path)
+
+        monkeypatch.setattr(piexif, "load", flaky_load)
+        EXIFWriter.write_gps(jpg, dst, gps)
+        result = EXIFWriter.read_gps(dst)
+        assert result is not None
+
+    def test_write_gps_no_gps_key_in_exif(self, tmp_path, monkeypatch):
+        """When loaded exif_dict has no GPS key, should add it."""
+        jpg = _create_jpeg(tmp_path / "src.jpg")
+        dst = tmp_path / "out.jpg"
+        gps = GPSInfo(latitude=25.0, longitude=100.0)
+
+        original_load = piexif.load
+        call_count = [0]
+
+        def load_no_gps(path):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return {"0th": {}, "Exif": {}}  # no GPS key
+            return original_load(path)
+
+        monkeypatch.setattr(piexif, "load", load_no_gps)
+        EXIFWriter.write_gps(jpg, dst, gps)
+        result = EXIFWriter.read_gps(dst)
+        assert result is not None
+
+    def test_write_gps_dump_failure_raises(self, tmp_path, monkeypatch):
+        """piexif.dump failure should raise EXIFWriteError."""
+        jpg = _create_jpeg(tmp_path / "src.jpg")
+        dst = tmp_path / "out.jpg"
+        gps = GPSInfo(latitude=25.0, longitude=100.0)
+
+        monkeypatch.setattr(piexif, "dump", lambda d: (_ for _ in ()).throw(RuntimeError("dump error")))
+        with pytest.raises(EXIFWriteError, match="serialize"):
+            EXIFWriter.write_gps(jpg, dst, gps)
+
+    def test_write_gps_verify_no_gps_raises(self, tmp_path, monkeypatch):
+        """Verification finds no GPS data should raise EXIFWriteError."""
+        jpg = _create_jpeg(tmp_path / "src.jpg")
+        dst = tmp_path / "out.jpg"
+        gps = GPSInfo(latitude=25.0, longitude=100.0)
+
+        # After piexif.insert writes, read_gps returns None
+        monkeypatch.setattr(EXIFWriter, "read_gps", lambda p: None)
+        with pytest.raises(EXIFWriteError, match="no GPS"):
+            EXIFWriter.write_gps(jpg, dst, gps)
+
+    def test_write_gps_verify_latitude_mismatch_raises(self, tmp_path, monkeypatch):
+        """Latitude verification mismatch should raise EXIFWriteError."""
+        jpg = _create_jpeg(tmp_path / "src.jpg")
+        dst = tmp_path / "out.jpg"
+        gps = GPSInfo(latitude=25.0, longitude=100.0)
+
+        from gps_photo_tracker.core.models import GPSInfo as GI
+
+        original_read_gps = EXIFWriter.read_gps
+        monkeypatch.setattr(EXIFWriter, "read_gps",
+                            lambda p: GI(latitude=99.0, longitude=100.0))
+        with pytest.raises(EXIFWriteError, match="Latitude"):
+            EXIFWriter.write_gps(jpg, dst, gps)
+
+    def test_write_gps_verify_longitude_mismatch_raises(self, tmp_path, monkeypatch):
+        """Longitude verification mismatch should raise EXIFWriteError."""
+        jpg = _create_jpeg(tmp_path / "src.jpg")
+        dst = tmp_path / "out.jpg"
+        gps = GPSInfo(latitude=25.0, longitude=100.0)
+
+        from gps_photo_tracker.core.models import GPSInfo as GI
+
+        monkeypatch.setattr(EXIFWriter, "read_gps",
+                            lambda p: GI(latitude=25.0, longitude=99.0))
+        with pytest.raises(EXIFWriteError, match="Longitude"):
+            EXIFWriter.write_gps(jpg, dst, gps)

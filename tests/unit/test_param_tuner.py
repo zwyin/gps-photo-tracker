@@ -80,3 +80,61 @@ class TestParamTuner:
         assert 600 <= config.middle_time_window <= 7200
         assert 60 <= config.context_window <= 1800
         assert 50 <= config.max_gps_distance <= 1000
+
+
+class TestParamTunerSpeedBranches:
+    """Cover speed_median branches: slow (<3), medium (<8), fast (>=8)."""
+
+    def _make_moving_segments(self, lat_step: float, gap: float, count: int) -> list[GPXSegment]:
+        """Segments with configurable lat_step to control speed."""
+        points = [
+            TrackPoint(timestamp=i * gap, latitude=i * lat_step, longitude=0.0)
+            for i in range(count)
+        ]
+        return [GPXSegment(filename="test.gpx", start=0.0,
+                           end=(count - 1) * gap, points=points)]
+
+    def test_slow_speed_distance_200(self):
+        """speed_median < 3 m/s → distance = 200."""
+        # ~0.0001° per 60s ≈ 0.3 m/s (walking)
+        segments = self._make_moving_segments(0.0001, 60, 50)
+        photos = _make_photos(10, 30)
+        config = ParamTuner.recommend(segments, photos)
+        assert config.max_gps_distance == 200
+
+    def test_medium_speed_distance_400(self):
+        """3 ≤ speed_median < 8 m/s → distance = 400."""
+        # ~0.0005° per 10s ≈ 5.5 m/s (cycling)
+        segments = self._make_moving_segments(0.0005, 10, 50)
+        photos = _make_photos(10, 30)
+        config = ParamTuner.recommend(segments, photos)
+        assert config.max_gps_distance == 400
+
+    def test_fast_speed_distance_500(self):
+        """speed_median ≥ 8 m/s → distance = 500."""
+        # ~0.001° per 5s ≈ 25 m/s (driving)
+        segments = self._make_moving_segments(0.001, 5, 50)
+        photos = _make_photos(10, 30)
+        config = ParamTuner.recommend(segments, photos)
+        assert config.max_gps_distance == 500
+
+    def test_zero_time_gap_skipped(self):
+        """Points with dt=0 should be skipped in speed calculation."""
+        points = [
+            TrackPoint(timestamp=0.0, latitude=0.0, longitude=0.0),
+            TrackPoint(timestamp=0.0, latitude=1.0, longitude=1.0),  # dt=0, skip
+            TrackPoint(timestamp=10.0, latitude=0.001, longitude=0.0),
+        ]
+        seg = GPXSegment(filename="dup.gpx", start=0.0, end=10.0, points=points)
+        photos = _make_photos(10, 30)
+        config = ParamTuner.recommend([seg], photos)
+        assert isinstance(config, MatcherConfig)
+
+    def test_single_point_returns_default_speed(self):
+        """Single-point segment → no speed pairs → returns default 1.5."""
+        seg = GPXSegment(filename="single.gpx", start=0.0, end=0.0,
+                         points=[TrackPoint(timestamp=0.0, latitude=0.0, longitude=0.0)])
+        photos = _make_photos(10, 30)
+        config = ParamTuner.recommend([seg], photos)
+        # speed 1.5 < 3 → distance = 200
+        assert config.max_gps_distance == 200
