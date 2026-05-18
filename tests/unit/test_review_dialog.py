@@ -371,3 +371,138 @@ class TestReviewDialog:
             dialog._batch_action(3)
         path_str = str(state.failed_results[0].photo.path)
         assert state.decisions[path_str].action == ReviewAction.MANUAL_COORD
+
+
+class TestReviewDialogSuggestions:
+
+    def _make_state_with_suggestions(self):
+        """Create a ReviewState with matched neighbors for suggestion generation."""
+        matched_result = MatchResult(
+            photo=PhotoInfo(path=Path("/tmp/ok.jpg"), filename="ok.jpg",
+                            timestamp=1000.0, has_gps=False),
+            success=True, gps=GPSInfo(25.0, 100.0, 50),
+            method="interpolated", time_diff=5.0,
+        )
+        failed_result = MatchResult(
+            photo=PhotoInfo(path=Path("/tmp/fail0.jpg"), filename="fail0.jpg",
+                            timestamp=1010.0, has_gps=False),
+            success=False, reject_reason="time_diff", time_diff=10.0,
+        )
+        seg = GPXSegment(
+            filename="track.gpx", start=900.0, end=1100.0,
+            points=[TrackPoint(timestamp=950.0, latitude=25.0, longitude=100.0)],
+        )
+        return ReviewState(
+            failed_results=[failed_result],
+            gps_segments=[seg],
+            all_results=[matched_result, failed_result],
+        )
+
+    def test_suggestions_computed_for_failed(self, app, qtbot):
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+
+        state = self._make_state_with_suggestions()
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        assert len(dialog._suggestions) > 0
+        assert "跟随" in dialog._suggestions[0]
+
+    def test_apply_suggestions_sets_combos(self, app, qtbot):
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+
+        state = self._make_state_with_suggestions()
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        dialog._apply_all_suggestions()
+        assert dialog._action_combos[0].currentIndex() >= 4
+
+    def test_suggestion_column_has_content(self, app, qtbot):
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+
+        state = self._make_state_with_suggestions()
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        sug_item = dialog._table.item(0, 4)
+        assert sug_item is not None
+        assert sug_item.text() != "—"
+
+    def test_no_suggestions_when_no_matches(self, app, qtbot):
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+
+        failed = _make_failed_result("fail0.jpg", time_diff=10.0)
+        state = ReviewState(
+            failed_results=[failed],
+            gps_segments=[],
+            all_results=[failed],
+        )
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        assert len(dialog._suggestions) == 0
+
+
+class TestReviewDialogRowClick:
+
+    def test_row_click_negative_row(self, app, qtbot):
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+
+        state = _make_review_state(count=1)
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        dialog._on_row_clicked(-1, 0)
+
+    def test_row_click_shows_preview(self, app, qtbot, tmp_path):
+        from PySide6.QtGui import QPixmap
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+
+        img = tmp_path / "photo.jpg"
+        QPixmap(40, 40).save(str(img))
+
+        result = MatchResult(
+            photo=PhotoInfo(path=img, filename="photo.jpg",
+                            timestamp=1000.0, has_gps=False),
+            success=False, reject_reason="time_diff", time_diff=5.0,
+        )
+        state = ReviewState(failed_results=[result], gps_segments=[])
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        dialog._on_row_clicked(0, 0)
+        assert "photo.jpg" in dialog._info_label.text()
+
+    def test_row_click_bad_preview(self, app, qtbot, tmp_path):
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+
+        bad = tmp_path / "bad.jpg"
+        bad.write_bytes(b"notimage")
+
+        result = MatchResult(
+            photo=PhotoInfo(path=bad, filename="bad.jpg",
+                            timestamp=1000.0, has_gps=False),
+            success=False, reject_reason="time_diff", time_diff=5.0,
+        )
+        state = ReviewState(failed_results=[result], gps_segments=[])
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        dialog._on_row_clicked(0, 0)
+
+
+class TestReviewDialogActionFollow:
+
+    def test_action_follow_prev(self, app, qtbot):
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+
+        state = _make_review_state(count=1)
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        dialog._action_combos[0].setCurrentIndex(4)
+        path_str = str(state.failed_results[0].photo.path)
+        assert path_str in dialog._state.decisions
+
+    def test_action_follow_next(self, app, qtbot):
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+
+        state = _make_review_state(count=1)
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        dialog._action_combos[0].setCurrentIndex(5)
+        path_str = str(state.failed_results[0].photo.path)
+        assert path_str in dialog._state.decisions
