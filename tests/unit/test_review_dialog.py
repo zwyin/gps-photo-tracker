@@ -506,3 +506,118 @@ class TestReviewDialogActionFollow:
         dialog._action_combos[0].setCurrentIndex(5)
         path_str = str(state.failed_results[0].photo.path)
         assert path_str in dialog._state.decisions
+
+
+class TestReviewDialogSuggestionEdgeCases:
+
+    def test_suggestion_skips_null_timestamp(self, app, qtbot):
+        """Failed photo with timestamp=None gets no suggestion (L221)."""
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+
+        matched = MatchResult(
+            photo=PhotoInfo(path=Path("/tmp/ok.jpg"), filename="ok.jpg",
+                            timestamp=1000.0, has_gps=False),
+            success=True, gps=GPSInfo(25.0, 100.0), method="interpolated",
+        )
+        failed = MatchResult(
+            photo=PhotoInfo(path=Path("/tmp/fail.jpg"), filename="fail.jpg",
+                            timestamp=None, has_gps=False),
+            success=False, reject_reason="time_diff",
+        )
+        state = ReviewState(
+            failed_results=[failed], gps_segments=[],
+            all_results=[matched, failed],
+        )
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        assert 0 not in dialog._suggestions
+
+    def test_suggestion_skips_far_neighbor(self, app, qtbot):
+        """Matched photo >300s away gets no suggestion (L237)."""
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+
+        matched = MatchResult(
+            photo=PhotoInfo(path=Path("/tmp/ok.jpg"), filename="ok.jpg",
+                            timestamp=1000.0, has_gps=False),
+            success=True, gps=GPSInfo(25.0, 100.0), method="interpolated",
+        )
+        failed = MatchResult(
+            photo=PhotoInfo(path=Path("/tmp/fail.jpg"), filename="fail.jpg",
+                            timestamp=1500.0, has_gps=False),
+            success=False, reject_reason="time_diff", time_diff=10.0,
+        )
+        state = ReviewState(
+            failed_results=[failed], gps_segments=[],
+            all_results=[matched, failed],
+        )
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        assert len(dialog._suggestions) == 0
+
+    def test_suggestion_follow_next(self, app, qtbot):
+        """Failed photo before matched → '跟随下一个' (L243)."""
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+
+        matched = MatchResult(
+            photo=PhotoInfo(path=Path("/tmp/ok.jpg"), filename="ok.jpg",
+                            timestamp=1000.0, has_gps=False),
+            success=True, gps=GPSInfo(25.0, 100.0), method="interpolated",
+        )
+        failed = MatchResult(
+            photo=PhotoInfo(path=Path("/tmp/fail.jpg"), filename="fail.jpg",
+                            timestamp=990.0, has_gps=False),
+            success=False, reject_reason="time_diff", time_diff=10.0,
+        )
+        state = ReviewState(
+            failed_results=[failed], gps_segments=[],
+            all_results=[matched, failed],
+        )
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        assert "下一个" in dialog._suggestions[0]
+
+    def test_apply_next_suggestion_sets_combo(self, app, qtbot):
+        """'跟随下一个' suggestion sets combo to index 5 (L252-253)."""
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+
+        matched = MatchResult(
+            photo=PhotoInfo(path=Path("/tmp/ok.jpg"), filename="ok.jpg",
+                            timestamp=1000.0, has_gps=False),
+            success=True, gps=GPSInfo(25.0, 100.0), method="interpolated",
+        )
+        failed = MatchResult(
+            photo=PhotoInfo(path=Path("/tmp/fail.jpg"), filename="fail.jpg",
+                            timestamp=990.0, has_gps=False),
+            success=False, reject_reason="time_diff", time_diff=10.0,
+        )
+        state = ReviewState(
+            failed_results=[failed], gps_segments=[],
+            all_results=[matched, failed],
+        )
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+        assert "下一个" in dialog._suggestions[0]
+        dialog._apply_all_suggestions()
+        assert dialog._action_combos[0].currentIndex() == 5
+
+    def test_row_click_preview_exception(self, app, qtbot, monkeypatch, tmp_path):
+        """Preview loading exception shows fallback text (L275-276)."""
+        from gps_photo_tracker.gui.review_dialog import ReviewDialog
+
+        img = tmp_path / "photo.jpg"
+
+        result = MatchResult(
+            photo=PhotoInfo(path=img, filename="photo.jpg",
+                            timestamp=1000.0, has_gps=False),
+            success=False, reject_reason="time_diff", time_diff=5.0,
+        )
+        state = ReviewState(failed_results=[result], gps_segments=[])
+        dialog = ReviewDialog(state)
+        qtbot.addWidget(dialog)
+
+        # Make QPixmap throw
+        from PySide6.QtGui import QPixmap
+        monkeypatch.setattr(QPixmap, "__init__", lambda self, *a: (_ for _ in ()).throw(RuntimeError("fail")))
+
+        dialog._on_row_clicked(0, 0)
+        assert "无法加载" in dialog._preview_label.text()
