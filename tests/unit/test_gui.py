@@ -3785,17 +3785,33 @@ class TestAutoScan:
 
 class TestPathHistory:
     def test_add_and_load_history(self, main_window):
-        QSettings().remove("test_history_key")
-        main_window._add_path_history("test_history_key", "/tmp/a", main_window._gps_dir_edit)
+        store = {}
+
+        class MockSettings:
+            def value(self, key, default=None):
+                return store.get(key, default)
+            def setValue(self, key, val):
+                store[key] = val
+
+        with patch("gps_photo_tracker.gui.main_window.QSettings", MockSettings):
+            main_window._add_path_history("test_history_key", "/tmp/a", main_window._gps_dir_edit)
         assert main_window._gps_dir_edit.currentText() == "/tmp/a"
         assert main_window._gps_dir_edit.count() >= 1
-        QSettings().remove("test_history_key")
 
     def test_load_path_history(self, main_window):
-        QSettings().setValue("gps_dir_history", ["/tmp/x"])
-        main_window._load_path_history()
+
+        class MockSettings:
+            def __init__(self):
+                self._data = {"gps_dir_history": ["/tmp/x"]}
+            def value(self, key, default=None):
+                return self._data.get(key, default)
+            def setValue(self, key, val):
+                self._data[key] = val
+
+        with patch("gps_photo_tracker.gui.main_window.QSettings", MockSettings):
+            main_window._gps_dir_edit.clear()
+            main_window._load_path_history()
         assert main_window._gps_dir_edit.count() >= 1
-        QSettings().remove("gps_dir_history")
 
 
 # ── MainWindow: auto tune ──────────────────────────────────
@@ -4552,13 +4568,21 @@ class TestOnPhotosScannedWithGPS:
 class TestAddPathHistoryDedup:
     def test_removes_duplicate_and_prepends(self, main_window):
         """Adding existing path moves it to front."""
-        s = QSettings()
-        s.setValue("test_dedup_history", ["/old", "/mid", "/new"])
-        main_window._add_path_history("test_dedup_history", "/mid", main_window._gps_dir_edit)
-        history = s.value("test_dedup_history", [])
+        store = {"test_dedup_history": ["/old", "/mid", "/new"]}
+
+        class MockSettings:
+            def value(self, key, default=None):
+                return store.get(key, default)
+            def setValue(self, key, val):
+                store[key] = val
+            def remove(self, key):
+                store.pop(key, None)
+
+        with patch("gps_photo_tracker.gui.main_window.QSettings", MockSettings):
+            main_window._add_path_history("test_dedup_history", "/mid", main_window._gps_dir_edit)
+        history = store["test_dedup_history"]
         assert history[0] == "/mid"
         assert history.count("/mid") == 1
-        s.remove("test_dedup_history")
 
 
 # ── MainWindow: _add_path_history str history ─────────────────
@@ -4566,13 +4590,21 @@ class TestAddPathHistoryDedup:
 class TestAddPathHistoryStr:
     def test_str_history_converted_to_list(self, main_window):
         """When QSettings returns a single string, it's converted to a list."""
-        s = QSettings()
-        s.setValue("test_str_hist", "/single_path")
-        main_window._add_path_history("test_str_hist", "/new_path", main_window._gps_dir_edit)
-        history = s.value("test_str_hist", [])
+        store = {"test_str_hist": "/single_path"}
+
+        class MockSettings:
+            def value(self, key, default=None):
+                return store.get(key, default)
+            def setValue(self, key, val):
+                store[key] = val
+            def remove(self, key):
+                store.pop(key, None)
+
+        with patch("gps_photo_tracker.gui.main_window.QSettings", MockSettings):
+            main_window._add_path_history("test_str_hist", "/new_path", main_window._gps_dir_edit)
+        history = store["test_str_hist"]
         assert isinstance(history, list)
         assert history[0] == "/new_path"
-        s.remove("test_str_hist")
 
 
 # ── MainWindow: _load_path_history str history ────────────────
@@ -4580,12 +4612,19 @@ class TestAddPathHistoryStr:
 class TestLoadPathHistoryStr:
     def test_loads_str_history_as_list(self, main_window):
         """_load_path_history handles single-string history."""
-        s = QSettings()
-        s.setValue("gps_dir_history", "/single_gps")
-        main_window._gps_dir_edit.clear()
-        main_window._load_path_history()
+
+        class MockSettings:
+            def __init__(self):
+                self._data = {"gps_dir_history": "/single_gps"}
+            def value(self, key, default=None):
+                return self._data.get(key, default)
+            def setValue(self, key, val):
+                self._data[key] = val
+
+        with patch("gps_photo_tracker.gui.main_window.QSettings", MockSettings):
+            main_window._gps_dir_edit.clear()
+            main_window._load_path_history()
         assert main_window._gps_dir_edit.count() == 1
-        s.remove("gps_dir_history")
 
 
 # ── MainWindow: auto_tune scan exception ──────────────────────

@@ -1053,7 +1053,7 @@ class MainWindow(QMainWindow):
             elif dec.action in (ReviewAction.FOLLOW_PREV, ReviewAction.FOLLOW_NEXT):
                 target_ts = None
                 for r in all_results:
-                    if str(r.photo.path) == path_str and r.photo.timestamp:
+                    if r.photo.path == Path(path_str) and r.photo.timestamp:
                         target_ts = r.photo.timestamp
                         break
                 if target_ts is None:
