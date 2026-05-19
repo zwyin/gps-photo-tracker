@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from gps_photo_tracker.core.file_provider import FileProvider, _COPY_TIMEOUT
+from gps_photo_tracker.core.file_provider import FileProvider
 from gps_photo_tracker.core.models import FileAccessError, NetworkTimeoutError, PermissionDeniedError
 
 
@@ -134,14 +134,12 @@ class TestCopyTimeout:
 
         provider = FileProvider()
 
-        # Mock shutil.copy2 to simulate a hang (sleep longer than timeout)
-        import shutil
-        original_copy2 = shutil.copy2
         def slow_copy(*args, **kwargs):
             import time
-            time.sleep(_COPY_TIMEOUT + 5)
+            time.sleep(0.1)
 
-        with patch("gps_photo_tracker.core.file_provider.shutil.copy2", side_effect=slow_copy):
+        with patch("gps_photo_tracker.core.file_provider._COPY_TIMEOUT", 0.01), \
+             patch("gps_photo_tracker.core.file_provider.shutil.copy2", side_effect=slow_copy):
             with pytest.raises(NetworkTimeoutError):
                 provider.copy_file(src, dst)
 
