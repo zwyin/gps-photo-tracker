@@ -16,7 +16,7 @@ from gps_photo_tracker.core.models import (
 _RETRY = retry(
     stop=(stop_after_attempt(3) | stop_after_delay(90)),
     wait=wait_exponential(multiplier=1, min=1, max=4),
-    retry=retry_if_exception_type((OSError, TimeoutError, NetworkTimeoutError)),
+    retry=retry_if_exception_type((OSError, TimeoutError)),
     reraise=True,
 )
 

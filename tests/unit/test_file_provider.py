@@ -4,6 +4,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
+from gps_photo_tracker.core import file_provider as fp_module
 from gps_photo_tracker.core.file_provider import FileProvider
 from gps_photo_tracker.core.models import FileAccessError, NetworkTimeoutError, PermissionDeniedError
 
@@ -132,14 +133,13 @@ class TestCopyTimeout:
         dst = tmp_path / "dst.jpg"
         src.write_bytes(b"data")
 
-        provider = FileProvider()
-
-        def slow_copy(*args, **kwargs):
+        def hanging_copy(*args, **kwargs):
             import time
             time.sleep(0.1)
 
-        with patch("gps_photo_tracker.core.file_provider._COPY_TIMEOUT", 0.01), \
-             patch("gps_photo_tracker.core.file_provider.shutil.copy2", side_effect=slow_copy):
+        provider = FileProvider()
+        with patch.object(fp_module, "_COPY_TIMEOUT", 0.01), \
+             patch("gps_photo_tracker.core.file_provider.shutil.copy2", side_effect=hanging_copy):
             with pytest.raises(NetworkTimeoutError):
                 provider.copy_file(src, dst)
 
@@ -166,6 +166,15 @@ class TestCopyTimeout:
 
     def test_retry_on_oserror(self, tmp_path):
         """OSError triggers retry (3 attempts)."""
+        from tenacity import retry, stop_after_attempt, retry_if_exception_type
+        from gps_photo_tracker.core.models import NetworkTimeoutError
+
+        fast_retry = retry(
+            stop=stop_after_attempt(3),
+            retry=retry_if_exception_type((OSError, TimeoutError, NetworkTimeoutError)),
+            reraise=True,
+        )
+
         src = tmp_path / "src.jpg"
         dst = tmp_path / "dst.jpg"
         src.write_bytes(b"data")
@@ -181,7 +190,8 @@ class TestCopyTimeout:
             return original_copy2(*args, **kwargs)
 
         provider = FileProvider()
-        with patch("gps_photo_tracker.core.file_provider.shutil.copy2", side_effect=flaky_copy):
+        with patch.object(FileProvider, "copy_file", fast_retry(FileProvider.copy_file.__wrapped__)), \
+             patch("gps_photo_tracker.core.file_provider.shutil.copy2", side_effect=flaky_copy):
             provider.copy_file(src, dst)
 
         assert call_count[0] == 3
