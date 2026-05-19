@@ -21,7 +21,7 @@ logging_/     → OperationLogger (4 log files + debug)
 
 ## Test & Coverage
 
-- Run: `pytest tests/unit/ -q`
+- Run: `pytest tests/unit/ -q` (~10s)
 - Coverage: `pytest tests/unit/ --cov --cov-report=term-missing`
 - Current: 859 tests, 99.80% overall coverage
 
