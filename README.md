@@ -79,15 +79,15 @@ Existing tools with linear interpolation achieve **30-50% coverage** — many ph
 
 ### Option A: Download Pre-built Package (Recommended)
 
-Download from [GitHub Actions](../../actions/workflows/build.yml) → click the latest successful run → scroll down to **Artifacts**:
+Download from [GitHub Releases](../../releases) (latest: v0.20.0):
 
 | Platform | File |
 |----------|------|
-| macOS | `GPS-Photo-Tracker-v0.19.0-macos.zip` |
-| Windows | `GPS-Photo-Tracker-v0.19.0-windows.zip` |
-| Linux | `GPS-Photo-Tracker-v0.19.0-linux.tar.gz` |
+| macOS | `GPS-Photo-Tracker-v0.20.0-macos.zip` |
+| Windows | `GPS-Photo-Tracker-v0.20.0-windows.zip` |
+| Linux | `GPS-Photo-Tracker-v0.20.0-linux.tar.gz` |
 
-Download, unzip, and double-click to run. No Python or any other software needed.
+Download from [GitHub Releases](../../releases), unzip, and double-click to run. No Python or any other software needed.
 
 ### Option B: Run from Source
 
@@ -158,9 +158,10 @@ pytest tests/unit/test_gps_matcher.py  # Single module
 
 | Layer | Target | Current |
 |-------|--------|---------|
-| Core (algorithm/IO) | >= 85% | ~95% |
-| Service | >= 80% | 86% |
-| Overall | >= 75% | ~80% |
+| Core (algorithm/IO) | >= 90% | 100% |
+| Service | >= 85% | 100% |
+| GUI | >= 80% | 100% |
+| Overall | >= 95% | 99.80% |
 
 ### Project Structure
 
@@ -171,7 +172,7 @@ src/gps_photo_tracker/
 ├── gui/            # PySide6 GUI: main window, panels, dialogs
 └── logging_/       # Structured logging
 tests/
-├── unit/           # 565+ unit tests
+├── unit/           # 859 unit tests
 ├── integration/    # End-to-end tests
 └── batch/          # Large-scale batch tests
 ```
