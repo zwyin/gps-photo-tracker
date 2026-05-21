@@ -1,8 +1,18 @@
 # GPS Photo Tracker
 
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-859%20passing-brightgreen.svg)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-99.80%25-brightgreen.svg)]()
+[![Platform](https://img.shields.io/badge/platform-Win%20%7C%20Mac%20%7C%20Linux-lightgrey.svg)]()
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)]()
+
 [English](../README.md)
 
 批量给照片打 GPS 地理标签——根据 GPS 轨迹（GPX/KML/TCX），自动为没有内置 GPS 的相机照片写入 EXIF 坐标。
+
+<!-- TODO: 添加截图或演示 GIF
+![截图](images/screenshot_zh.png)
+-->
 
 ## 为什么需要这个工具
 
@@ -13,8 +23,6 @@
 现有工具用线性插值匹配，覆盖率 **30-50%**，大量照片无法覆盖。GPS Photo Tracker 独有的**二轮邻居跟随**算法将覆盖率提升至 **~90%**，参数可调，平衡准确性和覆盖率。
 
 **目标用户**：用手机/智能手表记录轨迹但用相机拍照的旅行者。需要按地点管理照片的摄影师。需要给考察照片打地理标签的野外工作者。
-
-**关键词**：照片定位, GPS标签, 地理标记, 照片加GPS, GPX匹配, EXIF GPS, 照片地理信息, 相机GPS, 照片GPS标注
 
 ## 竞品对比
 
