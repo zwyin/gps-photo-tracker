@@ -10,9 +10,7 @@
 
 Batch geotag photos using GPS tracks (GPX/KML/TCX) — automatically write EXIF GPS coordinates for camera photos without built-in GPS.
 
-<!-- TODO: Add screenshot or demo GIF here for better conversion
-![Screenshot](docs/images/screenshot.png)
--->
+![GPS Photo Tracker](docs/images/screenshot.png)
 
 ## Why This Tool
 

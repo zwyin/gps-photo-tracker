@@ -10,9 +10,7 @@
 
 批量给照片打 GPS 地理标签——根据 GPS 轨迹（GPX/KML/TCX），自动为没有内置 GPS 的相机照片写入 EXIF 坐标。
 
-<!-- TODO: 添加截图或演示 GIF
-![截图](images/screenshot_zh.png)
--->
+![GPS Photo Tracker](images/screenshot.png)
 
 ## 为什么需要这个工具
 
