@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Windows crash on startup ("Missing dependencies: Pillow")**: Removed the unused `Pillow` dependency. Pillow was declared in `pyproject.toml`, checked at startup in `__main__.py`, and listed in the PyInstaller spec, but never actually imported — thumbnails use PySide6's `QPixmap` and EXIF writing uses `piexif` (standalone, no Pillow needed). On macOS the spec bundled it anyway; on Windows/Linux the build path bypasses the spec, so PyInstaller dropped the unused library and the startup dependency check then failed. Removing Pillow fixes the Windows crash and shrinks every installer.
+- **Windows crash on startup ("Missing dependencies: Pillow")**: Moved `Pillow` out of runtime dependencies into the `dev`/test extra. Pillow had been declared as a runtime dependency and checked at startup in `__main__.py`, but the production app never imports it — thumbnails use PySide6's `QPixmap` and EXIF writing uses `piexif` (standalone). Pillow is only used by the test suite to build JPEG fixtures (`PIL.Image`). On macOS the spec bundled it anyway; on Windows/Linux the build path bypasses the spec, so PyInstaller dropped the unused library and the startup check then failed, crashing the app. Moving it to dev-only fixes the Windows crash, keeps the test suite working, and shrinks every installer.
 
 ## [0.19.0] - 2026-05-18
 

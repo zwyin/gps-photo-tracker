@@ -21,6 +21,11 @@ dev = [
     "pytest-cov>=4.0",
     "pytest-qt>=4.0",
     "hypothesis>=6.0",
+    # Pillow is a TEST-only dependency: the test suite imports PIL.Image to
+    # build JPEG fixtures. The production app never imports PIL (thumbnails use
+    # PySide6 QPixmap; EXIF uses piexif). Keeping Pillow out of runtime
+    # dependencies fixed the Windows packaged-build crash.
+    "Pillow>=10.0.0",
 ]
 
 [project.scripts]

@@ -126,14 +126,24 @@ class TestCheckDependencies:
             result = _check_dependencies()
         assert "PIL" not in result
 
-    def test_pillow_not_declared_as_dependency(self):
-        """Pillow must not appear in pyproject.toml dependencies."""
+    def test_pillow_is_test_only_dependency(self):
+        """Pillow is a TEST-only dependency (the suite imports PIL.Image to
+        build JPEG fixtures), NOT a runtime dependency. The production app
+        never imports PIL (thumbnails use PySide6 QPixmap; EXIF uses piexif).
+        Keeping Pillow out of runtime deps fixed the Windows packaged-build
+        crash where the startup check demanded a library PyInstaller never
+        bundled. It must stay in the dev extra so tests can import PIL.
+        """
         import tomllib
         pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
         with open(pyproject, "rb") as f:
             data = tomllib.load(f)
-        deps = data["project"]["dependencies"]
-        assert not any("Pillow" in d for d in deps)
+        runtime = data["project"]["dependencies"]
+        dev = data["project"]["optional-dependencies"]["dev"]
+        assert not any("Pillow" in d for d in runtime), \
+            "Pillow must not be a runtime dependency"
+        assert any("Pillow" in d for d in dev), \
+            "Pillow must remain in dev/test deps for JPEG fixtures"
 
 
 class TestMain:
