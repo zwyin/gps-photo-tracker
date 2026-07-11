@@ -20,4 +20,5 @@ docs/dev-notes/
 .claude/
 .superpowers/
 .next/
+.codegraph/
 tests/unit/test_generic_source.py
