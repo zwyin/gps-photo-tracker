@@ -1065,7 +1065,7 @@ class TestPhotoPreviewShowPhoto:
         img = tmp_path / "test.jpg"
         QPixmap(40, 40).save(str(img))
 
-        cache_key = f"thumb:{img}"
+        cache_key = f"preview:{img}"
         QPixmapCache.insert(cache_key, QPixmap(20, 20))
 
         monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 1)
@@ -1082,7 +1082,7 @@ class TestPhotoPreviewShowPhoto:
         img = tmp_path / "rotated.jpg"
         QPixmap(40, 60).save(str(img))
 
-        cache_key = f"thumb:{img}"
+        cache_key = f"preview:{img}"
         QPixmapCache.insert(cache_key, QPixmap(20, 20))
 
         monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 6)
@@ -1202,7 +1202,7 @@ class TestPhotoPreviewPreload:
 
         img = tmp_path / "cached.jpg"
         QPixmap(30, 30).save(str(img))
-        QPixmapCache.insert(f"thumb:{img}", QPixmap(20, 20))
+        QPixmapCache.insert(f"preview:{img}", QPixmap(20, 20))
 
         timers = []
         monkeypatch.setattr("PySide6.QtCore.QTimer.singleShot", lambda ms, fn: timers.append((ms, fn)))
@@ -1217,13 +1217,13 @@ class TestPhotoPreviewPreload:
 
         img = tmp_path / "preload.jpg"
         QPixmap(60, 40).save(str(img))
-        QPixmapCache.remove(f"thumb:{img}")
+        QPixmapCache.remove(f"preview:{img}")
 
         monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 1)
 
         preview = main_window._photo_preview
         preview._preload_one(str(img))
-        cached = QPixmapCache.find(f"thumb:{img}")
+        cached = QPixmapCache.find(f"preview:{img}")
         assert cached is not None
 
     def test_preload_one_with_orientation(self, main_window, monkeypatch, tmp_path):
@@ -1232,14 +1232,14 @@ class TestPhotoPreviewPreload:
 
         img = tmp_path / "orient_pre.jpg"
         QPixmap(60, 40).save(str(img))
-        QPixmapCache.remove(f"thumb:{img}")
+        QPixmapCache.remove(f"preview:{img}")
 
         monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 3)
         monkeypatch.setattr(orient_mod.OrientationReader, "apply_orientation", lambda px, o: px)
 
         preview = main_window._photo_preview
         preview._preload_one(str(img))
-        cached = QPixmapCache.find(f"thumb:{img}")
+        cached = QPixmapCache.find(f"preview:{img}")
         assert cached is not None
 
     def test_preload_one_skips_cached(self, main_window, monkeypatch, tmp_path):
@@ -1247,7 +1247,7 @@ class TestPhotoPreviewPreload:
 
         img = tmp_path / "already.jpg"
         QPixmap(30, 30).save(str(img))
-        QPixmapCache.insert(f"thumb:{img}", QPixmap(20, 20))
+        QPixmapCache.insert(f"preview:{img}", QPixmap(20, 20))
 
         timers = []
         monkeypatch.setattr("PySide6.QtCore.QTimer.singleShot", lambda ms, fn: timers.append((ms, fn)))
@@ -2318,22 +2318,24 @@ class TestLogViewerDialog:
 
 class TestPhotoPreviewFullPixmapNull:
 
-    def test_show_photo_cached_null_pixmap(self, main_window, monkeypatch, tmp_path):
-        """Cached key exists but QPixmap(path) returns null → _full_pixmap = None."""
+    def test_show_photo_cached_null_pixmap(self, main_window, tmp_path):
+        """A NULL pixmap sitting in the cache is treated as a miss (not displayed):
+        show_photo schedules an async reload. A *valid* cache entry, by contrast,
+        is reused directly — the v0.22.0 fast path (see test_photo_preview)."""
         from PySide6.QtGui import QPixmap, QPixmapCache
-        from gps_photo_tracker.core import orientation as orient_mod
 
         bad = tmp_path / "bad.jpg"
         bad.write_bytes(b"notimage")
 
-        cache_key = f"thumb:{bad}"
-        QPixmapCache.insert(cache_key, QPixmap(20, 20))
-
-        monkeypatch.setattr(orient_mod.OrientationReader, "get_orientation", lambda p: 1)
+        cache_key = f"preview:{bad}"
+        QPixmapCache.insert(cache_key, QPixmap())  # explicitly NULL pixmap
 
         preview = main_window._photo_preview
-        preview.show_photo(str(bad), "null test")
+        preview._full_pixmap = None
+        preview.show_photo(str(bad), "null cache")
+        # NULL cache entry → miss path: _full_pixmap stays None, reload scheduled
         assert preview._full_pixmap is None
+        assert preview._thumb_label.text() == "加载中..."
 
     def test_rescale_with_null_pixmap_early_return(self, main_window):
         """_rescale with null _full_pixmap returns without error."""
