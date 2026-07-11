@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-07-11
+
+### Fixed
+
+- **Photo browsing lag on Windows (↑/↓ keys)**: Browsing photos in the result list was slow on Windows (~0.5s/photo; macOS felt smooth). Root cause: the photo preview re-decoded the full-resolution JPEG from disk on every selection change, discarding its own thumbnail cache. Fix: decode each photo once to a 1024px EXIF-orientation-corrected pixmap and reuse it on cache hit — repeated views are pure memory hits (no decode, no EXIF read, no disk/Defender scan). Adjacent-photo preload now populates the same cache, so forward browsing within ±3 is smooth too. Also namespaced the pixmap cache (`preview:` vs the photo browser's `thumb:`) and set the cache limit once at startup, since `QPixmapCache` is process-global.
+
 ## [0.21.0] - 2026-07-11
 
 ### Fixed
