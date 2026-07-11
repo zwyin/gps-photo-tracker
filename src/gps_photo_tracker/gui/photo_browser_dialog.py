@@ -91,7 +91,8 @@ class PhotoBrowserDialog(QDialog):
         # Initial populate
         self._filtered: list[dict] = list(self._photos)
         self._pending_thumb_path: str = ""
-        QPixmapCache.setCacheLimit(51200)  # 50 MB
+        # QPixmapCache size limit is set once at app startup (run_app); this
+        # dialog must not override it (process-global singleton — v0.22.0 M2).
         self._populate_table()
 
     def _populate_table(self):
