@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Windows crash on startup ("Missing dependencies: Pillow")**: Removed the unused `Pillow` dependency. Pillow was declared in `pyproject.toml`, checked at startup in `__main__.py`, and listed in the PyInstaller spec, but never actually imported — thumbnails use PySide6's `QPixmap` and EXIF writing uses `piexif` (standalone, no Pillow needed). On macOS the spec bundled it anyway; on Windows/Linux the build path bypasses the spec, so PyInstaller dropped the unused library and the startup dependency check then failed. Removing Pillow fixes the Windows crash and shrinks every installer.
+
 ## [0.19.0] - 2026-05-18
 
 ### Added

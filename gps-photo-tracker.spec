@@ -53,7 +53,6 @@ a = Analysis(
         "gpxpy",
         "geopy",
         "geopy.distance",
-        "PIL",
         "tenacity",
     ],
     hookspath=[],

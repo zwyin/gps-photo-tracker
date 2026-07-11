@@ -70,7 +70,6 @@ def _check_dependencies():
         "PySide6": "PySide6>=6.6",
         "piexif": "piexif>=1.1.3",
         "gpxpy": "gpxpy>=1.6.0",
-        "PIL": "Pillow>=10.0.0",
         "geopy": "geopy>=2.4.0",
         "tenacity": "tenacity>=8.0.0",
     }
