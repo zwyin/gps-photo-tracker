@@ -118,7 +118,7 @@ cd gps-photo-tracker
 pip install -e .
 ```
 
-This automatically installs all required packages: PySide6, piexif, gpxpy, Pillow, geopy, tenacity.
+This automatically installs all required packages: PySide6, piexif, gpxpy, geopy, tenacity.
 
 **Step 4 — Launch**
 
@@ -261,4 +261,4 @@ This project is licensed under the [GNU General Public License v3.0](LICENSE).
 ## Acknowledgments
 
 - GPS matching algorithm validated against 1,832 real photos with 83%+ success rate
-- Built with [PySide6](https://doc.qt.io/qtforpython-6/), [piexif](https://github.com/hMatoba/Piexif), [gpxpy](https://github.com/tkrajina/gpxpy), [Pillow](https://python-pillow.org/), and [geopy](https://github.com/geopy/geopy)
+- Built with [PySide6](https://doc.qt.io/qtforpython-6/), [piexif](https://github.com/hMatoba/Piexif), [gpxpy](https://github.com/tkrajina/gpxpy), and [geopy](https://github.com/geopy/geopy)

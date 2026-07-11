@@ -107,6 +107,44 @@ class TestCheckDependencies:
             assert "geopy" in result
             assert "tenacity" in result
 
+    def test_pillow_not_checked_even_if_missing(self):
+        """Pillow must NOT be treated as a required dependency. It is never
+        imported by the app (thumbnails use PySide6 QPixmap; EXIF uses piexif,
+        which is standalone). Requiring it crashed the Windows build, where
+        PyInstaller dropped the unused library and this check then failed with
+        "Missing dependencies: Pillow". Regression guard: even if PIL were
+        uninstallable, it must not be flagged as missing.
+        """
+        real_import = builtins.__import__
+
+        def fake_import(name, *a, **kw):
+            if name == "PIL":
+                raise ImportError("No module named 'PIL'")
+            return real_import(name, *a, **kw)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            result = _check_dependencies()
+        assert "PIL" not in result
+
+    def test_pillow_is_test_only_dependency(self):
+        """Pillow is a TEST-only dependency (the suite imports PIL.Image to
+        build JPEG fixtures), NOT a runtime dependency. The production app
+        never imports PIL (thumbnails use PySide6 QPixmap; EXIF uses piexif).
+        Keeping Pillow out of runtime deps fixed the Windows packaged-build
+        crash where the startup check demanded a library PyInstaller never
+        bundled. It must stay in the dev extra so tests can import PIL.
+        """
+        import tomllib
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        with open(pyproject, "rb") as f:
+            data = tomllib.load(f)
+        runtime = data["project"]["dependencies"]
+        dev = data["project"]["optional-dependencies"]["dev"]
+        assert not any("Pillow" in d for d in runtime), \
+            "Pillow must not be a runtime dependency"
+        assert any("Pillow" in d for d in dev), \
+            "Pillow must remain in dev/test deps for JPEG fixtures"
+
 
 class TestMain:
     def test_main_catches_exception(self):

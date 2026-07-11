@@ -118,7 +118,7 @@ cd gps-photo-tracker
 pip install -e .
 ```
 
-这条命令会自动安装所有需要的包：PySide6、piexif、gpxpy、Pillow、geopy、tenacity。
+这条命令会自动安装所有需要的包：PySide6、piexif、gpxpy、geopy、tenacity。
 
 **第 4 步 — 启动**
 
@@ -258,4 +258,4 @@ python scripts/build.py --clean  # 清理构建
 ## 致谢
 
 - GPS 匹配算法经过 1,832 张真实照片验证，成功率 83%+
-- 使用 [PySide6](https://doc.qt.io/qtforpython-6/)、[piexif](https://github.com/hMatoba/Piexif)、[gpxpy](https://github.com/tkrajina/gpxpy)、[Pillow](https://python-pillow.org/)、[geopy](https://github.com/geopy/geopy) 构建
+- 使用 [PySide6](https://doc.qt.io/qtforpython-6/)、[piexif](https://github.com/hMatoba/Piexif)、[gpxpy](https://github.com/tkrajina/gpxpy)、[geopy](https://github.com/geopy/geopy) 构建
