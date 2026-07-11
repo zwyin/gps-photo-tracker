@@ -1,8 +1,16 @@
 # GPS Photo Tracker
 
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-859%20passing-brightgreen.svg)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-99.80%25-brightgreen.svg)]()
+[![Platform](https://img.shields.io/badge/platform-Win%20%7C%20Mac%20%7C%20Linux-lightgrey.svg)]()
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)]()
+
 [中文文档](docs/README_zh.md)
 
 Batch geotag photos using GPS tracks (GPX/KML/TCX) — automatically write EXIF GPS coordinates for camera photos without built-in GPS.
+
+![GPS Photo Tracker](docs/images/screenshot.png)
 
 ## Why This Tool
 
@@ -13,8 +21,6 @@ Most cameras (unlike phones and drones) don't record GPS. Without geotags, photo
 Existing tools with linear interpolation achieve **30-50% coverage** — many photos remain unmatched. GPS Photo Tracker adds a **two-pass neighbor-following** algorithm that recovers unmatched photos by following their nearest successful neighbor, boosting coverage to **~90%**. Parameters are adjustable to balance accuracy vs. coverage.
 
 **Target users**: Travelers shooting with a camera + tracking GPS on phone/watch. Photographers needing location-based organization. Field researchers geotagging survey photos.
-
-**Keywords**: geotag, GPS tag, EXIF, photo geotagging, GPX, GPS photo, geocoding photos, photo location tag, camera GPS
 
 ## Comparison with Other Tools
 
