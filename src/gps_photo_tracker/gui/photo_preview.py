@@ -1,68 +1,95 @@
-"""Photo preview widget with async thumbnail loading."""
+"""Photo preview widget: adaptive image + info text in a draggable splitter."""
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QSettings
 from PySide6.QtGui import QImageReader, QPixmap, QPixmapCache
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSplitter, QWidget
 
-# Longest side of the cached preview pixmap. Large enough for the preview pane
-# (~30% of window width, incl. high-DPI). Decoded ONCE via QImageReader's
-# *native* JPEG downscale (setScaledSize) — the decoder produces the target
-# size directly instead of decoding full-res then scaling, which is far faster
-# on Windows (libjpeg). Result is cached so repeated views never touch disk.
-#
-# v0.22.0 fixed cache-HIT lag but the cache-MISS path still did a full decode
-# + scale on Windows → "加载中" flash + slowness on forward browse. v0.23.1
-# switches to QImageReader native downscale (fast miss) and drops the "加载中"
-# flash (keep showing the previous photo until the new one is ready).
-#
-# Cache key `preview:{path}` is namespaced vs PhotoBrowserDialog's `thumb:`
-# (QPixmapCache is process-global — v0.22.0 review).
+# Longest side of the cached preview pixmap. Decoded ONCE via QImageReader's
+# native JPEG downscale (setScaledSize) — far faster on Windows than
+# decode-full-then-scale. Cached so repeated views never touch disk.
+# (v0.22.0 fixed cache-HIT lag; v0.23.1 fixed cache-MISS speed; v0.24.0 made
+# the preview adaptive: image + info in a draggable splitter, image fills its
+# slot on both width and height — no more 30% fixed-width cap.)
 _PREVIEW_MAX_PX = 1024
+_SETTINGS_ORG = "GPSPhotoTracker"
+_SETTINGS_APP = "GPSPhotoTracker"
+_SPLITTER_STATE_KEY = "preview_splitter_state"
 
 
 class PhotoPreview(QWidget):
-    """Thumbnail preview + info label, with QPixmapCache async loading and dynamic resize."""
+    """Image preview + info text in a horizontal QSplitter.
+
+    Drag the splitter handle to resize the image vs the info text. The image
+    fills its slot (adaptive width AND height — v0.24.0 removed the 30%
+    fixed-width cap). Splitter state persists across runs via QSettings.
+
+    Cache key `preview:{path}` is namespaced vs PhotoBrowserDialog's `thumb:`
+    (QPixmapCache is process-global — v0.22.0 review).
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # QPixmapCache size limit is set ONCE at app startup (run_app), not here
-        # — it's process-global (v0.22.0 review, M2).
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter.setHandleWidth(4)
+        self._splitter.setStyleSheet(
+            "QSplitter::handle { background: #c0c0c0; }"
+            "QSplitter::handle:hover { background: #4a9eff; }"
+        )
+        outer.addWidget(self._splitter)
 
         self._thumb_label = QLabel()
         self._thumb_label.setMinimumSize(80, 80)
         self._thumb_label.setStyleSheet("background: #e8e8e8; border: 1px solid #ccc;")
         self._thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self._thumb_label)
+        self._splitter.addWidget(self._thumb_label)
 
         self._info_label = QLabel("选中照片查看预览")
         self._info_label.setWordWrap(True)
-        layout.addWidget(self._info_label, stretch=1)
+        self._info_label.setMinimumWidth(200)
+        self._info_label.setMaximumWidth(360)
+        self._splitter.addWidget(self._info_label)
+
+        # Image expands; info keeps a fixed-ish width.
+        self._splitter.setStretchFactor(0, 1)
+        self._splitter.setStretchFactor(1, 0)
+
+        self._splitter.splitterMoved.connect(self._on_splitter_moved)
 
         self._pending_thumb_path: str = ""
         self._full_pixmap: QPixmap | None = None
 
+        # Restore saved splitter proportions (image-vs-info widths).
+        settings = QSettings(_SETTINGS_ORG, _SETTINGS_APP)
+        state = settings.value(_SPLITTER_STATE_KEY)
+        if state:
+            self._splitter.restoreState(state)
+
+    def _on_splitter_moved(self, *_):
+        """Re-scale the image to the new thumb-slot size and persist state."""
+        self._rescale()
+        QSettings(_SETTINGS_ORG, _SETTINGS_APP).setValue(
+            _SPLITTER_STATE_KEY, self._splitter.saveState()
+        )
+
     def show_photo(self, photo_path: str, info_text: str):
         """Update info immediately, load thumbnail asynchronously."""
         self._info_label.setText(info_text)
-
         if not photo_path:
             self._thumb_label.clear()
             self._full_pixmap = None
             return
-
         cache_key = f"preview:{photo_path}"
         cached = QPixmapCache.find(cache_key)
         if cached is not None and not cached.isNull():
-            # Cache hit: reuse the already-decoded preview pixmap. MUST NOT
-            # re-decode the full JPEG here — that was the browse-lag root cause.
+            # Cache hit: reuse the already-decoded preview pixmap.
             self._full_pixmap = cached
             self._rescale()
         else:
-            # Cache miss: keep showing the CURRENT photo until the new one is
-            # ready (don't flash "加载中..." — it clears the image and feels
-            # janky/slow). Just schedule the async decode; it swaps in when done.
+            # Cache miss: keep showing the current photo until the new one is
+            # ready (no "加载中..." flash). Schedule the async decode.
             self._pending_thumb_path = photo_path
             QTimer.singleShot(10, self._load_thumbnail)
 
@@ -73,18 +100,28 @@ class PhotoPreview(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        thumb_w = max(int(self.width() * 0.3), 80)
-        self._thumb_label.setFixedWidth(thumb_w)
         if self._full_pixmap and not self._full_pixmap.isNull():
             self._rescale()
 
     def _rescale(self):
+        """Scale _full_pixmap to the thumb label's current size (KeepAspectRatio).
+
+        Falls back to the label's minimum size when it hasn't been laid out yet
+        (e.g. in tests / before first show), so a cache-hit show_photo still
+        produces a visible pixmap.
+        """
         if not self._full_pixmap or self._full_pixmap.isNull():
             return
-        thumb_w = max(int(self.width() * 0.3), 80)
-        h = self.height()
+        tw = self._thumb_label.width()
+        th = self._thumb_label.height()
+        if tw <= 0:
+            tw = self._thumb_label.minimumWidth()
+        if th <= 0:
+            th = self._thumb_label.minimumHeight()
+        if tw <= 0 or th <= 0:
+            return
         scaled = self._full_pixmap.scaled(
-            thumb_w, h,
+            tw, th,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
@@ -92,10 +129,8 @@ class PhotoPreview(QWidget):
 
     def _decode_preview(self, path: str) -> QPixmap | None:
         """Decode JPEG directly to ≤ _PREVIEW_MAX_PX via QImageReader's native
-        downscale (setScaledSize), apply EXIF orientation. Runs once per photo;
-        the result is cached. Native downscale is dramatically faster than
-        decode-full-res-then-scale, especially on Windows (libjpeg DCT scaling).
-        """
+        downscale, apply EXIF orientation. Native downscale is far faster than
+        decode-full-then-scale, especially on Windows (libjpeg DCT scaling)."""
         reader = QImageReader(str(path))
         if not reader.canRead():
             return None
@@ -124,7 +159,6 @@ class PhotoPreview(QWidget):
                 continue
             if QPixmapCache.find(f"preview:{path}"):
                 continue
-            # Stagger loads so the immediately-adjacent photo loads first
             QTimer.singleShot(50 + i * 30, lambda p=path: self._preload_one(p))
 
     def _preload_one(self, path: str):
@@ -139,8 +173,7 @@ class PhotoPreview(QWidget):
         if not path:
             return
         # Dedupe rapid navigation: if another scheduled timer already decoded &
-        # cached this path, skip the redundant decode. Null-pixmap guard mirrors
-        # show_photo so a stray NULL entry can't pin the UI.
+        # cached this path, skip the redundant decode.
         cached = QPixmapCache.find(f"preview:{path}")
         if cached is not None and not cached.isNull():
             return

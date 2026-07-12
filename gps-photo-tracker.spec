@@ -106,8 +106,8 @@ app = BUNDLE(
     bundle_identifier="com.gps-photo-tracker.app",
     info_plist={
         "CFBundleName": "GPS Photo Tracker",
-        "CFBundleShortVersionString": "0.23.1",
-        "CFBundleVersion": "0.23.1",
+        "CFBundleShortVersionString": "0.24.0",
+        "CFBundleVersion": "0.24.0",
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "11.0",
         "CFBundleDocumentTypes": [
