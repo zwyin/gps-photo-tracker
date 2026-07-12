@@ -138,8 +138,8 @@ class TestPreviewSplitter:
         assert sp is preview._splitter
         assert sp.widget(0) is preview._thumb_label
         assert sp.widget(1) is preview._info_label
-        assert preview._info_label.minimumWidth() >= 200
-        assert preview._info_label.maximumWidth() <= 360
+        assert preview._info_label.minimumHeight() >= 30
+        assert preview._info_label.maximumHeight() <= 120
 
     def test_rescale_uses_label_size_not_30_percent(self, preview):
         """_rescale scales to _thumb_label's actual size (not 30% of widget)."""

@@ -17,11 +17,9 @@ _SPLITTER_STATE_KEY = "preview_splitter_state"
 
 
 class PhotoPreview(QWidget):
-    """Image preview + info text in a horizontal QSplitter.
-
-    Drag the splitter handle to resize the image vs the info text. The image
-    fills its slot (adaptive width AND height — v0.24.0 removed the 30%
-    fixed-width cap). Splitter state persists across runs via QSettings.
+    """Image preview (top, full-width, expanding) + info text (bottom, compact)
+    in a vertical QSplitter. The three right-panel sections — photo list,
+    preview image, file info — are vertically stacked; drag handles to resize.
 
     Cache key `preview:{path}` is namespaced vs PhotoBrowserDialog's `thumb:`
     (QPixmapCache is process-global — v0.22.0 review).
@@ -32,7 +30,7 @@ class PhotoPreview(QWidget):
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
 
-        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter = QSplitter(Qt.Orientation.Vertical)
         self._splitter.setHandleWidth(4)
         self._splitter.setStyleSheet(
             "QSplitter::handle { background: #c0c0c0; }"
@@ -48,8 +46,8 @@ class PhotoPreview(QWidget):
 
         self._info_label = QLabel("选中照片查看预览")
         self._info_label.setWordWrap(True)
-        self._info_label.setMinimumWidth(200)
-        self._info_label.setMaximumWidth(360)
+        self._info_label.setMinimumHeight(30)
+        self._info_label.setMaximumHeight(120)
         self._splitter.addWidget(self._info_label)
 
         # Image expands; info keeps a fixed-ish width.

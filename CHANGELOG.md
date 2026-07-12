@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-07-12
+
+### Changed
+
+- **预览布局改为纵向三段**：照片列表 / 预览图 / 文件信息 从左右并排改为**从上到下纵向排列**。预览图获得全宽（最大化），文件信息移至底部（紧凑 1-2 行）。三个区域可分别拖动分割条调整大小。
+
 ## [0.24.0] - 2026-07-12
 
 ### Changed
