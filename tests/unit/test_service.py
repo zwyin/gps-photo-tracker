@@ -1185,6 +1185,7 @@ class TestParallelWrite:
                     on_result(WriteResult(
                         success=True, filename=t.match_result.photo.filename,
                         dest_path=output / t.match_result.photo.filename,
+                        photo_path=str(t.match_result.photo.path),
                     ))
                 on_progress(len(tasks), len(tasks))
             return []
@@ -1229,9 +1230,11 @@ class TestParallelWrite:
 
         def fake_submit_all_with_failure(tasks, on_progress=None, on_result=None, cancel=None):
             if on_result:
-                on_result(WriteResult(
-                    success=False, filename="photo.jpg", error="write failed",
-                ))
+                for t in tasks:
+                    on_result(WriteResult(
+                        success=False, filename="photo.jpg", error="write failed",
+                        photo_path=str(t.match_result.photo.path),
+                    ))
             return []
 
         mock_instance = MagicMock()
@@ -1890,6 +1893,7 @@ class TestParallelWriteWithLogger:
                     on_result(WriteResult(
                         success=True, filename=t.match_result.photo.filename,
                         dest_path=output / t.match_result.photo.filename,
+                        photo_path=str(t.match_result.photo.path),
                     ))
                 on_progress(len(tasks), len(tasks))
             return []
@@ -1928,6 +1932,7 @@ class TestParallelWriteWithLogger:
                     on_result(WriteResult(
                         success=False, filename=t.match_result.photo.filename,
                         error=OSError("parallel write failed"),
+                        photo_path=str(t.match_result.photo.path),
                     ))
             return []
 
@@ -1967,6 +1972,7 @@ class TestParallelWriteWithLogger:
                     on_result(WriteResult(
                         success=False, filename=t.match_result.photo.filename,
                         error=OSError("failed"),
+                        photo_path=str(t.match_result.photo.path),
                     ))
             return []
 
@@ -2121,6 +2127,7 @@ class TestParallelProgressCallback:
                     on_result(WriteResult(
                         success=True, filename=t.match_result.photo.filename,
                         dest_path=output / t.match_result.photo.filename,
+                        photo_path=str(t.match_result.photo.path),
                     ))
             return []
 
@@ -2167,6 +2174,7 @@ class TestParallelFallbackCopyFail:
                     on_result(WriteResult(
                         success=False, filename=t.match_result.photo.filename,
                         error=OSError("parallel write failed"),
+                        photo_path=str(t.match_result.photo.path),
                     ))
             return []
 
@@ -2244,6 +2252,7 @@ class TestParallelCheckpoint:
                     on_result(WriteResult(
                         success=True, filename=t.match_result.photo.filename,
                         dest_path=output / t.match_result.photo.filename,
+                        photo_path=str(t.match_result.photo.path),
                     ))
             return []
 
@@ -2281,5 +2290,175 @@ class TestScanWithInputSelection:
         gpx_file.write_text(gpx, encoding="utf-8")
         segs = GPSTaggingService().scan_gpx(InputSelection.of([gpx_file]))
         assert len(segs) >= 1 and len(segs[0].points) >= 1
+
+
+class TestMultiDirSameNameNoAlias:
+    """Round-2 review MAJOR: same-name photos in different selected directories must
+    not collide in the parallel-write / checkpoint path (keyed by full photo path)."""
+
+    def test_parallel_write_same_name_different_dir_no_alias(self, tmp_path):
+        """workers=2, two IMG.jpg in different dirs → both written, distinct dests, no aliasing.
+
+        Pre-fix this would either silently omit a photo (broken task_by_path lookup when
+        WriteResult carried only filename) or alias the two via task_by_filename.
+        """
+        from unittest.mock import patch
+
+        d1 = tmp_path / "d1"
+        d2 = tmp_path / "d2"
+        d1.mkdir()
+        d2.mkdir()
+        out = tmp_path / "out"
+        out.mkdir()
+
+        # Two same-named JPEGs with EXIF timestamps in different dirs
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(d1 / "IMG.jpg"), "JPEG", exif=piexif.dump(exif))
+        img.save(str(d2 / "IMG.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo1 = PhotoInfo(
+            path=d1 / "IMG.jpg", filename="IMG.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        photo2 = PhotoInfo(
+            path=d2 / "IMG.jpg", filename="IMG.jpg",
+            timestamp=2000.0, has_gps=False,
+        )
+        mr1 = MatchResult(
+            photo=photo1, success=True, gps=GPSInfo(31.0, 121.0),
+            method="interpolated", time_diff=10.0,
+        )
+        mr2 = MatchResult(
+            photo=photo2, success=True, gps=GPSInfo(32.0, 122.0),
+            method="interpolated", time_diff=10.0,
+        )
+
+        opts = ProcessOptions(
+            mode=ProcessMode.COPY, output_dir=out,
+            keep_structure=True, workers=2,
+        )
+
+        # Mock GPSMatcher (we test the write path, not matching) but let the
+        # REAL BatchProcessor + REAL EXIFWriter run — that's what catches the bug.
+        with patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher:
+            MockMatcher.return_value.match.return_value = [mr1, mr2]
+            MockMatcher.return_value.auto_follow.return_value = 0
+            service = GPSTaggingService()
+            result = service.process([], [photo1, photo2], MatcherConfig(), opts, photo_dir=tmp_path)
+
+        # Both photos written, no silent omission
+        written = list(out.rglob("IMG.jpg"))
+        assert len(written) == 2, f"expected 2 outputs, got {len(written)}: {written}"
+        # Distinct destination directories — no aliasing
+        assert {str(w.parent) for w in written} == {str(out / "d1"), str(out / "d2")}
+        # Both succeeded
+        assert result.matched == 2
+        assert result.failed == 0
+
+    def test_parallel_write_same_name_failure_fallback_no_omission(self, tmp_path):
+        """Round-2 MAJOR guard: workers=2, two same-name photos, one write FAILS.
+        The fallback copy must still emit the failed photo to its dest — a broken
+        feedback lookup (task_by_path.get(wr.filename)) would silently drop it.
+        """
+        from unittest.mock import patch
+
+        d1 = tmp_path / "d1"
+        d2 = tmp_path / "d2"
+        d1.mkdir()
+        d2.mkdir()
+        out = tmp_path / "out"
+        out.mkdir()
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(d1 / "IMG.jpg"), "JPEG", exif=piexif.dump(exif))
+        img.save(str(d2 / "IMG.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo1 = PhotoInfo(
+            path=d1 / "IMG.jpg", filename="IMG.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        photo2 = PhotoInfo(
+            path=d2 / "IMG.jpg", filename="IMG.jpg",
+            timestamp=2000.0, has_gps=False,
+        )
+        mr1 = MatchResult(
+            photo=photo1, success=True, gps=GPSInfo(31.0, 121.0),
+            method="interpolated", time_diff=10.0,
+        )
+        mr2 = MatchResult(
+            photo=photo2, success=True, gps=GPSInfo(32.0, 122.0),
+            method="interpolated", time_diff=10.0,
+        )
+
+        opts = ProcessOptions(
+            mode=ProcessMode.COPY, output_dir=out,
+            keep_structure=True, workers=2,
+        )
+
+        # Force write failure for the d1 photo; the fallback copy must still emit it.
+        real_write = EXIFWriter.write_gps
+
+        def failing_write(src, dst, gps):
+            if str(src) == str(d1 / "IMG.jpg"):
+                raise OSError("simulated write failure")
+            return real_write(src, dst, gps)
+
+        with patch("gps_photo_tracker.core.concurrency.EXIFWriter.write_gps", side_effect=failing_write), \
+             patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher:
+            MockMatcher.return_value.match.return_value = [mr1, mr2]
+            MockMatcher.return_value.auto_follow.return_value = 0
+            service = GPSTaggingService()
+            service.process([], [photo1, photo2], MatcherConfig(), opts, photo_dir=tmp_path)
+
+        # CRITICAL: both photos must be present in output — the failed one via fallback copy.
+        # A broken feedback lookup would skip the fallback and silently omit d1/IMG.jpg.
+        assert (out / "d1" / "IMG.jpg").exists(), "failed photo must be copied via fallback"
+        assert (out / "d2" / "IMG.jpg").exists(), "successful photo must be written"
+
+
+    def test_sequential_checkpoint_marked_by_full_path(self, tmp_path):
+        """Sequential write (workers=1) checkpoint entry is the full photo path, not filename.
+
+        Pre-fix this stored the bare filename; a same-name photo in another directory
+        would be falsely skipped on resume.
+        """
+        from gps_photo_tracker.core.checkpoint import CheckpointManager
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        match_result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0),
+            method="interpolated", time_diff=10.0,
+        )
+        output = tmp_path / "output"
+        output.mkdir()
+        opts = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, resume=True)
+
+        # Suppress checkpoint finalization so we can inspect the marked entries
+        from unittest.mock import patch
+        with patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher, \
+             patch("gps_photo_tracker.service.tagging_service.EXIFWriter") as MockWriter, \
+             patch.object(CheckpointManager, "complete") as mock_complete:
+            MockMatcher.return_value.match.return_value = [match_result]
+            MockMatcher.return_value.auto_follow.return_value = 0
+            MockWriter.write_gps.return_value = True
+            service = GPSTaggingService()
+            result = service.process([], [photo], MatcherConfig(), opts, photo_dir=tmp_path)
+            assert result.matched == 1
+            mock_complete.assert_called_once()
+
+        # The marked key must be the full path, not the bare filename
+        completed = CheckpointManager.load(output)
+        assert str(tmp_path / "photo.jpg") in completed
+        assert "photo.jpg" not in completed  # bare filename must NOT be the key
+
 
 
