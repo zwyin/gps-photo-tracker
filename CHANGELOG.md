@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-07-12
+
+### Added
+
+- **文件或目录选择（平台自适应）**：GPS 轨迹和照片输入现在支持选择目录，或一个/多个文件。macOS 用原生 `NSOpenPanel`（一个对话框里选文件或目录，pyobjc），Windows/Linux 用"选择 ▾"小菜单 → 原生对话框，pyobjc 不可用时优雅降级。COPY 模式按所选照片的最低公共祖先（LCA）保留各自相对路径。
+
+### Fixed
+
+- **多目录同名照片碰撞**：checkpoint 与并行写入改按照片**全路径**做 key（原先按文件名），多目录选择下两个同名照片（如不同文件夹的 `IMG_001.jpg`）不再互相误标完成 / 并行字典互相覆盖 / 写失败时静默丢片。文件/混合/多目录选择强制保留目录结构，避免同名覆盖。
+
 ## [0.22.0] - 2026-07-11
 
 ### Fixed
