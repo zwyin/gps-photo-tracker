@@ -50,8 +50,9 @@ class TestPhotoPreview:
     def test_show_photo_async_triggers_timer(self, preview):
         with patch.object(PhotoPreview, "_load_thumbnail"):
             preview.show_photo("/nonexistent.jpg", "Loading test")
+            # Cache miss no longer flashes "加载中..." — it keeps the previous
+            # display and just schedules the async load (v0.23.1).
             assert preview._pending_thumb_path == "/nonexistent.jpg"
-            assert preview._thumb_label.text() == "加载中..."
 
     def test_load_thumbnail_null_pixmap_clears(self, preview):
         preview._pending_thumb_path = "/nonexistent_file.jpg"
@@ -83,12 +84,12 @@ class TestPhotoPreview:
         assert cached is not None
 
     def test_show_photo_cache_hit_does_not_redecode(self, preview, tmp_path, qtbot):
-        """Regression (v0.22.0): browsing back to a previously-viewed photo must
-        NOT re-decode the JPEG from disk. The old cache-hit branch re-called
-        QPixmap(path) on every selection change, causing ~0.5s/photo lag on
-        Windows (libjpeg) while macOS (ImageIO) hid the cost."""
+        """Regression: browsing back to a previously-viewed photo must NOT
+        re-decode from disk — the cache-hit branch reuses the cached pixmap.
+        v0.22.0 fixed the re-decode; v0.23.1 switched the decode to QImageReader
+        native downscale, so this test patches the _decode_preview seam (agnostic
+        to whether the decode uses QPixmap or QImageReader under the hood)."""
         from PIL import Image
-        import gps_photo_tracker.gui.photo_preview as ppmod
 
         img = Image.new("RGB", (60, 40))
         photo = tmp_path / "photo.jpg"
@@ -96,25 +97,19 @@ class TestPhotoPreview:
         path = str(photo)
         QPixmapCache.clear()
 
-        real_qpix = ppmod.QPixmap
-        decodes: list[str] = []
-
-        def counting_qpix(*args, **kwargs):
-            # Only a path-string argument means "decode from disk".
-            if args and isinstance(args[0], str):
-                decodes.append(args[0])
-            return real_qpix(*args, **kwargs)
-
-        with patch.object(ppmod, "QPixmap", counting_qpix):
+        with patch.object(PhotoPreview, "_decode_preview", wraps=preview._decode_preview) as mock_decode:
             preview.show_photo(path, "first view")
             # Let the async _load_thumbnail (QTimer.singleShot) run and populate cache.
             qtbot.waitUntil(lambda: QPixmapCache.find(f"preview:{path}") is not None, timeout=2000)
-            after_first = len(decodes)
+            qtbot.wait(80)  # let any pending timers (incl. ones leaked from other tests) settle
+            after_first = mock_decode.call_count
             assert after_first >= 1  # cache populated via at least one decode
 
-            # Second view is a cache hit — must NOT decode from disk again.
+            # Second view is a cache hit — must NOT trigger a NEW decode.
+            # (Relative check: robust to leaked-timer noise across the full suite.)
             preview.show_photo(path, "second view")
-            assert len(decodes) == after_first
+            qtbot.wait(80)
+            assert mock_decode.call_count == after_first
 
     def test_caches_under_preview_namespace(self, preview, tmp_path):
         """PhotoPreview must cache under the `preview:` namespace, NOT `thumb:`

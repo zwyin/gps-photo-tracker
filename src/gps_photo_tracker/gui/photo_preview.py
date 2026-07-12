@@ -1,21 +1,22 @@
 """Photo preview widget with async thumbnail loading."""
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap, QPixmapCache
+from PySide6.QtGui import QImageReader, QPixmap, QPixmapCache
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 # Longest side of the cached preview pixmap. Large enough for the preview pane
-# (~30% of window width, incl. high-DPI) while far cheaper to decode/rescale
-# than the full-resolution image. The full JPEG is decoded ONCE, scaled to this
-# size, EXIF-orientation-corrected, and cached — so repeated views never touch
-# disk. (Previously show_photo re-decoded the full image on every selection
-# change; that decode dominated per-navigation cost and caused the Windows
-# browse lag — v0.22.0.)
+# (~30% of window width, incl. high-DPI). Decoded ONCE via QImageReader's
+# *native* JPEG downscale (setScaledSize) — the decoder produces the target
+# size directly instead of decoding full-res then scaling, which is far faster
+# on Windows (libjpeg). Result is cached so repeated views never touch disk.
 #
-# The cache key is namespaced `preview:{path}` — NOT `thumb:{path}`, which is
-# owned by PhotoBrowserDialog for its 150x150 thumbnails. QPixmapCache is a
-# process-global singleton, so the two widgets must not share a key (different
-# pixmap sizes would collide). See v0.22.0 review.
+# v0.22.0 fixed cache-HIT lag but the cache-MISS path still did a full decode
+# + scale on Windows → "加载中" flash + slowness on forward browse. v0.23.1
+# switches to QImageReader native downscale (fast miss) and drops the "加载中"
+# flash (keep showing the previous photo until the new one is ready).
+#
+# Cache key `preview:{path}` is namespaced vs PhotoBrowserDialog's `thumb:`
+# (QPixmapCache is process-global — v0.22.0 review).
 _PREVIEW_MAX_PX = 1024
 
 
@@ -24,9 +25,8 @@ class PhotoPreview(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # NOTE: the QPixmapCache size limit is set ONCE at app startup (run_app),
-        # not here — QPixmapCache is process-global, so a per-widget setCacheLimit
-        # would fight other widgets over the limit (v0.22.0 review, M2).
+        # QPixmapCache size limit is set ONCE at app startup (run_app), not here
+        # — it's process-global (v0.22.0 review, M2).
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -60,7 +60,9 @@ class PhotoPreview(QWidget):
             self._full_pixmap = cached
             self._rescale()
         else:
-            self._thumb_label.setText("加载中...")
+            # Cache miss: keep showing the CURRENT photo until the new one is
+            # ready (don't flash "加载中..." — it clears the image and feels
+            # janky/slow). Just schedule the async decode; it swaps in when done.
             self._pending_thumb_path = photo_path
             QTimer.singleShot(10, self._load_thumbnail)
 
@@ -89,22 +91,31 @@ class PhotoPreview(QWidget):
         self._thumb_label.setPixmap(scaled)
 
     def _decode_preview(self, path: str) -> QPixmap | None:
-        """Decode JPEG, apply EXIF orientation, scale to preview size. Runs once
-        per photo; the result is cached so repeated views are pure memory hits
-        (no decode, no EXIF read, no disk — and no Windows Defender scan)."""
-        pixmap = QPixmap(path)
-        if pixmap.isNull():
+        """Decode JPEG directly to ≤ _PREVIEW_MAX_PX via QImageReader's native
+        downscale (setScaledSize), apply EXIF orientation. Runs once per photo;
+        the result is cached. Native downscale is dramatically faster than
+        decode-full-res-then-scale, especially on Windows (libjpeg DCT scaling).
+        """
+        reader = QImageReader(str(path))
+        if not reader.canRead():
             return None
+        orig = reader.size()
+        if orig.width() > _PREVIEW_MAX_PX or orig.height() > _PREVIEW_MAX_PX:
+            target = orig.scaled(
+                _PREVIEW_MAX_PX, _PREVIEW_MAX_PX,
+                Qt.AspectRatioMode.KeepAspectRatio,
+            )
+            reader.setScaledSize(target)
+        img = reader.read()
+        if img.isNull():
+            return None
+        pixmap = QPixmap.fromImage(img)
         from pathlib import Path
         from gps_photo_tracker.core.orientation import OrientationReader
         orientation = OrientationReader.get_orientation(Path(path))
         if orientation and orientation != 1:
             pixmap = OrientationReader.apply_orientation(pixmap, orientation)
-        return pixmap.scaled(
-            _PREVIEW_MAX_PX, _PREVIEW_MAX_PX,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
+        return pixmap
 
     def preload_photos(self, paths: list[str]):
         """Load thumbnails into cache without displaying them."""
@@ -128,9 +139,8 @@ class PhotoPreview(QWidget):
         if not path:
             return
         # Dedupe rapid navigation: if another scheduled timer already decoded &
-        # cached this path (e.g. user held the arrow key), skip the redundant
-        # decode — the exact cost this fix exists to avoid. Mirror show_photo's
-        # null-pixmap guard so a stray NULL entry can't pin the UI on "加载中...".
+        # cached this path, skip the redundant decode. Null-pixmap guard mirrors
+        # show_photo so a stray NULL entry can't pin the UI.
         cached = QPixmapCache.find(f"preview:{path}")
         if cached is not None and not cached.isNull():
             return
