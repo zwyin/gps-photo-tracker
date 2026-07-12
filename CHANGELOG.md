@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-07-12
+
+### Changed
+
+- **预览区可拖动分割**：底部照片预览区改为 `QSplitter`（图片预览 + 信息文字），拖动分割条调整图片大小。图片填满它分到的空间（宽度+高度自适应，去掉 30% 固定宽度限制），信息文字固定最小宽度（200px）确保可读。分割条状态自动保存（`QSettings`）。
+
 ## [0.23.1] - 2026-07-12
 
 ### Fixed
