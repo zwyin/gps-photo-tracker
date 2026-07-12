@@ -1097,7 +1097,7 @@ class TestPhotoPreviewShowPhoto:
         preview._pending_thumb_path = ""
         monkeypatch.setattr("PySide6.QtCore.QTimer.singleShot", lambda ms, fn: None)
         preview.show_photo("/nonexistent/photo.jpg", "loading test")
-        assert preview._thumb_label.text() == "加载中..."
+        # Cache miss schedules an async load (no "加载中..." flash — v0.23.1)
         assert preview._pending_thumb_path == "/nonexistent/photo.jpg"
 
 
@@ -2335,7 +2335,7 @@ class TestPhotoPreviewFullPixmapNull:
         preview.show_photo(str(bad), "null cache")
         # NULL cache entry → miss path: _full_pixmap stays None, reload scheduled
         assert preview._full_pixmap is None
-        assert preview._thumb_label.text() == "加载中..."
+        assert preview._pending_thumb_path == str(bad)  # miss → reload scheduled
 
     def test_rescale_with_null_pixmap_early_return(self, main_window):
         """_rescale with null _full_pixmap returns without error."""
@@ -3810,7 +3810,8 @@ class TestPhotoInputPick:
             main_window._pick_photo_input_files()
         assert main_window._photo_selection.paths == (f1, f2)
         assert "2 个文件" in main_window._photo_dir_edit.currentText()
-        assert "点击查看" in main_window._photo_dir_edit.currentText()
+        # 查看 button (click-to-view) exists for multi-file selections (v0.23.1)
+        assert main_window._photo_view_btn is not None
 
     def test_pick_photo_input_files_cancelled(self, main_window):
         """Empty return from getOpenFileNames leaves selection untouched."""
@@ -3916,7 +3917,8 @@ class TestRenderSelectionEdges:
     def test_render_empty_selection_clears_combo(self, main_window):
         main_window._photo_dir_edit.setCurrentText("stale text")
         main_window._render_selection(
-            main_window._photo_dir_edit, InputSelection(), "photo_dir_history")
+            main_window._photo_dir_edit, InputSelection(), "photo_dir_history",
+            main_window._photo_view_btn)
         assert main_window._photo_dir_edit.currentText() == ""
         assert main_window._photo_dir_edit.toolTip() == ""
 

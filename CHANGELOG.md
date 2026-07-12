@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-07-12
+
+### Fixed
+
+- **Windows：「点击查看」无反应**：QComboBox 在 Windows 上拦截了 lineEdit 的点击（其弹出菜单的事件过滤器），导致点击「📄 N 个文件（点击查看）」摘要打不开已选清单。改为在每个输入框旁加独立「查看」按钮（多选时显示），三平台可靠，并和"历史下拉"点击区分开。
+- **Windows：上下键浏览照片显示「加载中」且变慢**：缓存未命中路径做了全图 JPEG 解码+缩放到 1024（libjpeg 慢）并闪「加载中…」（清掉上一张图）。改用 `QImageReader.setScaledSize` 原生 JPEG 降采样（直接解码到目标尺寸，Windows 上快很多），并去掉「加载中」闪烁（加载期间保留上一张照片）。
+
 ## [0.23.0] - 2026-07-12
 
 ### Added

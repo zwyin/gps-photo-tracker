@@ -220,9 +220,15 @@ class MainWindow(QMainWindow):
         self._gps_dir_edit.activated.connect(self._on_gps_history_activated)
         btn_gps = QPushButton("选择 ▾")
         btn_gps.clicked.connect(self._pick_gps_input)
+        self._gps_view_btn = QPushButton("查看")
+        self._gps_view_btn.setToolTip("查看已选 GPS 轨迹清单")
+        self._gps_view_btn.clicked.connect(
+            lambda: self._show_selection_list(self._gps_dir_edit, self._gps_selection))
+        self._gps_view_btn.setVisible(False)
         row1.addWidget(QLabel("GPS:"))
         row1.addWidget(self._gps_dir_edit)
         row1.addWidget(btn_gps)
+        row1.addWidget(self._gps_view_btn)
         layout.addLayout(row1)
 
         # Photo directory
@@ -235,9 +241,15 @@ class MainWindow(QMainWindow):
         self._photo_dir_edit.activated.connect(self._on_photo_history_activated)
         btn_photo = QPushButton("选择 ▾")
         btn_photo.clicked.connect(self._pick_photo_input)
+        self._photo_view_btn = QPushButton("查看")
+        self._photo_view_btn.setToolTip("查看已选照片清单")
+        self._photo_view_btn.clicked.connect(
+            lambda: self._show_selection_list(self._photo_dir_edit, self._photo_selection))
+        self._photo_view_btn.setVisible(False)
         row2.addWidget(QLabel("照片:"))
         row2.addWidget(self._photo_dir_edit)
         row2.addWidget(btn_photo)
+        row2.addWidget(self._photo_view_btn)
         layout.addLayout(row2)
 
         # Output directory
@@ -415,11 +427,11 @@ class MainWindow(QMainWindow):
         sel = InputSelection.of(paths)
         if kind == "gps":
             self._gps_selection = sel
-            self._render_selection(self._gps_dir_edit, sel, "gps_dir_history")
+            self._render_selection(self._gps_dir_edit, sel, "gps_dir_history", self._gps_view_btn)
             self._auto_scan_gpx()
         else:
             self._photo_selection = sel
-            self._render_selection(self._photo_dir_edit, sel, "photo_dir_history")
+            self._render_selection(self._photo_dir_edit, sel, "photo_dir_history", self._photo_view_btn)
             self._clear_results()
             self._auto_scan_photos()
 
@@ -435,13 +447,16 @@ class MainWindow(QMainWindow):
             if text:
                 self._photo_selection = InputSelection.of([Path(text)])
 
-    def _render_selection(self, combo: QComboBox, sel: InputSelection, history_key: str):
+    def _render_selection(self, combo: QComboBox, sel: InputSelection, history_key: str,
+                          view_btn: QPushButton):
         """Show a one-line summary in the combobox; full paths in the tooltip.
-        Adds to history ONLY for a single-directory selection."""
+        Show the 查看 button (opens the full list) only for a multi-path
+        selection. Adds to history ONLY for a single-directory selection."""
         n = len(sel.paths)
         if n == 0:
             combo.setCurrentText("")
             combo.setToolTip("")
+            view_btn.setVisible(False)
             return
         if n == 1:
             text = str(sel.paths[0])
@@ -449,14 +464,17 @@ class MainWindow(QMainWindow):
             files = [p for p in sel.paths if not p.is_dir()]
             dirs = [p for p in sel.paths if p.is_dir()]
             if files and not dirs:
-                text = f"📄 {len(files)} 个文件（点击查看）"
+                text = f"📄 {len(files)} 个文件"
             elif dirs and not files:
-                text = f"📁 {len(dirs)} 个目录（点击查看）"
+                text = f"📁 {len(dirs)} 个目录"
             else:
-                text = f"📄 {len(files)} 文件 + {len(dirs)} 目录（点击查看）"
+                text = f"📄 {len(files)} 文件 + {len(dirs)} 目录"
         combo.setCurrentText(text)
         combo.setToolTip("\n".join(str(p) for p in sel.paths))
-        combo.lineEdit().mousePressEvent = lambda e: self._show_selection_list(combo, sel)
+        # 查看 button is the click-to-view affordance. A lineEdit.mousePressEvent
+        # override was unreliable on Windows (QComboBox intercepts the click to
+        # show its popup before the lineEdit sees it) — v0.23.1.
+        view_btn.setVisible(n > 1)
         if n == 1 and sel.paths[0].is_dir():
             self._add_path_history(history_key, str(sel.paths[0]), combo)
 
