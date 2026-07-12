@@ -12,4 +12,4 @@ def pick_paths(title="", allowed_exts=None):
     if title: panel.setTitle_(title)
     if allowed_exts: panel.setAllowedFileTypes_(allowed_exts)
     if panel.runModal()!=1: return []   # NSModalResponseOK=1
-    return [Path(str(u)) for u in panel.URLs()]
+    return [Path(u.path()) for u in panel.URLs()]
