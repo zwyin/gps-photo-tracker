@@ -520,10 +520,11 @@ class MainWindow(QMainWindow):
 
         self._set_processing(True)
         self._worker = Worker(
-            gps_dir=Path(gps_dir),
-            photo_dir=Path(photo_dir),
+            gps_selection=InputSelection.of([Path(gps_dir)]),
+            photo_selection=InputSelection.of([Path(photo_dir)]),
             config=config,
             options=options,
+            photo_root=Path(photo_dir),
             log_dir=log_dir,
             excluded_filenames=self._excluded_filenames,
         )
@@ -641,10 +642,11 @@ class MainWindow(QMainWindow):
         self._write_mode = mode
 
         self._worker = Worker(
-            gps_dir=Path(self._gps_dir_edit.currentText()),
-            photo_dir=Path(self._photo_dir_edit.currentText()),
+            gps_selection=InputSelection.of([Path(self._gps_dir_edit.currentText())]),
+            photo_selection=InputSelection.of([Path(self._photo_dir_edit.currentText())]),
             config=config,
             options=options,
+            photo_root=Path(self._photo_dir_edit.currentText()),
             log_dir=log_dir,
             excluded_filenames=self._excluded_filenames,
             pre_computed_results=results,

@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QSettings
 
 from gps_photo_tracker.gui.main_window import MainWindow
 from gps_photo_tracker.gui.worker import Worker
-from gps_photo_tracker.core.models import MatcherConfig, ProcessMode, ProcessOptions
+from gps_photo_tracker.core.models import InputSelection, MatcherConfig, ProcessMode, ProcessOptions
 
 
 # Ensure QApplication exists (required for all QWidget tests)
@@ -88,8 +88,8 @@ class TestWorker:
 
     def test_worker_creation(self, qapp):
         worker = Worker(
-            gps_dir=Path("/tmp"),
-            photo_dir=Path("/tmp"),
+            gps_selection=InputSelection.of([Path("/tmp")]),
+            photo_selection=InputSelection.of([Path("/tmp")]),
             config=MatcherConfig(),
             options=ProcessOptions(mode=ProcessMode.PREVIEW),
         )
@@ -97,8 +97,8 @@ class TestWorker:
 
     def test_worker_cancel(self, qapp):
         worker = Worker(
-            gps_dir=Path("/tmp"),
-            photo_dir=Path("/tmp"),
+            gps_selection=InputSelection.of([Path("/tmp")]),
+            photo_selection=InputSelection.of([Path("/tmp")]),
             config=MatcherConfig(),
             options=ProcessOptions(mode=ProcessMode.PREVIEW),
         )
@@ -107,8 +107,8 @@ class TestWorker:
 
     def test_worker_signals_exist(self, qapp):
         worker = Worker(
-            gps_dir=Path("/tmp"),
-            photo_dir=Path("/tmp"),
+            gps_selection=InputSelection.of([Path("/tmp")]),
+            photo_selection=InputSelection.of([Path("/tmp")]),
             config=MatcherConfig(),
             options=ProcessOptions(mode=ProcessMode.PREVIEW),
         )
@@ -122,8 +122,8 @@ class TestWorkerOnPhotoCallback:
 
     def _make_worker(self, qapp, pre_computed=None):
         return Worker(
-            gps_dir=Path("/tmp"),
-            photo_dir=Path("/tmp"),
+            gps_selection=InputSelection.of([Path("/tmp")]),
+            photo_selection=InputSelection.of([Path("/tmp")]),
             config=MatcherConfig(),
             options=ProcessOptions(mode=ProcessMode.PREVIEW),
             pre_computed_results=pre_computed,
@@ -540,8 +540,8 @@ class TestMainWindowScanDone:
 
     def test_worker_has_scan_done_signal(self, qapp):
         worker = Worker(
-            gps_dir=Path("/tmp"),
-            photo_dir=Path("/tmp"),
+            gps_selection=InputSelection.of([Path("/tmp")]),
+            photo_selection=InputSelection.of([Path("/tmp")]),
             config=MatcherConfig(),
             options=ProcessOptions(mode=ProcessMode.PREVIEW),
         )
@@ -792,8 +792,8 @@ class TestMainWindowPhotosScanned:
 
     def test_worker_has_photos_scanned_signal(self, qapp):
         worker = Worker(
-            gps_dir=Path("/tmp"),
-            photo_dir=Path("/tmp"),
+            gps_selection=InputSelection.of([Path("/tmp")]),
+            photo_selection=InputSelection.of([Path("/tmp")]),
             config=MatcherConfig(),
             options=ProcessOptions(mode=ProcessMode.PREVIEW),
         )
@@ -1650,7 +1650,7 @@ class TestWorkerRun:
             success_rate=0.5, results=[], reject_groups={},
         )
 
-        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+        w = Worker(InputSelection.of([Path("/gpx")]), InputSelection.of([Path("/photo")]), MatcherConfig(),
                    ProcessOptions(mode=ProcessMode.PREVIEW))
         r = self._run_worker(w)
 
@@ -1678,7 +1678,7 @@ class TestWorkerRun:
             success_rate=1.0, results=[], reject_groups={},
         )
 
-        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+        w = Worker(InputSelection.of([Path("/gpx")]), InputSelection.of([Path("/photo")]), MatcherConfig(),
                    ProcessOptions(mode=ProcessMode.COPY, output_dir=Path("/out")),
                    pre_computed_results=pre_computed)
         r = self._run_worker(w)
@@ -1693,7 +1693,7 @@ class TestWorkerRun:
         mock_svc = MockService.return_value
         mock_svc.scan_gpx.side_effect = FileNotFoundError("dir not found")
 
-        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+        w = Worker(InputSelection.of([Path("/gpx")]), InputSelection.of([Path("/photo")]), MatcherConfig(),
                    ProcessOptions(mode=ProcessMode.PREVIEW))
         r = self._run_worker(w)
 
@@ -1714,7 +1714,7 @@ class TestWorkerRun:
             success_rate=1.0, results=[], reject_groups={},
         )
 
-        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+        w = Worker(InputSelection.of([Path("/gpx")]), InputSelection.of([Path("/photo")]), MatcherConfig(),
                    ProcessOptions(mode=ProcessMode.PREVIEW),
                    excluded_filenames={"excluded.gpx"})
         r = self._run_worker(w)
@@ -1747,7 +1747,7 @@ class TestWorkerRun:
                               success_rate=1.0, results=[match_result], reject_groups={})
         mock_svc.preview.side_effect = fake_preview
 
-        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+        w = Worker(InputSelection.of([Path("/gpx")]), InputSelection.of([Path("/photo")]), MatcherConfig(),
                    ProcessOptions(mode=ProcessMode.PREVIEW))
         r = self._run_worker(w)
 
@@ -1772,7 +1772,7 @@ class TestWorkerRun:
             success_rate=0.0, results=[], reject_groups={},
         )
 
-        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+        w = Worker(InputSelection.of([Path("/gpx")]), InputSelection.of([Path("/photo")]), MatcherConfig(),
                    ProcessOptions(mode=ProcessMode.PREVIEW))
         r = self._run_worker(w)
 
@@ -1802,7 +1802,7 @@ class TestWorkerRun:
                               success_rate=1.0, results=[], reject_groups={})
         mock_svc.preview.side_effect = fake_preview
 
-        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+        w = Worker(InputSelection.of([Path("/gpx")]), InputSelection.of([Path("/photo")]), MatcherConfig(),
                    ProcessOptions(mode=ProcessMode.PREVIEW))
         r = self._run_worker(w)
 
@@ -1819,7 +1819,7 @@ class TestWorkerRun:
             success_rate=0.0, results=[], reject_groups={},
         )
 
-        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+        w = Worker(InputSelection.of([Path("/gpx")]), InputSelection.of([Path("/photo")]), MatcherConfig(),
                    ProcessOptions(mode=ProcessMode.PREVIEW))
         assert not w._token.is_cancelled
         w.cancel()
@@ -1837,7 +1837,7 @@ class TestWorkerRun:
         )
 
         log_dir = Path("/tmp/logs")
-        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+        w = Worker(InputSelection.of([Path("/gpx")]), InputSelection.of([Path("/photo")]), MatcherConfig(),
                    ProcessOptions(mode=ProcessMode.PREVIEW), log_dir=log_dir)
         self._run_worker(w)
 
@@ -1852,7 +1852,7 @@ class TestWorkerRun:
         mock_svc.scan_photos.return_value = []
         mock_svc.preview.side_effect = OperationCancelledError("cancelled")
 
-        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+        w = Worker(InputSelection.of([Path("/gpx")]), InputSelection.of([Path("/photo")]), MatcherConfig(),
                    ProcessOptions(mode=ProcessMode.PREVIEW))
         r = self._run_worker(w)
 
@@ -2090,7 +2090,7 @@ class TestWriteSignal:
 
     def test_worker_has_write_signal(self, qapp):
         """Worker class should have write_signal defined."""
-        w = Worker(Path("/gpx"), Path("/photo"), MatcherConfig(),
+        w = Worker(InputSelection.of([Path("/gpx")]), InputSelection.of([Path("/photo")]), MatcherConfig(),
                    ProcessOptions(mode=ProcessMode.PREVIEW))
         assert hasattr(w, "write_signal")
 
@@ -2671,8 +2671,8 @@ class TestWorkerDirectWrite:
         config = MatcherConfig()
         options = ProcessOptions(mode=ProcessMode.PREVIEW)
         worker = Worker(
-            gps_dir=tmp_path,
-            photo_dir=tmp_path,
+            gps_selection=InputSelection.of([tmp_path]),
+            photo_selection=InputSelection.of([tmp_path]),
             config=config,
             options=options,
             log_dir=tmp_path,
@@ -2725,8 +2725,8 @@ class TestWorkerDirectWrite:
         config = MatcherConfig()
         options = ProcessOptions(mode=ProcessMode.PREVIEW)
         worker = Worker(
-            gps_dir=tmp_path,
-            photo_dir=tmp_path,
+            gps_selection=InputSelection.of([tmp_path]),
+            photo_selection=InputSelection.of([tmp_path]),
             config=config,
             options=options,
             log_dir=tmp_path,
@@ -2766,8 +2766,8 @@ class TestWorkerDirectWrite:
         config = MatcherConfig()
         options = ProcessOptions(mode=ProcessMode.PREVIEW)
         worker = Worker(
-            gps_dir=tmp_path,
-            photo_dir=tmp_path,
+            gps_selection=InputSelection.of([tmp_path]),
+            photo_selection=InputSelection.of([tmp_path]),
             config=config,
             options=options,
             log_dir=tmp_path,
@@ -2799,7 +2799,7 @@ class TestWorkerDirectWrite:
         config = MatcherConfig()
         options = ProcessOptions(mode=ProcessMode.PREVIEW)
         worker = Worker(
-            gps_dir=tmp_path, photo_dir=tmp_path,
+            gps_selection=InputSelection.of([tmp_path]), photo_selection=InputSelection.of([tmp_path]),
             config=config, options=options, log_dir=tmp_path,
             pre_computed_results=[],
         )
@@ -2831,7 +2831,7 @@ class TestWorkerDirectWrite:
         config = MatcherConfig()
         options = ProcessOptions(mode=ProcessMode.PREVIEW)
         worker = Worker(
-            gps_dir=tmp_path, photo_dir=tmp_path,
+            gps_selection=InputSelection.of([tmp_path]), photo_selection=InputSelection.of([tmp_path]),
             config=config, options=options, log_dir=tmp_path,
             pre_computed_results=[],
         )
@@ -2889,7 +2889,7 @@ class TestWorkerDirectWrite:
         config = MatcherConfig()
         options = ProcessOptions(mode=ProcessMode.PREVIEW)
         worker = Worker(
-            gps_dir=tmp_path, photo_dir=tmp_path,
+            gps_selection=InputSelection.of([tmp_path]), photo_selection=InputSelection.of([tmp_path]),
             config=config, options=options, log_dir=tmp_path,
         )
 
@@ -2935,7 +2935,7 @@ class TestWorkerDirectWrite:
         config = MatcherConfig()
         options = ProcessOptions(mode=ProcessMode.PREVIEW)
         worker = Worker(
-            gps_dir=tmp_path, photo_dir=tmp_path,
+            gps_selection=InputSelection.of([tmp_path]), photo_selection=InputSelection.of([tmp_path]),
             config=config, options=options, log_dir=tmp_path,
         )
         captured = []

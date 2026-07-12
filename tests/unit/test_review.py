@@ -5,6 +5,7 @@ from pathlib import Path
 from gps_photo_tracker.core.models import (
     GPSInfo,
     GPXSegment,
+    InputSelection,
     MatcherConfig,
     MatchResult,
     PhotoInfo,
@@ -220,7 +221,7 @@ class TestWorkerReviewSignal:
         options = ProcessOptions(mode=ProcessMode.PREVIEW)
         config = MatcherConfig()
         worker = Worker(
-            gps_dir=tmp_path, photo_dir=tmp_path,
+            gps_selection=InputSelection.of([tmp_path]), photo_selection=InputSelection.of([tmp_path]),
             config=config, options=options,
         )
 
@@ -273,7 +274,7 @@ class TestWorkerDirectWrite:
         ]
         options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output_dir)
         worker = Worker(
-            gps_dir=tmp_path, photo_dir=tmp_path,
+            gps_selection=InputSelection.of([tmp_path]), photo_selection=InputSelection.of([tmp_path]),
             config=MatcherConfig(), options=options,
             pre_computed_results=pre_computed,
         )
