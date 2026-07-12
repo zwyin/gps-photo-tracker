@@ -2,7 +2,7 @@
 from pathlib import Path
 
 
-def lowest_common_ancestor(paths):
+def lowest_common_ancestor(paths) -> Path | None:
     """所有路径最深的共同祖先目录；无共同根分量返回 None。"""
     if not paths:
         return None

@@ -5742,6 +5742,21 @@ class TestBuildProcessOptions:
         assert opts.keep_structure is True
         assert opts.mode == ProcessMode.COPY
 
+    def test_multi_dir_forces_keep_structure_even_when_disabled(self, main_window, tmp_path):
+        """Two dirs (each may contain IMG_001.jpg) + keep_structure=False → still True.
+
+        Regression: multi-directory selection with the checkbox unchecked would
+        flatten both dirs to output/<filename> and silently overwrite same-named
+        photos — a data-loss bug contradicting the no-collision guarantee.
+        """
+        d1 = tmp_path / "trip_a"; d1.mkdir()
+        d2 = tmp_path / "trip_b"; d2.mkdir()
+        main_window._photo_selection = InputSelection.of([d1, d2])
+
+        opts = main_window._build_process_options(mode_copy=True, keep_structure=False)
+        assert opts.keep_structure is True
+        assert opts.mode == ProcessMode.COPY
+
     def test_single_dir_honors_keep_structure_false(self, main_window, tmp_path):
         """Single dir + keep_structure=False (checkbox unchecked) → False."""
         d = tmp_path / "photos"; d.mkdir()

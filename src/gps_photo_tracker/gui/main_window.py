@@ -566,15 +566,17 @@ class MainWindow(QMainWindow):
         )
 
     def _build_process_options(self, mode_copy=False, **kw):
-        """Build ProcessOptions, forcing keep_structure=True for file/mixed
-        selections so COPY-mode flattening cannot overwrite same-named photos
-        sourced from different directories. Single-dir selections honor the
-        caller-supplied keep_structure (the "保持目录结构" checkbox).
+        """Build ProcessOptions, forcing keep_structure=True for file/mixed/
+        multi-directory selections so COPY-mode flattening cannot overwrite
+        same-named photos sourced from different directories. Single-dir
+        selections honor the caller-supplied keep_structure (the "保持目录结构"
+        checkbox).
         """
         is_file_mode = any(p.is_file() for p in self._photo_selection.paths)
+        is_multi = len(self._photo_selection.paths) > 1
         keep = kw.pop("keep_structure", True)
-        if is_file_mode:
-            keep = True   # 文件/混合选择强制保留结构，避免同名覆盖
+        if is_file_mode or is_multi:
+            keep = True   # 文件/混合/多目录选择强制保留结构，避免同名覆盖
         mode = ProcessMode.COPY if mode_copy else ProcessMode.OVERWRITE
         return ProcessOptions(mode=mode, keep_structure=keep, **kw)
 
