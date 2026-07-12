@@ -3710,24 +3710,25 @@ class TestToggleLeftPanel:
 
 class TestBrowseDirectories:
     def test_browse_gps_dir_sets_text(self, main_window, tmp_path):
-        with patch("gps_photo_tracker.gui.main_window.QFileDialog.getExistingDirectory",
-                   return_value=str(tmp_path)), \
-             patch.object(main_window, '_auto_scan_gpx'):
-            main_window._browse_gps_dir()
+        """GPS dir pick populates _gps_selection and combobox summary."""
+        with patch.object(main_window, '_auto_scan_gpx'):
+            main_window._set_selection("gps", [tmp_path])
+        assert main_window._gps_selection.paths == (tmp_path,)
         assert main_window._gps_dir_edit.currentText() == str(tmp_path)
 
     def test_browse_gps_dir_cancelled(self, main_window):
-        with patch("gps_photo_tracker.gui.main_window.QFileDialog.getExistingDirectory",
-                   return_value=""):
-            main_window._browse_gps_dir()
-        # Should not change
+        """When the picker returns no paths, selection stays empty."""
+        with patch.object(main_window, '_collect_paths', return_value=[]):
+            main_window._pick_gps_input()
+        assert main_window._gps_selection.is_empty
 
     def test_browse_photo_dir_sets_text(self, main_window, tmp_path):
+        """Photo dir pick populates _photo_selection and combobox summary."""
         with patch("gps_photo_tracker.gui.main_window.QFileDialog.getExistingDirectory",
                    return_value=str(tmp_path)), \
-             patch.object(main_window, '_clear_results'), \
              patch.object(main_window, '_auto_scan_photos'):
-            main_window._browse_photo_dir()
+            main_window._pick_photo_input_dir()
+        assert main_window._photo_selection.paths == (tmp_path,)
         assert main_window._photo_dir_edit.currentText() == str(tmp_path)
 
     def test_browse_output_dir_sets_text(self, main_window, tmp_path):
@@ -3759,7 +3760,7 @@ class TestAutoScan:
                          points=[TrackPoint(timestamp=0.0, latitude=25.0, longitude=100.0)])
         with patch("gps_photo_tracker.core.file_provider.FileProvider") as MockFP, \
              patch("gps_photo_tracker.core.track_parser.TrackParser") as MockTP:
-            MockFP.return_value.list_tracks.return_value = [tmp_path / "t.gpx"]
+            MockFP.return_value.resolve_tracks.return_value = [tmp_path / "t.gpx"]
             MockTP.return_value.parse_file.return_value = [seg]
             main_window._auto_scan_gpx(tmp_path)
         assert "1 段" in main_window._gpx_browser_label.text()
@@ -3768,7 +3769,7 @@ class TestAutoScan:
     def test_auto_scan_gpx_handles_parse_error(self, main_window, tmp_path):
         with patch("gps_photo_tracker.core.file_provider.FileProvider") as MockFP, \
              patch("gps_photo_tracker.core.track_parser.TrackParser") as MockTP:
-            MockFP.return_value.list_tracks.return_value = [tmp_path / "bad.gpx"]
+            MockFP.return_value.resolve_tracks.return_value = [tmp_path / "bad.gpx"]
             MockTP.return_value.parse_file.side_effect = ValueError("bad file")
             main_window._auto_scan_gpx(tmp_path)  # should not crash
 
@@ -3781,6 +3782,139 @@ class TestAutoScan:
     def test_auto_scan_photos_empty_dir(self, main_window, tmp_path):
         main_window._auto_scan_photos(tmp_path)
         assert "0张" in main_window._photo_browser_label.text()
+
+
+# ── MainWindow: file-or-directory selection ───────────────
+
+class TestPhotoInputPick:
+    """_pick_photo_input_files / _pick_photo_input_dir populate
+    _photo_selection and render the combobox summary."""
+
+    def test_pick_photo_input_files_sets_selection(self, main_window, tmp_path):
+        f1 = tmp_path / "a.jpg"; f1.touch()
+        f2 = tmp_path / "b.jpg"; f2.touch()
+        with patch("gps_photo_tracker.gui.main_window.QFileDialog.getOpenFileNames",
+                   return_value=([str(f1), str(f2)], "")), \
+             patch.object(main_window, '_auto_scan_photos'):
+            main_window._pick_photo_input_files()
+        assert main_window._photo_selection.paths == (f1, f2)
+        assert "2 个文件" in main_window._photo_dir_edit.currentText()
+        assert "点击查看" in main_window._photo_dir_edit.currentText()
+
+    def test_pick_photo_input_files_cancelled(self, main_window):
+        """Empty return from getOpenFileNames leaves selection untouched."""
+        with patch("gps_photo_tracker.gui.main_window.QFileDialog.getOpenFileNames",
+                   return_value=([], "")):
+            main_window._pick_photo_input_files()
+        assert main_window._photo_selection.is_empty
+
+    def test_pick_photo_input_dir_sets_selection(self, main_window, tmp_path):
+        with patch("gps_photo_tracker.gui.main_window.QFileDialog.getExistingDirectory",
+                   return_value=str(tmp_path)), \
+             patch.object(main_window, '_auto_scan_photos'):
+            main_window._pick_photo_input_dir()
+        assert main_window._photo_selection.paths == (tmp_path,)
+        # Single dir → full path shown verbatim
+        assert main_window._photo_dir_edit.currentText() == str(tmp_path)
+
+    def test_render_tooltip_joins_paths(self, main_window, tmp_path):
+        f1 = tmp_path / "a.jpg"; f1.touch()
+        f2 = tmp_path / "b.jpg"; f2.touch()
+        with patch.object(main_window, '_auto_scan_photos'):
+            main_window._set_selection("photo", [f1, f2])
+        tip = main_window._photo_dir_edit.toolTip()
+        assert str(f1) in tip and str(f2) in tip
+
+    def test_render_dirs_only_summary(self, main_window, tmp_path):
+        d1 = tmp_path / "dir1"; d1.mkdir()
+        d2 = tmp_path / "dir2"; d2.mkdir()
+        with patch.object(main_window, '_auto_scan_photos'):
+            main_window._set_selection("photo", [d1, d2])
+        assert "2 个目录" in main_window._photo_dir_edit.currentText()
+
+    def test_render_mixed_summary(self, main_window, tmp_path):
+        d1 = tmp_path / "dir1"; d1.mkdir()
+        f1 = tmp_path / "a.jpg"; f1.touch()
+        with patch.object(main_window, '_auto_scan_photos'):
+            main_window._set_selection("photo", [d1, f1])
+        text = main_window._photo_dir_edit.currentText()
+        assert "1 文件" in text and "1 目录" in text
+
+    def test_pick_gps_input_via_native_picker(self, main_window, tmp_path):
+        """On macOS with pyobjc, _pick_gps_input uses mac_native_picker.pick_paths."""
+        gpx = tmp_path / "a.gpx"; gpx.touch()
+        with patch("gps_photo_tracker.gui.main_window.mac_native_picker") as mock_nat, \
+             patch.object(main_window, '_auto_scan_gpx'):
+            mock_nat.is_supported.return_value = True
+            mock_nat.pick_paths.return_value = [gpx]
+            main_window._pick_gps_input()
+        assert main_window._gps_selection.paths == (gpx,)
+
+    def test_pick_photo_input_via_native_picker(self, main_window, tmp_path):
+        img = tmp_path / "a.jpg"; img.touch()
+        with patch("gps_photo_tracker.gui.main_window.mac_native_picker") as mock_nat, \
+             patch.object(main_window, '_auto_scan_photos'):
+            mock_nat.is_supported.return_value = True
+            mock_nat.pick_paths.return_value = [img]
+            main_window._pick_photo_input()
+        assert main_window._photo_selection.paths == (img,)
+
+    def test_native_picker_none_falls_back_to_menu(self, main_window):
+        """When pick_paths returns None (pyobjc unavailable), fall back to _menu_pick."""
+        with patch("gps_photo_tracker.gui.main_window.mac_native_picker") as mock_nat, \
+             patch.object(main_window, '_menu_pick', return_value=[]) as mock_menu:
+            mock_nat.is_supported.return_value = True
+            mock_nat.pick_paths.return_value = None
+            main_window._pick_gps_input()
+        mock_menu.assert_called_once()
+
+
+class TestPhotoCopyRoot:
+    """_photo_copy_root: single dir → that dir; multiple → LCA;
+    filesystem root → None."""
+
+    def test_single_dir_returns_that_dir(self, main_window, tmp_path):
+        main_window._photo_selection = InputSelection.of([tmp_path])
+        assert main_window._photo_copy_root() == tmp_path
+
+    def test_multiple_files_return_lca(self, main_window, tmp_path):
+        sub = tmp_path / "trip"
+        sub.mkdir()
+        f1 = sub / "a.jpg"; f1.touch()
+        f2 = sub / "b.jpg"; f2.touch()
+        main_window._photo_selection = InputSelection.of([f1, f2])
+        assert main_window._photo_copy_root() == sub.resolve()
+
+    def test_filesystem_root_returns_none(self, main_window, monkeypatch):
+        """When LCA is the filesystem root (POSIX '/'), return None (flat)."""
+        import gps_photo_tracker.gui.main_window as mw_mod
+        monkeypatch.setattr(
+            mw_mod, "lowest_common_ancestor", lambda paths: Path("/"))
+        main_window._photo_selection = InputSelection.of(
+            [Path("/var/a.jpg"), Path("/etc/b.jpg")])
+        assert main_window._photo_copy_root() is None
+
+    def test_empty_selection_returns_none(self, main_window):
+        main_window._photo_selection = InputSelection()
+        assert main_window._photo_copy_root() is None
+
+
+class TestRenderSelectionEdges:
+    """Edge cases for _render_selection and the click-to-view dialog."""
+
+    def test_render_empty_selection_clears_combo(self, main_window):
+        main_window._photo_dir_edit.setCurrentText("stale text")
+        main_window._render_selection(
+            main_window._photo_dir_edit, InputSelection(), "photo_dir_history")
+        assert main_window._photo_dir_edit.currentText() == ""
+        assert main_window._photo_dir_edit.toolTip() == ""
+
+    def test_show_selection_list_opens_dialog(self, main_window, tmp_path):
+        sel = InputSelection.of([tmp_path])
+        with patch("gps_photo_tracker.gui.main_window.SelectionListDialog") as MockDlg:
+            MockDlg.return_value.exec.return_value = 0
+            main_window._show_selection_list(main_window._photo_dir_edit, sel)
+        MockDlg.assert_called_once()
 
 
 # ── MainWindow: path history ───────────────────────────────
