@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from gps_photo_tracker.core.models import (
     GPXSegment,
+    InputSelection,
     MatcherConfig,
     MatchResult,
     PhotoInfo,
@@ -452,8 +453,8 @@ class MainWindow(QMainWindow):
         service = GPSTaggingService()
         self.statusBar().showMessage("正在分析数据...")
         try:
-            segments = service.scan_gpx(Path(gps_dir))
-            photos = service.scan_photos(Path(photo_dir))
+            segments = service.scan_gpx(InputSelection.of([Path(gps_dir)]))
+            photos = service.scan_photos(InputSelection.of([Path(photo_dir)]))
         except Exception as e:
             QMessageBox.warning(self, "错误", f"扫描失败: {e}")
             return

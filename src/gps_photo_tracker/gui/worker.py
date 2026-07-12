@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 from PySide6.QtCore import QThread, Signal
 
 from gps_photo_tracker.core.models import (
+    InputSelection,
     MatchResult,
     OperationCancelledError,
     ProcessMode,
@@ -67,8 +68,8 @@ class Worker(QThread):
             )
 
         try:
-            segments = service.scan_gpx(self._gps_dir, on_progress=on_scan_progress)
-            photos = service.scan_photos(self._photo_dir, on_progress=on_scan_progress)
+            segments = service.scan_gpx(InputSelection.of([self._gps_dir]), on_progress=on_scan_progress)
+            photos = service.scan_photos(InputSelection.of([self._photo_dir]), on_progress=on_scan_progress)
         except Exception as e:
             logger.error("扫描失败: %s", e)
             self.done_signal.emit({"error": str(e), "total": 0, "matched": 0})

@@ -18,6 +18,7 @@ from gps_photo_tracker.core.models import (
     BatchResult,
     GPSInfo,
     GPXSegment,
+    InputSelection,
     MatcherConfig,
     MatchResult,
     PhotoInfo,
@@ -218,10 +219,10 @@ class GPSTaggingService:
             reject_groups=reject_groups,
         )
 
-    def scan_gpx(self, gpx_dir: Path, on_progress: Callable | None = None) -> list[GPXSegment]:
-        """Scan directory for track files (GPX, KML, TCX) and parse them."""
+    def scan_gpx(self, selection: InputSelection, on_progress: Callable | None = None) -> list[GPXSegment]:
+        """Scan selection for track files (GPX, KML, TCX) and parse them."""
         start = time.time()
-        track_files = self._file_provider.list_tracks(gpx_dir)
+        track_files = self._file_provider.resolve_tracks(selection)
         all_segments: list[GPXSegment] = []
         for i, track_path in enumerate(track_files):
             try:
@@ -239,14 +240,14 @@ class GPSTaggingService:
                     current_file=track_path.name,
                     elapsed_seconds=time.time() - start,
                 ))
-        logger.debug("scan_gpx 完成 | 目录=%s, 文件=%d, 段=%d, 耗时=%.1fs",
-                     gpx_dir, len(track_files), len(all_segments), time.time() - start)
+        logger.debug("scan_gpx 完成 | 输入=%s, 文件=%d, 段=%d, 耗时=%.1fs",
+                     selection, len(track_files), len(all_segments), time.time() - start)
         return all_segments
 
-    def scan_photos(self, photo_dir: Path, on_progress: Callable | None = None) -> list[PhotoInfo]:
-        """Scan directory for JPEG files and read their timestamps."""
+    def scan_photos(self, selection: InputSelection, on_progress: Callable | None = None) -> list[PhotoInfo]:
+        """Scan selection for JPEG files and read their timestamps."""
         start = time.time()
-        photo_paths = self._file_provider.list_photos(photo_dir)
+        photo_paths = self._file_provider.resolve_photos(selection)
         photos: list[PhotoInfo] = []
         for i, path in enumerate(photo_paths):
             try:
@@ -279,8 +280,8 @@ class GPSTaggingService:
                     current_file=path.name,
                     elapsed_seconds=time.time() - start,
                 ))
-        logger.debug("scan_photos 完成 | 目录=%s, 照片=%d, 耗时=%.1fs",
-                     photo_dir, len(photos), time.time() - start)
+        logger.debug("scan_photos 完成 | 输入=%s, 照片=%d, 耗时=%.1fs",
+                     selection, len(photos), time.time() - start)
         return photos
 
     def preview(
