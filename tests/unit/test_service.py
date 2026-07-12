@@ -1033,9 +1033,12 @@ class TestResumeCheckpoint:
         output = tmp_path / "output"
         output.mkdir()
 
-        # Pre-create checkpoint with photo already completed
+        # Pre-create checkpoint with photo already completed.
+        # Key by FULL source path (post multi-dir fix); a bare filename would
+        # never match `str(result.photo.path)` and the skip wouldn't fire —
+        # which CI (UTC) exposed after a local TZ coincidence had masked it.
         CheckpointManager.create(output, total_photos=1)
-        CheckpointManager.mark(output, "photo.jpg")
+        CheckpointManager.mark(output, str(tmp_path / "photo.jpg"))
 
         service = GPSTaggingService()
         segments = service.scan_gpx(InputSelection.of([tmp_path]))
