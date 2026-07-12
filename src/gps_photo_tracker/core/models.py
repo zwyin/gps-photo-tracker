@@ -196,3 +196,25 @@ class ProgressUpdate:
     total: int
     current_file: str
     elapsed_seconds: float
+
+
+@dataclass(frozen=True)
+class InputSelection:
+    paths: tuple[Path, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        return len(self.paths) == 0
+
+    @classmethod
+    def of(cls, paths) -> "InputSelection":
+        seen = set()
+        norm = []
+        for p in paths:
+            pp = Path(p)
+            if pp == Path():
+                continue
+            if pp not in seen:
+                seen.add(pp)
+                norm.append(pp)
+        return cls(paths=tuple(norm))
