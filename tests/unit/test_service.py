@@ -13,6 +13,7 @@ from gps_photo_tracker.core.gpx_parser import GPXParser
 from gps_photo_tracker.core.models import (
     BatchResult,
     GPSInfo,
+    InputSelection,
     MatcherConfig,
     MatchResult,
     PhotoInfo,
@@ -86,13 +87,13 @@ class TestScanGPX:
         (tmp_path / "track.gpx").write_text(gpx_content)
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
         assert len(segments) == 1
         assert len(segments[0].points) == 2
 
     def test_scan_gpx_empty_dir(self, tmp_path):
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
         assert segments == []
 
 
@@ -108,7 +109,7 @@ class TestScanPhotos:
         img.save(tmp_path / "photo.jpg", "JPEG", exif=piexif.dump(exif))
 
         service = GPSTaggingService()
-        photos = service.scan_photos(tmp_path)
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         assert len(photos) == 1
         assert photos[0].filename == "photo.jpg"
         assert photos[0].timestamp is not None
@@ -119,13 +120,13 @@ class TestScanPhotos:
         img.save(tmp_path / "photo.jpg", "JPEG")
 
         service = GPSTaggingService()
-        photos = service.scan_photos(tmp_path)
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         assert len(photos) == 1
         assert photos[0].timestamp is None
 
     def test_scan_photos_empty_dir(self, tmp_path):
         service = GPSTaggingService()
-        photos = service.scan_photos(tmp_path)
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         assert photos == []
 
 
@@ -156,8 +157,8 @@ class TestPreview:
     def test_preview_basic(self, tmp_path):
         self._setup_gpx_and_photos(tmp_path)
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
 
         result = service.preview(segments, photos, MatcherConfig())
         assert isinstance(result, BatchResult)
@@ -167,8 +168,8 @@ class TestPreview:
     def test_preview_with_progress(self, tmp_path):
         self._setup_gpx_and_photos(tmp_path)
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
 
         progress_calls = []
         def on_progress(update: ProgressUpdate):
@@ -181,8 +182,8 @@ class TestPreview:
     def test_preview_with_photo_callback(self, tmp_path):
         self._setup_gpx_and_photos(tmp_path)
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
 
         results = []
         def on_photo(r):
@@ -222,8 +223,8 @@ class TestProcess:
         output.mkdir()
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
 
         result = service.process(segments, photos, MatcherConfig(), options)
@@ -236,8 +237,8 @@ class TestProcess:
         self._setup_gpx_and_photos(tmp_path)
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(mode=ProcessMode.OVERWRITE)
 
         result = service.process(segments, photos, MatcherConfig(), options)
@@ -247,8 +248,8 @@ class TestProcess:
         self._setup_gpx_and_photos(tmp_path)
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(mode=ProcessMode.PREVIEW)
 
         result = service.process(segments, photos, MatcherConfig(), options)
@@ -284,8 +285,8 @@ class TestCancel:
             img.save(tmp_path / f"photo{i}.jpg", "JPEG", exif=piexif.dump(exif))
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         token = CancellationToken()
 
         # Cancel after first photo
@@ -320,7 +321,7 @@ class TestScanEdgeCases:
   </trkseg></trk>
 </gpx>""")
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
         assert len(segments) == 1  # only good.gpx parsed
 
     def test_scan_photos_handles_broken_jpeg(self, tmp_path):
@@ -328,7 +329,7 @@ class TestScanEdgeCases:
         (tmp_path / "good.jpg").write_bytes(_make_jpeg_bytes())
         (tmp_path / "bad.jpg").write_bytes(b"not a real image")
         service = GPSTaggingService()
-        photos = service.scan_photos(tmp_path)
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         assert len(photos) == 2
         good = [p for p in photos if p.filename == "good.jpg"][0]
         bad = [p for p in photos if p.filename == "bad.jpg"][0]
@@ -368,8 +369,8 @@ class TestProcessOverwriteAndSkip:
         (tmp_path / "track.gpx").write_text(gpx)
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(mode=ProcessMode.OVERWRITE, overwrite_gps=True)
 
         result = service.process(segments, photos, MatcherConfig(), options)
@@ -391,8 +392,8 @@ class TestProcessOverwriteAndSkip:
         (tmp_path / "track.gpx").write_text(gpx)
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(mode=ProcessMode.COPY, output_dir=tmp_path / "out", overwrite_gps=False)
         (tmp_path / "out").mkdir()
 
@@ -418,8 +419,8 @@ class TestProcessOverwriteAndSkip:
         output = tmp_path / "output"
         output.mkdir()
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
 
         result = service.process(segments, photos, MatcherConfig(), options)
@@ -465,8 +466,8 @@ class TestCopyModeSkippedStillCopied:
         output = tmp_path / "output"
         output.mkdir()
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, overwrite_gps=False)
 
         result = service.process(segments, photos, MatcherConfig(), options, photo_dir=tmp_path)
@@ -515,8 +516,8 @@ class TestKeepStructure:
         output = tmp_path / "output"
         output.mkdir()
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(sub)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([sub]))
         options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, keep_structure=True)
 
         result = service.process(segments, photos, MatcherConfig(), options, photo_dir=sub)
@@ -547,8 +548,8 @@ class TestRejectGroups:
         img.save(tmp_path / "photo.jpg", "JPEG", exif=piexif.dump(exif))
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         result = service.preview(segments, photos, MatcherConfig())
         if result.failed > 0:
             assert len(result.reject_groups) > 0
@@ -579,8 +580,8 @@ class TestOperationLoggerIntegration:
         """Service without log_dir works normally (backward compatible)."""
         self._setup_gpx_and_photos(tmp_path)
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         result = service.preview(segments, photos, MatcherConfig())
         assert result.total == 1
 
@@ -593,8 +594,8 @@ class TestOperationLoggerIntegration:
         self._setup_gpx_and_photos(tmp_path)
         log_dir = tmp_path / "logs"
         service = GPSTaggingService(log_dir=log_dir)
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         service.preview(segments, photos, MatcherConfig())
 
         ops = (log_dir / "operations.log").read_text(encoding="utf-8")
@@ -611,8 +612,8 @@ class TestOperationLoggerIntegration:
         self._setup_gpx_and_photos(tmp_path)
         log_dir = tmp_path / "logs"
         service = GPSTaggingService(log_dir=log_dir)
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         result = service.preview(segments, photos, MatcherConfig())
 
         if result.matched > 0:
@@ -642,8 +643,8 @@ class TestOperationLoggerIntegration:
 
         log_dir = tmp_path / "logs"
         service = GPSTaggingService(log_dir=log_dir)
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         result = service.preview(segments, photos, MatcherConfig())
 
         if result.failed > 0:
@@ -662,8 +663,8 @@ class TestOperationLoggerIntegration:
 
         log_dir = tmp_path / "logs"
         service = GPSTaggingService(log_dir=log_dir)
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
         result = service.process(segments, photos, MatcherConfig(), options)
 
@@ -680,7 +681,7 @@ class TestOperationLoggerIntegration:
         (tmp_path / "bad.gpx").write_text("not xml")
         log_dir = tmp_path / "logs"
         service = GPSTaggingService(log_dir=log_dir)
-        service.scan_gpx(tmp_path)
+        service.scan_gpx(InputSelection.of([tmp_path]))
 
         errors = (log_dir / "errors.log").read_text(encoding="utf-8")
         assert "scan_gpx" in errors
@@ -695,7 +696,7 @@ class TestOperationLoggerIntegration:
         (tmp_path / "bad.jpg").write_bytes(b"not a real image")
         log_dir = tmp_path / "logs"
         service = GPSTaggingService(log_dir=log_dir)
-        service.scan_photos(tmp_path)
+        service.scan_photos(InputSelection.of([tmp_path]))
 
         errors = (log_dir / "errors.log").read_text(encoding="utf-8")
         assert "scan_photos" in errors
@@ -729,8 +730,8 @@ class TestCopyAfterWriteFailure:
         output.mkdir()
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
 
         # Make write_gps fail
@@ -756,7 +757,7 @@ class TestScanProgressCallbacks:
 
         service = GPSTaggingService()
         updates = []
-        segments = service.scan_gpx(tmp_path, on_progress=lambda u: updates.append(u))
+        segments = service.scan_gpx(InputSelection.of([tmp_path]), on_progress=lambda u: updates.append(u))
 
         assert len(segments) == 2
         assert len(updates) == 2
@@ -773,7 +774,7 @@ class TestScanProgressCallbacks:
 
         service = GPSTaggingService()
         updates = []
-        photos = service.scan_photos(tmp_path, on_progress=lambda u: updates.append(u))
+        photos = service.scan_photos(InputSelection.of([tmp_path]), on_progress=lambda u: updates.append(u))
 
         assert len(photos) == 2
         assert len(updates) == 2
@@ -788,7 +789,7 @@ class TestScanProgressCallbacks:
         (tmp_path / "good.gpx").write_text(gpx)
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
         assert len(segments) == 1
         assert segments[0].filename == "good.gpx"
 
@@ -813,8 +814,8 @@ class TestCopyModeEdgeCases:
         output.mkdir()
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(
             mode=ProcessMode.COPY, output_dir=output, keep_structure=True,
         )
@@ -842,8 +843,8 @@ class TestCopyModeEdgeCases:
         output.mkdir()
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
         result = service.process(segments, photos, MatcherConfig(), options, photo_dir=tmp_path)
 
@@ -919,8 +920,8 @@ class TestPipelineProgressCallback:
         img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
 
         updates = []
         result = service.preview(
@@ -947,8 +948,8 @@ class TestPipelineProgressCallback:
         output.mkdir()
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output)
 
         updates = []
@@ -996,7 +997,7 @@ class TestOrientationInScan:
         img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
 
         service = GPSTaggingService()
-        photos = service.scan_photos(tmp_path)
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         assert len(photos) == 1
         assert photos[0].orientation == 6
 
@@ -1006,7 +1007,7 @@ class TestOrientationInScan:
         img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
 
         service = GPSTaggingService()
-        photos = service.scan_photos(tmp_path)
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         assert len(photos) == 1
         # orientation is None when not set in EXIF
         assert photos[0].orientation is None
@@ -1037,8 +1038,8 @@ class TestResumeCheckpoint:
         CheckpointManager.mark(output, "photo.jpg")
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(
             mode=ProcessMode.COPY, output_dir=output, resume=True,
         )
@@ -1064,8 +1065,8 @@ class TestResumeCheckpoint:
         output.mkdir()
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(
             mode=ProcessMode.COPY, output_dir=output, resume=True,
         )
@@ -1093,8 +1094,8 @@ class TestReportGeneration:
         output.mkdir()
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(
             mode=ProcessMode.COPY, output_dir=output, generate_report=True,
         )
@@ -1121,8 +1122,8 @@ class TestConcurrentWorkersInResult:
         img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
 
         result = service.preview(segments, photos, MatcherConfig())
         assert result.concurrent_workers == 1
@@ -1142,8 +1143,8 @@ class TestConcurrentWorkersInResult:
         output.mkdir()
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, workers=4)
 
         result = service.process(segments, photos, MatcherConfig(), options)
@@ -1184,6 +1185,7 @@ class TestParallelWrite:
                     on_result(WriteResult(
                         success=True, filename=t.match_result.photo.filename,
                         dest_path=output / t.match_result.photo.filename,
+                        photo_path=str(t.match_result.photo.path),
                     ))
                 on_progress(len(tasks), len(tasks))
             return []
@@ -1228,9 +1230,11 @@ class TestParallelWrite:
 
         def fake_submit_all_with_failure(tasks, on_progress=None, on_result=None, cancel=None):
             if on_result:
-                on_result(WriteResult(
-                    success=False, filename="photo.jpg", error="write failed",
-                ))
+                for t in tasks:
+                    on_result(WriteResult(
+                        success=False, filename="photo.jpg", error="write failed",
+                        photo_path=str(t.match_result.photo.path),
+                    ))
             return []
 
         mock_instance = MagicMock()
@@ -1271,8 +1275,8 @@ class TestParallelWrite:
         output.mkdir()
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         options = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, workers=1)
 
         with patch("gps_photo_tracker.service.tagging_service.BatchProcessor") as MockBP:
@@ -1889,6 +1893,7 @@ class TestParallelWriteWithLogger:
                     on_result(WriteResult(
                         success=True, filename=t.match_result.photo.filename,
                         dest_path=output / t.match_result.photo.filename,
+                        photo_path=str(t.match_result.photo.path),
                     ))
                 on_progress(len(tasks), len(tasks))
             return []
@@ -1927,6 +1932,7 @@ class TestParallelWriteWithLogger:
                     on_result(WriteResult(
                         success=False, filename=t.match_result.photo.filename,
                         error=OSError("parallel write failed"),
+                        photo_path=str(t.match_result.photo.path),
                     ))
             return []
 
@@ -1966,6 +1972,7 @@ class TestParallelWriteWithLogger:
                     on_result(WriteResult(
                         success=False, filename=t.match_result.photo.filename,
                         error=OSError("failed"),
+                        photo_path=str(t.match_result.photo.path),
                     ))
             return []
 
@@ -2120,6 +2127,7 @@ class TestParallelProgressCallback:
                     on_result(WriteResult(
                         success=True, filename=t.match_result.photo.filename,
                         dest_path=output / t.match_result.photo.filename,
+                        photo_path=str(t.match_result.photo.path),
                     ))
             return []
 
@@ -2166,6 +2174,7 @@ class TestParallelFallbackCopyFail:
                     on_result(WriteResult(
                         success=False, filename=t.match_result.photo.filename,
                         error=OSError("parallel write failed"),
+                        photo_path=str(t.match_result.photo.path),
                     ))
             return []
 
@@ -2243,6 +2252,7 @@ class TestParallelCheckpoint:
                     on_result(WriteResult(
                         success=True, filename=t.match_result.photo.filename,
                         dest_path=output / t.match_result.photo.filename,
+                        photo_path=str(t.match_result.photo.path),
                     ))
             return []
 
@@ -2258,4 +2268,197 @@ class TestParallelCheckpoint:
             assert result.matched == 1
             from gps_photo_tracker.core.checkpoint import CheckpointManager
             assert CheckpointManager.is_interrupted(output) is False
+
+
+class TestScanWithInputSelection:
+    """scan_gpx/scan_photos accept InputSelection (file or directory)."""
+
+    def test_scan_photos_with_file(self, tmp_path):
+        (tmp_path / "a.jpg").write_bytes(b"\xff\xd8\xff\xe0")
+        photos = GPSTaggingService().scan_photos(InputSelection.of([tmp_path / "a.jpg"]))
+        assert len(photos) == 1 and photos[0].filename == "a.jpg"
+
+    def test_scan_photos_with_dir(self, tmp_path):
+        (tmp_path / "a.jpg").write_bytes(b"\xff\xd8\xff\xe0")
+        assert len(GPSTaggingService().scan_photos(InputSelection.of([tmp_path]))) == 1
+
+    def test_scan_gpx_with_file(self, tmp_path):
+        gpx = ('<?xml version="1.0"?><gpx><trk><trkseg>'
+               '<trkpt lat="31" lon="121"><time>2020-01-01T12:00:00Z</time></trkpt>'
+               '</trkseg></trk></gpx>')
+        gpx_file = tmp_path / "a.gpx"
+        gpx_file.write_text(gpx, encoding="utf-8")
+        segs = GPSTaggingService().scan_gpx(InputSelection.of([gpx_file]))
+        assert len(segs) >= 1 and len(segs[0].points) >= 1
+
+
+class TestMultiDirSameNameNoAlias:
+    """Round-2 review MAJOR: same-name photos in different selected directories must
+    not collide in the parallel-write / checkpoint path (keyed by full photo path)."""
+
+    def test_parallel_write_same_name_different_dir_no_alias(self, tmp_path):
+        """workers=2, two IMG.jpg in different dirs → both written, distinct dests, no aliasing.
+
+        Pre-fix this would either silently omit a photo (broken task_by_path lookup when
+        WriteResult carried only filename) or alias the two via task_by_filename.
+        """
+        from unittest.mock import patch
+
+        d1 = tmp_path / "d1"
+        d2 = tmp_path / "d2"
+        d1.mkdir()
+        d2.mkdir()
+        out = tmp_path / "out"
+        out.mkdir()
+
+        # Two same-named JPEGs with EXIF timestamps in different dirs
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(d1 / "IMG.jpg"), "JPEG", exif=piexif.dump(exif))
+        img.save(str(d2 / "IMG.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo1 = PhotoInfo(
+            path=d1 / "IMG.jpg", filename="IMG.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        photo2 = PhotoInfo(
+            path=d2 / "IMG.jpg", filename="IMG.jpg",
+            timestamp=2000.0, has_gps=False,
+        )
+        mr1 = MatchResult(
+            photo=photo1, success=True, gps=GPSInfo(31.0, 121.0),
+            method="interpolated", time_diff=10.0,
+        )
+        mr2 = MatchResult(
+            photo=photo2, success=True, gps=GPSInfo(32.0, 122.0),
+            method="interpolated", time_diff=10.0,
+        )
+
+        opts = ProcessOptions(
+            mode=ProcessMode.COPY, output_dir=out,
+            keep_structure=True, workers=2,
+        )
+
+        # Mock GPSMatcher (we test the write path, not matching) but let the
+        # REAL BatchProcessor + REAL EXIFWriter run — that's what catches the bug.
+        with patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher:
+            MockMatcher.return_value.match.return_value = [mr1, mr2]
+            MockMatcher.return_value.auto_follow.return_value = 0
+            service = GPSTaggingService()
+            result = service.process([], [photo1, photo2], MatcherConfig(), opts, photo_dir=tmp_path)
+
+        # Both photos written, no silent omission
+        written = list(out.rglob("IMG.jpg"))
+        assert len(written) == 2, f"expected 2 outputs, got {len(written)}: {written}"
+        # Distinct destination directories — no aliasing
+        assert {str(w.parent) for w in written} == {str(out / "d1"), str(out / "d2")}
+        # Both succeeded
+        assert result.matched == 2
+        assert result.failed == 0
+
+    def test_parallel_write_same_name_failure_fallback_no_omission(self, tmp_path):
+        """Round-2 MAJOR guard: workers=2, two same-name photos, one write FAILS.
+        The fallback copy must still emit the failed photo to its dest — a broken
+        feedback lookup (task_by_path.get(wr.filename)) would silently drop it.
+        """
+        from unittest.mock import patch
+
+        d1 = tmp_path / "d1"
+        d2 = tmp_path / "d2"
+        d1.mkdir()
+        d2.mkdir()
+        out = tmp_path / "out"
+        out.mkdir()
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(d1 / "IMG.jpg"), "JPEG", exif=piexif.dump(exif))
+        img.save(str(d2 / "IMG.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo1 = PhotoInfo(
+            path=d1 / "IMG.jpg", filename="IMG.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        photo2 = PhotoInfo(
+            path=d2 / "IMG.jpg", filename="IMG.jpg",
+            timestamp=2000.0, has_gps=False,
+        )
+        mr1 = MatchResult(
+            photo=photo1, success=True, gps=GPSInfo(31.0, 121.0),
+            method="interpolated", time_diff=10.0,
+        )
+        mr2 = MatchResult(
+            photo=photo2, success=True, gps=GPSInfo(32.0, 122.0),
+            method="interpolated", time_diff=10.0,
+        )
+
+        opts = ProcessOptions(
+            mode=ProcessMode.COPY, output_dir=out,
+            keep_structure=True, workers=2,
+        )
+
+        # Force write failure for the d1 photo; the fallback copy must still emit it.
+        real_write = EXIFWriter.write_gps
+
+        def failing_write(src, dst, gps):
+            if str(src) == str(d1 / "IMG.jpg"):
+                raise OSError("simulated write failure")
+            return real_write(src, dst, gps)
+
+        with patch("gps_photo_tracker.core.concurrency.EXIFWriter.write_gps", side_effect=failing_write), \
+             patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher:
+            MockMatcher.return_value.match.return_value = [mr1, mr2]
+            MockMatcher.return_value.auto_follow.return_value = 0
+            service = GPSTaggingService()
+            service.process([], [photo1, photo2], MatcherConfig(), opts, photo_dir=tmp_path)
+
+        # CRITICAL: both photos must be present in output — the failed one via fallback copy.
+        # A broken feedback lookup would skip the fallback and silently omit d1/IMG.jpg.
+        assert (out / "d1" / "IMG.jpg").exists(), "failed photo must be copied via fallback"
+        assert (out / "d2" / "IMG.jpg").exists(), "successful photo must be written"
+
+
+    def test_sequential_checkpoint_marked_by_full_path(self, tmp_path):
+        """Sequential write (workers=1) checkpoint entry is the full photo path, not filename.
+
+        Pre-fix this stored the bare filename; a same-name photo in another directory
+        would be falsely skipped on resume.
+        """
+        from gps_photo_tracker.core.checkpoint import CheckpointManager
+
+        img = Image.new("RGB", (10, 10))
+        exif = {"Exif": {piexif.ExifIFD.DateTimeOriginal: b"2026:02:17 08:05:00"}}
+        img.save(str(tmp_path / "photo.jpg"), "JPEG", exif=piexif.dump(exif))
+
+        photo = PhotoInfo(
+            path=tmp_path / "photo.jpg", filename="photo.jpg",
+            timestamp=1000.0, has_gps=False,
+        )
+        match_result = MatchResult(
+            photo=photo, success=True, gps=GPSInfo(25.0, 100.0),
+            method="interpolated", time_diff=10.0,
+        )
+        output = tmp_path / "output"
+        output.mkdir()
+        opts = ProcessOptions(mode=ProcessMode.COPY, output_dir=output, resume=True)
+
+        # Suppress checkpoint finalization so we can inspect the marked entries
+        from unittest.mock import patch
+        with patch("gps_photo_tracker.service.tagging_service.GPSMatcher") as MockMatcher, \
+             patch("gps_photo_tracker.service.tagging_service.EXIFWriter") as MockWriter, \
+             patch.object(CheckpointManager, "complete") as mock_complete:
+            MockMatcher.return_value.match.return_value = [match_result]
+            MockMatcher.return_value.auto_follow.return_value = 0
+            MockWriter.write_gps.return_value = True
+            service = GPSTaggingService()
+            result = service.process([], [photo], MatcherConfig(), opts, photo_dir=tmp_path)
+            assert result.matched == 1
+            mock_complete.assert_called_once()
+
+        # The marked key must be the full path, not the bare filename
+        completed = CheckpointManager.load(output)
+        assert str(tmp_path / "photo.jpg") in completed
+        assert "photo.jpg" not in completed  # bare filename must NOT be the key
+
+
 

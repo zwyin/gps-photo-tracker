@@ -24,6 +24,7 @@ class WriteResult:
     filename: str
     error: str | None = None
     dest_path: Path | None = None
+    photo_path: str | None = None  # full source path; identity key for multi-dir parallel writes
 
 
 def _copy_destination(src_path: Path, options: ProcessOptions, photo_dir: Path | None = None) -> Path:
@@ -45,21 +46,36 @@ def execute_task(task: WriteTask) -> WriteResult:
 
     try:
         if not result.gps:
-            return WriteResult(success=False, filename=result.photo.filename, error="no GPS data")
+            return WriteResult(
+                success=False, filename=result.photo.filename,
+                error="no GPS data", photo_path=str(result.photo.path),
+            )
 
         if opts.mode == ProcessMode.COPY and opts.output_dir:
             dst = _copy_destination(result.photo.path, opts, task.photo_dir)
             dst.parent.mkdir(parents=True, exist_ok=True)
             EXIFWriter.write_gps(result.photo.path, dst, result.gps)
-            return WriteResult(success=True, filename=result.photo.filename, dest_path=dst)
+            return WriteResult(
+                success=True, filename=result.photo.filename,
+                dest_path=dst, photo_path=str(result.photo.path),
+            )
         elif opts.mode == ProcessMode.OVERWRITE:
             EXIFWriter.write_gps(result.photo.path, result.photo.path, result.gps)
-            return WriteResult(success=True, filename=result.photo.filename)
+            return WriteResult(
+                success=True, filename=result.photo.filename,
+                photo_path=str(result.photo.path),
+            )
         else:
-            return WriteResult(success=False, filename=result.photo.filename, error="unsupported mode")
+            return WriteResult(
+                success=False, filename=result.photo.filename,
+                error="unsupported mode", photo_path=str(result.photo.path),
+            )
 
     except Exception as e:
-        return WriteResult(success=False, filename=result.photo.filename, error=str(e))
+        return WriteResult(
+            success=False, filename=result.photo.filename,
+            error=str(e), photo_path=str(result.photo.path),
+        )
 
 
 class BatchProcessor:

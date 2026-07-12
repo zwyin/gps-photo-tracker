@@ -6,7 +6,12 @@ from unittest.mock import patch
 
 from gps_photo_tracker.core import file_provider as fp_module
 from gps_photo_tracker.core.file_provider import FileProvider
-from gps_photo_tracker.core.models import FileAccessError, NetworkTimeoutError, PermissionDeniedError
+from gps_photo_tracker.core.models import (
+    FileAccessError,
+    InputSelection,
+    NetworkTimeoutError,
+    PermissionDeniedError,
+)
 
 
 class TestListPhotos:
@@ -240,3 +245,102 @@ class TestCopyDiskFull:
         with patch("gps_photo_tracker.core.file_provider.shutil.copy2", side_effect=err):
             with pytest.raises(DiskFullError):
                 provider.copy_file(src, dst)
+
+
+class TestResolvePhotos:
+
+    def test_recursive_scan_from_directory(self, tmp_path):
+        """Directory is scanned recursively for jpg/jpeg."""
+        sub = tmp_path / "subdir"
+        sub.mkdir()
+        (tmp_path / "top.jpg").write_bytes(b"fake")
+        (sub / "nested.jpeg").write_bytes(b"fake")
+        (sub / "notes.txt").write_bytes(b"fake")
+
+        out = FileProvider().resolve_photos(InputSelection.of([tmp_path]))
+
+        names = [p.name for p in out]
+        assert names == ["nested.jpeg", "top.jpg"]
+
+    def test_filters_by_extension(self, tmp_path):
+        """Non-photo extensions are dropped; only jpg kept."""
+        (tmp_path / "a.jpg").write_bytes(b"fake")
+        (tmp_path / "b.txt").write_bytes(b"fake")
+
+        out = FileProvider().resolve_photos(
+            InputSelection.of([tmp_path / "a.jpg", tmp_path / "b.txt"])
+        )
+
+        assert [p.name for p in out] == ["a.jpg"]
+
+    def test_mixed_dir_and_file_dedup(self, tmp_path):
+        """Same file reached via dir AND direct path appears once."""
+        (tmp_path / "a.jpg").write_bytes(b"fake")
+        (tmp_path / "b.jpg").write_bytes(b"fake")
+
+        out = FileProvider().resolve_photos(
+            InputSelection.of([tmp_path, tmp_path / "a.jpg"])
+        )
+
+        names = sorted(p.name for p in out)
+        assert names == ["a.jpg", "b.jpg"]
+
+    def test_case_insensitive_extension(self, tmp_path):
+        """Uppercase extensions are recognized."""
+        (tmp_path / "pic.JPG").write_bytes(b"fake")
+        (tmp_path / "pic2.JPEG").write_bytes(b"fake")
+
+        out = FileProvider().resolve_photos(InputSelection.of([tmp_path]))
+
+        assert sorted(p.name for p in out) == ["pic.JPG", "pic2.JPEG"]
+
+    def test_empty_selection(self):
+        """Empty selection returns empty list."""
+        assert FileProvider().resolve_photos(InputSelection.of([])) == []
+
+
+class TestResolveTracks:
+
+    def test_filters_by_extension(self, tmp_path):
+        """Only gpx/kml/tcx kept; other extensions dropped."""
+        (tmp_path / "a.gpx").write_text("gpx")
+        (tmp_path / "c.txt").write_text("skip")
+
+        out = FileProvider().resolve_tracks(
+            InputSelection.of([tmp_path / "a.gpx", tmp_path / "c.txt"])
+        )
+
+        assert [p.name for p in out] == ["a.gpx"]
+
+    def test_keeps_all_track_formats(self, tmp_path):
+        """gpx, kml, tcx are all accepted."""
+        (tmp_path / "a.gpx").write_text("gpx")
+        (tmp_path / "b.kml").write_text("kml")
+        (tmp_path / "c.tcx").write_text("tcx")
+        (tmp_path / "d.jpg").write_bytes(b"fake")
+
+        out = FileProvider().resolve_tracks(InputSelection.of([tmp_path]))
+
+        assert sorted(p.name for p in out) == ["a.gpx", "b.kml", "c.tcx"]
+
+    def test_non_recursive_from_directory(self, tmp_path):
+        """Nested track files are NOT picked up (non-recursive)."""
+        sub = tmp_path / "subdir"
+        sub.mkdir()
+        (tmp_path / "top.gpx").write_text("gpx")
+        (sub / "nested.gpx").write_text("gpx")
+
+        out = FileProvider().resolve_tracks(InputSelection.of([tmp_path]))
+
+        assert [p.name for p in out] == ["top.gpx"]
+
+    def test_empty_selection(self):
+        """Empty selection returns empty list."""
+        assert FileProvider().resolve_tracks(InputSelection.of([])) == []
+
+    def test_nonexistent_path_skipped(self, tmp_path):
+        """Non-existent paths are silently skipped (no raise)."""
+        out = FileProvider().resolve_tracks(
+            InputSelection.of([tmp_path / "missing.gpx"])
+        )
+        assert out == []

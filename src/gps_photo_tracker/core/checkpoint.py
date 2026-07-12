@@ -34,12 +34,19 @@ class CheckpointManager:
         return set(data.get("completed", []))
 
     @staticmethod
-    def mark(output_dir: Path, filename: str) -> None:
+    def mark(output_dir: Path, key: str) -> None:
+        """Append a completed-photo key to the checkpoint.
+
+        ``key`` is the photo's full source path as a string (post multi-dir fix).
+        Old checkpoints stored bare filenames; on resume those entries won't match
+        the new full-path keys, so the affected photos are safely re-done rather
+        than silently skipped.
+        """
         cp_file = output_dir / CHECKPOINT_FILE
         if not cp_file.exists():
             return
         data = json.loads(cp_file.read_text(encoding="utf-8"))
-        data["completed"].append(filename)
+        data["completed"].append(key)
         cp_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
     @staticmethod

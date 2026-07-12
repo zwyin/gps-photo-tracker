@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from gps_photo_tracker.core.models import (
     GPXSegment,
+    InputSelection,
     MatcherConfig,
     MatchResult,
     PhotoInfo,
@@ -37,7 +38,10 @@ from gps_photo_tracker.core.models import (
     ReviewState,
     TrackPoint,
 )
+from gps_photo_tracker.core.path_layout import lowest_common_ancestor
+from gps_photo_tracker.gui import mac_native_picker
 from gps_photo_tracker.gui.review_dialog import ReviewDialog
+from gps_photo_tracker.gui.selection_list_dialog import SelectionListDialog
 from gps_photo_tracker.gui.config_panel import build_params_group, build_step_group
 from gps_photo_tracker.gui.detail_dialog import DetailDialog
 from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
@@ -86,6 +90,8 @@ class MainWindow(QMainWindow):
         self._cached_segments = []
         self._cached_photos = []
         self._excluded_filenames: set[str] = set()
+        self._gps_selection = InputSelection()
+        self._photo_selection = InputSelection()
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -208,9 +214,12 @@ class MainWindow(QMainWindow):
         row1 = QHBoxLayout()
         self._gps_dir_edit = QComboBox()
         self._gps_dir_edit.setEditable(True)
-        self._gps_dir_edit.lineEdit().setPlaceholderText("GPS 轨迹目录 (GPX/KML/TCX)...")
-        btn_gps = QPushButton("浏览")
-        btn_gps.clicked.connect(self._browse_gps_dir)
+        self._gps_dir_edit.lineEdit().setPlaceholderText("GPS 轨迹 (GPX/KML/TCX 文件或目录)...")
+        self._gps_dir_edit.lineEdit().setReadOnly(True)
+        self._gps_dir_edit.setToolTip("点击「选择 ▾」按钮挑选 GPS 轨迹文件或目录")
+        self._gps_dir_edit.activated.connect(self._on_gps_history_activated)
+        btn_gps = QPushButton("选择 ▾")
+        btn_gps.clicked.connect(self._pick_gps_input)
         row1.addWidget(QLabel("GPS:"))
         row1.addWidget(self._gps_dir_edit)
         row1.addWidget(btn_gps)
@@ -220,9 +229,12 @@ class MainWindow(QMainWindow):
         row2 = QHBoxLayout()
         self._photo_dir_edit = QComboBox()
         self._photo_dir_edit.setEditable(True)
-        self._photo_dir_edit.lineEdit().setPlaceholderText("照片目录...")
-        btn_photo = QPushButton("浏览")
-        btn_photo.clicked.connect(self._browse_photo_dir)
+        self._photo_dir_edit.lineEdit().setPlaceholderText("照片 (JPG/JPEG 文件或目录)...")
+        self._photo_dir_edit.lineEdit().setReadOnly(True)
+        self._photo_dir_edit.setToolTip("点击「选择 ▾」按钮挑选照片文件或目录")
+        self._photo_dir_edit.activated.connect(self._on_photo_history_activated)
+        btn_photo = QPushButton("选择 ▾")
+        btn_photo.clicked.connect(self._pick_photo_input)
         row2.addWidget(QLabel("照片:"))
         row2.addWidget(self._photo_dir_edit)
         row2.addWidget(btn_photo)
@@ -316,26 +328,154 @@ class MainWindow(QMainWindow):
         else:
             self._splitter.setSizes([0, sum(sizes)])
 
-    def _browse_gps_dir(self):
-        path = QFileDialog.getExistingDirectory(self, "选择 GPS 轨迹目录")
-        if path:
-            self._gps_dir_edit.setCurrentText(path)
-            self._add_path_history("gps_dir_history", path, self._gps_dir_edit)
-            self._auto_scan_gpx(Path(path))
-
-    def _browse_photo_dir(self):
-        path = QFileDialog.getExistingDirectory(self, "选择照片目录")
-        if path:
-            self._photo_dir_edit.setCurrentText(path)
-            self._add_path_history("photo_dir_history", path, self._photo_dir_edit)
-            self._clear_results()
-            self._auto_scan_photos(Path(path))
-
     def _browse_output_dir(self):
         path = QFileDialog.getExistingDirectory(self, "选择输出目录")
         if path:
             self._output_dir_edit.setCurrentText(path)
             self._add_path_history("output_dir_history", path, self._output_dir_edit)
+
+    # ── File-or-directory selection ────────────────────────
+
+    _GPS_EXTS = (".gpx", ".kml", ".tcx")
+    _PHOTO_EXTS = (".jpg", ".jpeg")
+
+    def _pick_gps_input(self):
+        """Open the GPS input picker (file and/or directory)."""
+        self._pick("gps", "选择 GPS 轨迹", list(self._GPS_EXTS))
+
+    def _pick_photo_input(self):
+        """Open the photo input picker (file and/or directory)."""
+        self._pick("photo", "选择照片", list(self._PHOTO_EXTS))
+
+    def _pick(self, kind: str, title: str, exts: list[str]):
+        """Pick input paths for 'gps' or 'photo'. Uses native picker on macOS,
+        falls back to a {选择文件…/选择目录…} menu on other platforms."""
+        paths = self._collect_paths(title, exts)
+        if paths:
+            self._set_selection(kind, paths)
+
+    def _collect_paths(self, title: str, exts: list[str]) -> list[Path]:
+        """Collect paths via native macOS picker (returns None when pyobjc
+        unavailable) or the Qt fallback menu."""
+        if mac_native_picker.is_supported():
+            paths = mac_native_picker.pick_paths(title=title, allowed_exts=exts)
+            if paths is None:  # pyobjc missing → fall back
+                return self._menu_pick(title, exts)
+            return paths
+        return self._menu_pick(title, exts)
+
+    def _menu_pick(self, title: str, exts: list[str]) -> list[Path]:
+        """Qt fallback: {选择文件…/选择目录…} menu driven by cursor position."""
+        menu = QMenu(self)
+        act_files = menu.addAction("选择文件…")
+        menu.addSeparator()
+        act_dir = menu.addAction("选择目录…")
+        chosen = menu.exec(QCursor.pos())
+        if chosen is act_files:
+            filter_str = " ".join(f"*{e}" for e in exts)
+            paths_str, _ = QFileDialog.getOpenFileNames(
+                self, title, "", f"支持的文件 ({filter_str})")
+            return [Path(p) for p in paths_str]
+        if chosen is act_dir:
+            d = QFileDialog.getExistingDirectory(self, title)
+            return [Path(d)] if d else []
+        return []
+
+    def _pick_photo_input_files(self):
+        """Direct photo-file picker (no menu) — test-friendly entry point."""
+        paths_str, _ = QFileDialog.getOpenFileNames(
+            self, "选择照片文件", "", "照片 (*.jpg *.jpeg)")
+        if paths_str:
+            self._set_selection("photo", [Path(p) for p in paths_str])
+
+    def _pick_photo_input_dir(self):
+        """Direct photo-dir picker (no menu) — test-friendly entry point."""
+        d = QFileDialog.getExistingDirectory(self, "选择照片目录")
+        if d:
+            self._set_selection("photo", [Path(d)])
+
+    def _on_gps_history_activated(self, index: int):
+        """User picked a directory from the GPS combobox dropdown history —
+        sync the selection state to that path. `activated` only fires on user
+        interaction, not on programmatic setCurrentText/addItems."""
+        path_text = self._gps_dir_edit.itemText(index)
+        if path_text:
+            self._set_selection("gps", [Path(path_text)])
+
+    def _on_photo_history_activated(self, index: int):
+        """User picked a directory from the photo combobox dropdown history —
+        sync the selection state to that path. `activated` only fires on user
+        interaction, not on programmatic setCurrentText/addItems."""
+        path_text = self._photo_dir_edit.itemText(index)
+        if path_text:
+            self._set_selection("photo", [Path(path_text)])
+
+    def _set_selection(self, kind: str, paths: list[Path]):
+        """Store selection, render summary, and rescan labels."""
+        sel = InputSelection.of(paths)
+        if kind == "gps":
+            self._gps_selection = sel
+            self._render_selection(self._gps_dir_edit, sel, "gps_dir_history")
+            self._auto_scan_gpx()
+        else:
+            self._photo_selection = sel
+            self._render_selection(self._photo_dir_edit, sel, "photo_dir_history")
+            self._clear_results()
+            self._auto_scan_photos()
+
+    def _sync_selection_from_combo_if_needed(self):
+        """Backward-compat: if selection state is empty (no picker/drop used),
+        build it from combobox text (history dropdown or legacy typing)."""
+        if self._gps_selection.is_empty:
+            text = self._gps_dir_edit.currentText()
+            if text:
+                self._gps_selection = InputSelection.of([Path(text)])
+        if self._photo_selection.is_empty:
+            text = self._photo_dir_edit.currentText()
+            if text:
+                self._photo_selection = InputSelection.of([Path(text)])
+
+    def _render_selection(self, combo: QComboBox, sel: InputSelection, history_key: str):
+        """Show a one-line summary in the combobox; full paths in the tooltip.
+        Adds to history ONLY for a single-directory selection."""
+        n = len(sel.paths)
+        if n == 0:
+            combo.setCurrentText("")
+            combo.setToolTip("")
+            return
+        if n == 1:
+            text = str(sel.paths[0])
+        else:
+            files = [p for p in sel.paths if not p.is_dir()]
+            dirs = [p for p in sel.paths if p.is_dir()]
+            if files and not dirs:
+                text = f"📄 {len(files)} 个文件（点击查看）"
+            elif dirs and not files:
+                text = f"📁 {len(dirs)} 个目录（点击查看）"
+            else:
+                text = f"📄 {len(files)} 文件 + {len(dirs)} 目录（点击查看）"
+        combo.setCurrentText(text)
+        combo.setToolTip("\n".join(str(p) for p in sel.paths))
+        combo.lineEdit().mousePressEvent = lambda e: self._show_selection_list(combo, sel)
+        if n == 1 and sel.paths[0].is_dir():
+            self._add_path_history(history_key, str(sel.paths[0]), combo)
+
+    def _show_selection_list(self, combo: QComboBox, sel: InputSelection):
+        """Open the read-only selection list dialog (click-to-view)."""
+        if sel.paths:
+            SelectionListDialog(sel.paths, parent=self).exec()
+
+    def _photo_copy_root(self) -> Path | None:
+        """COPY root from photo selection: single dir → that dir; multiple → LCA;
+        filesystem root → None (flat placement)."""
+        sel = self._photo_selection
+        dirs = [p for p in sel.paths if p.is_dir()]
+        if len(sel.paths) == 1 and len(dirs) == 1:
+            return dirs[0]
+        root = lowest_common_ancestor(list(sel.paths))
+        if root is not None and root.parent == root:
+            root = None  # filesystem root (POSIX '/', Windows drive) → flat
+        return root
 
     def _clear_results(self):
         self._results_table.setRowCount(0)
@@ -344,12 +484,15 @@ class MainWindow(QMainWindow):
         self._stats_label.setText("")
         self._photo_preview.clear()
 
-    def _auto_scan_gpx(self, gps_dir: Path):
+    def _auto_scan_gpx(self, gps_dir: Path | None = None):
+        """Quick-scan GPS selection for a summary (segment count, point count).
+        If gps_dir is given, builds a one-off selection from it (legacy callers)."""
         from gps_photo_tracker.core.file_provider import FileProvider
         from gps_photo_tracker.core.track_parser import TrackParser
+        sel = InputSelection.of([gps_dir]) if gps_dir is not None else self._gps_selection
         provider = FileProvider()
         parser = TrackParser()
-        track_files = provider.list_tracks(gps_dir)
+        track_files = provider.resolve_tracks(sel)
         total_points = 0
         gpx_count = 0
         for f in track_files:
@@ -363,11 +506,14 @@ class MainWindow(QMainWindow):
             self._gpx_browser_label.setText(f"GPS: {gpx_count} 段, {total_points} 点 (点击查看)")
             self._scan_summary.setText(f"GPS: {gpx_count} 段, {total_points} 点")
 
-    def _auto_scan_photos(self, photo_dir: Path):
+    def _auto_scan_photos(self, photo_dir: Path | None = None):
+        """Quick-scan photo selection for a summary (photo count, GPS coverage).
+        If photo_dir is given, builds a one-off selection from it (legacy callers)."""
         from gps_photo_tracker.core.exif_writer import EXIFWriter
         from gps_photo_tracker.core.file_provider import FileProvider
+        sel = InputSelection.of([photo_dir]) if photo_dir is not None else self._photo_selection
         provider = FileProvider()
-        photo_paths = provider.list_photos(photo_dir)
+        photo_paths = provider.resolve_photos(sel)
         has_gps = 0
         for p in photo_paths:
             try:
@@ -419,24 +565,39 @@ class MainWindow(QMainWindow):
             overwrite_gps=self._overwrite_gps_cb.isChecked(),
         )
 
+    def _build_process_options(self, mode_copy=False, **kw):
+        """Build ProcessOptions, forcing keep_structure=True for file/mixed/
+        multi-directory selections so COPY-mode flattening cannot overwrite
+        same-named photos sourced from different directories. Single-dir
+        selections honor the caller-supplied keep_structure (the "保持目录结构"
+        checkbox).
+        """
+        is_file_mode = any(p.is_file() for p in self._photo_selection.paths)
+        is_multi = len(self._photo_selection.paths) > 1
+        keep = kw.pop("keep_structure", True)
+        if is_file_mode or is_multi:
+            keep = True   # 文件/混合/多目录选择强制保留结构，避免同名覆盖
+        mode = ProcessMode.COPY if mode_copy else ProcessMode.OVERWRITE
+        return ProcessOptions(mode=mode, keep_structure=keep, **kw)
+
     def _get_process_options(self) -> ProcessOptions:
         output_dir = Path(self._output_dir_edit.currentText()) if self._output_dir_edit.currentText() else None
         settings = QSettings()
-        return ProcessOptions(
-            mode=ProcessMode.PREVIEW,
+        opts = self._build_process_options(
+            mode_copy=False,
             output_dir=output_dir,
-            overwrite_gps=self._overwrite_gps_cb.isChecked(),
             keep_structure=self._keep_struct_cb.isChecked(),
+            overwrite_gps=self._overwrite_gps_cb.isChecked(),
             resume=bool(settings.value("resume", False, type=bool)),
             generate_report=bool(settings.value("generate_report", False, type=bool)),
             workers=self._workers_spin.value(),
         )
+        opts.mode = ProcessMode.PREVIEW  # default for preview callers; execute path mutates
+        return opts
 
     def _on_auto_tune(self):
         """Auto-tune parameters by re-scanning actual data."""
-        gps_dir = self._gps_dir_edit.currentText()
-        photo_dir = self._photo_dir_edit.currentText()
-        if not gps_dir or not photo_dir:
+        if self._gps_selection.is_empty or self._photo_selection.is_empty:
             QMessageBox.information(self, "提示", "请先选择 GPS 轨迹目录和照片目录")
             return
         reply = QMessageBox.question(
@@ -452,8 +613,8 @@ class MainWindow(QMainWindow):
         service = GPSTaggingService()
         self.statusBar().showMessage("正在分析数据...")
         try:
-            segments = service.scan_gpx(Path(gps_dir))
-            photos = service.scan_photos(Path(photo_dir))
+            segments = service.scan_gpx(self._gps_selection)
+            photos = service.scan_photos(self._photo_selection)
         except Exception as e:
             QMessageBox.warning(self, "错误", f"扫描失败: {e}")
             return
@@ -493,9 +654,8 @@ class MainWindow(QMainWindow):
 
     def _on_step1_preview(self):
         """Step ①: Scan + match (preview only, no writing)."""
-        gps_dir = self._gps_dir_edit.currentText()
-        photo_dir = self._photo_dir_edit.currentText()
-        if not gps_dir or not photo_dir:
+        self._sync_selection_from_combo_if_needed()
+        if self._gps_selection.is_empty or self._photo_selection.is_empty:
             QMessageBox.warning(self, "提示", "请先选择 GPS 轨迹目录和照片目录")
             return
 
@@ -519,10 +679,11 @@ class MainWindow(QMainWindow):
 
         self._set_processing(True)
         self._worker = Worker(
-            gps_dir=Path(gps_dir),
-            photo_dir=Path(photo_dir),
+            gps_selection=self._gps_selection,
+            photo_selection=self._photo_selection,
             config=config,
             options=options,
+            photo_root=self._photo_copy_root(),
             log_dir=log_dir,
             excluded_filenames=self._excluded_filenames,
         )
@@ -639,11 +800,13 @@ class MainWindow(QMainWindow):
         self._set_processing(True)
         self._write_mode = mode
 
+        self._sync_selection_from_combo_if_needed()
         self._worker = Worker(
-            gps_dir=Path(self._gps_dir_edit.currentText()),
-            photo_dir=Path(self._photo_dir_edit.currentText()),
+            gps_selection=self._gps_selection,
+            photo_selection=self._photo_selection,
             config=config,
             options=options,
+            photo_root=self._photo_copy_root(),
             log_dir=log_dir,
             excluded_filenames=self._excluded_filenames,
             pre_computed_results=results,
@@ -1206,8 +1369,12 @@ class MainWindow(QMainWindow):
     def _build_export_filename(self, ext: str) -> str:
         from datetime import date
         from gps_photo_tracker import __version__, __commit__
-        photo_dir = self._photo_dir_edit.currentText()
-        dir_name = Path(photo_dir).name if photo_dir else "results"
+        sel = self._photo_selection
+        dirs = [p for p in sel.paths if p.is_dir()]
+        if len(sel.paths) == 1 and len(dirs) == 1:
+            dir_name = dirs[0].name
+        else:
+            dir_name = "results"
         safe_name = self._sanitize_filename(dir_name)
         today = date.today().isoformat()
         commit = __commit__
@@ -1754,14 +1921,9 @@ class MainWindow(QMainWindow):
             return
         gps_dir, photo_dir = self._classify_drop(urls)
         if gps_dir:
-            self._gps_dir_edit.setCurrentText(str(gps_dir))
-            self._add_path_history("gps_dir_history", str(gps_dir), self._gps_dir_edit)
-            self._auto_scan_gpx(gps_dir)
+            self._set_selection("gps", [gps_dir])
         if photo_dir:
-            self._photo_dir_edit.setCurrentText(str(photo_dir))
-            self._add_path_history("photo_dir_history", str(photo_dir), self._photo_dir_edit)
-            self._clear_results()
-            self._auto_scan_photos(photo_dir)
+            self._set_selection("photo", [photo_dir])
         if not gps_dir and not photo_dir:
             QMessageBox.information(self, "拖放", "无法识别拖入的内容类型")
         event.accept()

@@ -9,6 +9,7 @@ from tenacity import retry, stop_after_attempt, stop_after_delay, wait_exponenti
 from gps_photo_tracker.core.models import (
     DiskFullError,
     FileAccessError,
+    InputSelection,
     NetworkTimeoutError,
     PermissionDeniedError,
 )
@@ -25,6 +26,9 @@ _COPY_TIMEOUT = 30  # seconds per copy attempt
 
 class FileProvider:
     """File system operations with retry for network disks."""
+
+    _PHOTO_EXTS = (".jpg", ".jpeg")
+    _TRACK_EXTS = (".gpx", ".kml", ".tcx")
 
     def list_photos(self, directory: Path) -> list[Path]:
         """Recursively find all JPEG files in directory."""
@@ -52,6 +56,33 @@ class FileProvider:
             p for p in directory.iterdir()
             if p.is_file() and p.suffix.lower() in (".gpx", ".kml", ".tcx")
         )
+
+    def _expand(self, sel: InputSelection, exts: tuple[str, ...], recursive: bool) -> list[Path]:
+        """Expand an InputSelection into a deduped, sorted list of files.
+
+        Directories are scanned (recursive or not); files are kept iff their
+        extension matches. Non-existent paths are silently skipped.
+        """
+        result: set[Path] = set()
+        for p in sel.paths:
+            if not p.exists():
+                continue
+            if p.is_dir():
+                iterator = p.rglob("*") if recursive else p.iterdir()
+                for item in iterator:
+                    if item.is_file() and item.suffix.lower() in exts:
+                        result.add(item)
+            elif p.is_file() and p.suffix.lower() in exts:
+                result.add(p)
+        return sorted(result)
+
+    def resolve_photos(self, sel: InputSelection) -> list[Path]:
+        """Resolve photos from selection: dirs scanned recursively, files filtered by ext."""
+        return self._expand(sel, self._PHOTO_EXTS, recursive=True)
+
+    def resolve_tracks(self, sel: InputSelection) -> list[Path]:
+        """Resolve tracks from selection: dirs scanned non-recursively, files filtered by ext."""
+        return self._expand(sel, self._TRACK_EXTS, recursive=False)
 
     @_RETRY
     def copy_file(self, src: Path, dst: Path) -> None:

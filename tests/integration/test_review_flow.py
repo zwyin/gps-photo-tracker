@@ -9,6 +9,7 @@ from PIL import Image
 from gps_photo_tracker.core.models import (
     GPXSegment,
     GPSInfo,
+    InputSelection,
     MatcherConfig,
     MatchResult,
     PhotoInfo,
@@ -51,8 +52,8 @@ class TestReviewFlow:
         _create_test_photo(tmp_path / "photo.jpg")
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         config = MatcherConfig()
 
         # Phase 1: match (preview only, no write)
@@ -94,8 +95,8 @@ class TestReviewFlow:
         _create_test_photo(tmp_path / "photo.jpg")
 
         service = GPSTaggingService()
-        segments = service.scan_gpx(tmp_path)
-        photos = service.scan_photos(tmp_path)
+        segments = service.scan_gpx(InputSelection.of([tmp_path]))
+        photos = service.scan_photos(InputSelection.of([tmp_path]))
         config = MatcherConfig()
 
         result = service.preview(segments, photos, config)

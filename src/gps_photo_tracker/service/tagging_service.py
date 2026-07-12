@@ -18,6 +18,7 @@ from gps_photo_tracker.core.models import (
     BatchResult,
     GPSInfo,
     GPXSegment,
+    InputSelection,
     MatcherConfig,
     MatchResult,
     PhotoInfo,
@@ -218,10 +219,10 @@ class GPSTaggingService:
             reject_groups=reject_groups,
         )
 
-    def scan_gpx(self, gpx_dir: Path, on_progress: Callable | None = None) -> list[GPXSegment]:
-        """Scan directory for track files (GPX, KML, TCX) and parse them."""
+    def scan_gpx(self, selection: InputSelection, on_progress: Callable | None = None) -> list[GPXSegment]:
+        """Scan selection for track files (GPX, KML, TCX) and parse them."""
         start = time.time()
-        track_files = self._file_provider.list_tracks(gpx_dir)
+        track_files = self._file_provider.resolve_tracks(selection)
         all_segments: list[GPXSegment] = []
         for i, track_path in enumerate(track_files):
             try:
@@ -239,14 +240,14 @@ class GPSTaggingService:
                     current_file=track_path.name,
                     elapsed_seconds=time.time() - start,
                 ))
-        logger.debug("scan_gpx 完成 | 目录=%s, 文件=%d, 段=%d, 耗时=%.1fs",
-                     gpx_dir, len(track_files), len(all_segments), time.time() - start)
+        logger.debug("scan_gpx 完成 | 输入=%s, 文件=%d, 段=%d, 耗时=%.1fs",
+                     selection, len(track_files), len(all_segments), time.time() - start)
         return all_segments
 
-    def scan_photos(self, photo_dir: Path, on_progress: Callable | None = None) -> list[PhotoInfo]:
-        """Scan directory for JPEG files and read their timestamps."""
+    def scan_photos(self, selection: InputSelection, on_progress: Callable | None = None) -> list[PhotoInfo]:
+        """Scan selection for JPEG files and read their timestamps."""
         start = time.time()
-        photo_paths = self._file_provider.list_photos(photo_dir)
+        photo_paths = self._file_provider.resolve_photos(selection)
         photos: list[PhotoInfo] = []
         for i, path in enumerate(photo_paths):
             try:
@@ -279,8 +280,8 @@ class GPSTaggingService:
                     current_file=path.name,
                     elapsed_seconds=time.time() - start,
                 ))
-        logger.debug("scan_photos 完成 | 目录=%s, 照片=%d, 耗时=%.1fs",
-                     photo_dir, len(photos), time.time() - start)
+        logger.debug("scan_photos 完成 | 输入=%s, 照片=%d, 耗时=%.1fs",
+                     selection, len(photos), time.time() - start)
         return photos
 
     def preview(
@@ -375,14 +376,14 @@ class GPSTaggingService:
             and options.mode in (ProcessMode.COPY, ProcessMode.OVERWRITE)
         )
         write_tasks: list[WriteTask] = []
-        filename_to_overwritten: dict[str, bool] = {}  # track which parallel tasks overwrite
+        path_to_overwritten: dict[str, bool] = {}  # keyed by str(photo.path); tracks parallel overwrites
 
         for i, result in enumerate(match_results):
             if cancel and cancel.is_cancelled:
                 break
 
-            # Resume: skip already-completed photos
-            if completed_set and result.photo.filename in completed_set:
+            # Resume: skip already-completed photos (keyed by full path to avoid cross-dir collision)
+            if completed_set and str(result.photo.path) in completed_set:
                 continue
 
             elapsed = time.time() - start
@@ -417,7 +418,7 @@ class GPSTaggingService:
                                 write_tasks.append(WriteTask(
                                     match_result=result, options=options, photo_dir=photo_dir,
                                 ))
-                                filename_to_overwritten[result.photo.filename] = result.photo.has_gps
+                                path_to_overwritten[str(result.photo.path)] = result.photo.has_gps
                             else:
                                 try:
                                     dst = self._write_photo(result, options, photo_dir)
@@ -455,19 +456,19 @@ class GPSTaggingService:
 
             # Checkpoint: mark completed (sequential mode only; parallel marks after batch)
             if not use_parallel and use_checkpoint and options and options.output_dir and result.success:
-                CheckpointManager.mark(options.output_dir, result.photo.filename)
+                CheckpointManager.mark(options.output_dir, str(result.photo.path))
 
         # Parallel write phase
         if use_parallel and write_tasks:
             logger.info("并行写入: %d 任务, %d workers", len(write_tasks), options.workers)
             processor = BatchProcessor(workers=options.workers)
 
-            # Build lookup dict for O(1) access (handles duplicate filenames in different dirs)
-            task_by_filename: dict[str, WriteTask] = {}
+            # Build lookup dict keyed by full photo path (handles same filename in different dirs)
+            task_by_path: dict[str, WriteTask] = {}
             for wt in write_tasks:
-                task_by_filename[wt.match_result.photo.filename] = wt
+                task_by_path[str(wt.match_result.photo.path)] = wt
 
-            completed_filenames: list[str] = []
+            completed_paths: list[str] = []
             def _on_write_progress(done: int, total: int):
                 if on_progress:
                     on_progress(ProgressUpdate(
@@ -481,9 +482,9 @@ class GPSTaggingService:
             def _on_write_result(wr):
                 nonlocal overwritten
                 if wr.success:
-                    completed_filenames.append(wr.filename)
+                    completed_paths.append(str(wr.photo_path))
                     if self._op_logger:
-                        task = task_by_filename.get(wr.filename)
+                        task = task_by_path.get(str(wr.photo_path))
                         if task:
                             r = task.match_result
                             self._op_logger.log_write_success(r.photo, r.gps, dest=wr.dest_path)
@@ -491,14 +492,14 @@ class GPSTaggingService:
                     nonlocal failed, matched
                     failed += 1
                     matched -= 1
-                    if filename_to_overwritten.get(wr.filename, False):
+                    if path_to_overwritten.get(str(wr.photo_path), False):
                         overwritten -= 1
                     if self._op_logger:
                         self._op_logger.log_error(f"parallel_write: {wr.filename}", wr.error)
                     # Fallback: copy original photo to output (all photos must output)
                     if is_copy and options.output_dir:
                         try:
-                            task = task_by_filename.get(wr.filename)
+                            task = task_by_path.get(str(wr.photo_path))
                             if task:
                                 dst = self._copy_destination(task.match_result.photo.path, options, photo_dir)
                                 self._file_provider.copy_file(task.match_result.photo.path, dst)
@@ -528,8 +529,8 @@ class GPSTaggingService:
 
             # Checkpoint: batch-mark all completed writes (no race — single-threaded)
             if use_checkpoint and options.output_dir:
-                for fn in completed_filenames:
-                    CheckpointManager.mark(options.output_dir, fn)
+                for p in completed_paths:
+                    CheckpointManager.mark(options.output_dir, p)
 
         # Checkpoint: finalize if not cancelled
         if use_checkpoint and options and options.output_dir:

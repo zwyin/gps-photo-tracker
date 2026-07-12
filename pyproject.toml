@@ -1,6 +1,6 @@
 [project]
 name = "gps-photo-tracker"
-version = "0.22.0"
+version = "0.23.0"
 description = "Batch process photos with GPS tracks (GPX/KML/TCX) to write EXIF GPS tags"
 license = {text = "GPL-3.0-or-later"}
 requires-python = ">=3.11"
@@ -10,6 +10,14 @@ dependencies = [
     "gpxpy>=1.6.0",
     "geopy>=2.4.0",
     "tenacity>=8.0.0",
+    # macOS native file/dir picker (gui/mac_native_picker.py) uses NSOpenPanel
+    # via `from AppKit import NSOpenPanel`. The AppKit module is a top-level
+    # package of pyobjc-framework-Cocoa (its top_level.txt declares AppKit,
+    # Foundation, Cocoa, CoreFoundation); there is NO standalone
+    # "pyobjc-framework-AppKit" distribution on PyPI. PyInstaller's standard
+    # module-graph analysis follows the import and bundles it, so NO manual
+    # AppKit/Foundation entries belong in gps-photo-tracker.spec hiddenimports.
+    'pyobjc-framework-Cocoa>=10.0; sys_platform=="darwin"',
 ]
 
 [project.urls]
