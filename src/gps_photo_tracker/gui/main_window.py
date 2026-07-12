@@ -565,18 +565,33 @@ class MainWindow(QMainWindow):
             overwrite_gps=self._overwrite_gps_cb.isChecked(),
         )
 
+    def _build_process_options(self, mode_copy=False, **kw):
+        """Build ProcessOptions, forcing keep_structure=True for file/mixed
+        selections so COPY-mode flattening cannot overwrite same-named photos
+        sourced from different directories. Single-dir selections honor the
+        caller-supplied keep_structure (the "保持目录结构" checkbox).
+        """
+        is_file_mode = any(p.is_file() for p in self._photo_selection.paths)
+        keep = kw.pop("keep_structure", True)
+        if is_file_mode:
+            keep = True   # 文件/混合选择强制保留结构，避免同名覆盖
+        mode = ProcessMode.COPY if mode_copy else ProcessMode.OVERWRITE
+        return ProcessOptions(mode=mode, keep_structure=keep, **kw)
+
     def _get_process_options(self) -> ProcessOptions:
         output_dir = Path(self._output_dir_edit.currentText()) if self._output_dir_edit.currentText() else None
         settings = QSettings()
-        return ProcessOptions(
-            mode=ProcessMode.PREVIEW,
+        opts = self._build_process_options(
+            mode_copy=False,
             output_dir=output_dir,
-            overwrite_gps=self._overwrite_gps_cb.isChecked(),
             keep_structure=self._keep_struct_cb.isChecked(),
+            overwrite_gps=self._overwrite_gps_cb.isChecked(),
             resume=bool(settings.value("resume", False, type=bool)),
             generate_report=bool(settings.value("generate_report", False, type=bool)),
             workers=self._workers_spin.value(),
         )
+        opts.mode = ProcessMode.PREVIEW  # default for preview callers; execute path mutates
+        return opts
 
     def _on_auto_tune(self):
         """Auto-tune parameters by re-scanning actual data."""

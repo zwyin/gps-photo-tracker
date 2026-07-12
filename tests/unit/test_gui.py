@@ -5722,3 +5722,80 @@ class TestQuickFollowOutOfRangeCandidate:
         main_window._quick_follow_gps(1, -1)
         # Should still find row 0 as valid candidate
         assert "25.0000" in main_window._results_table.item(1, 4).text()
+
+
+# ── MainWindow: _build_process_options keep_structure forcing ──
+
+class TestBuildProcessOptions:
+    """_build_process_options: file/mixed selections force keep_structure=True
+    to prevent same-name overwrites when COPY flattens to output/<filename>."""
+
+    def test_multi_file_forces_keep_structure_even_when_disabled(self, main_window, tmp_path):
+        """Two files from different dirs + keep_structure=False → still True."""
+        sub1 = tmp_path / "trip_a"; sub1.mkdir()
+        sub2 = tmp_path / "trip_b"; sub2.mkdir()
+        f1 = sub1 / "IMG_001.jpg"; f1.write_bytes(b"x")
+        f2 = sub2 / "IMG_001.jpg"; f2.write_bytes(b"x")
+        main_window._photo_selection = InputSelection.of([f1, f2])
+
+        opts = main_window._build_process_options(mode_copy=True, keep_structure=False)
+        assert opts.keep_structure is True
+        assert opts.mode == ProcessMode.COPY
+
+    def test_single_dir_honors_keep_structure_false(self, main_window, tmp_path):
+        """Single dir + keep_structure=False (checkbox unchecked) → False."""
+        d = tmp_path / "photos"; d.mkdir()
+        main_window._photo_selection = InputSelection.of([d])
+
+        opts = main_window._build_process_options(mode_copy=True, keep_structure=False)
+        assert opts.keep_structure is False
+
+    def test_single_dir_honors_keep_structure_true(self, main_window, tmp_path):
+        """Single dir + keep_structure=True (checkbox checked) → True."""
+        d = tmp_path / "photos"; d.mkdir()
+        main_window._photo_selection = InputSelection.of([d])
+
+        opts = main_window._build_process_options(mode_copy=True, keep_structure=True)
+        assert opts.keep_structure is True
+
+    def test_mixed_dir_and_file_forces_keep_structure(self, main_window, tmp_path):
+        """Mixed selection (dir + file) forces keep_structure=True."""
+        d = tmp_path / "album"; d.mkdir()
+        f = tmp_path / "loose.jpg"; f.write_bytes(b"x")
+        main_window._photo_selection = InputSelection.of([d, f])
+
+        opts = main_window._build_process_options(mode_copy=True, keep_structure=False)
+        assert opts.keep_structure is True
+
+    def test_mode_copy_false_returns_overwrite(self, main_window, tmp_path):
+        """mode_copy=False → ProcessMode.OVERWRITE (still forces keep for file selection)."""
+        f1 = tmp_path / "a.jpg"; f1.write_bytes(b"x")
+        main_window._photo_selection = InputSelection.of([f1])
+
+        opts = main_window._build_process_options(mode_copy=False, keep_structure=False)
+        assert opts.mode == ProcessMode.OVERWRITE
+        assert opts.keep_structure is True  # file mode still forces
+
+    def test_default_keep_structure_is_true_for_dir(self, main_window, tmp_path):
+        """No keep_structure kw → defaults to True for dir selection."""
+        d = tmp_path / "photos"; d.mkdir()
+        main_window._photo_selection = InputSelection.of([d])
+
+        opts = main_window._build_process_options(mode_copy=True)
+        assert opts.keep_structure is True
+
+    def test_passes_through_other_kwargs(self, main_window, tmp_path):
+        """output_dir/overwrite_gps/workers flow through unchanged."""
+        d = tmp_path / "photos"; d.mkdir()
+        main_window._photo_selection = InputSelection.of([d])
+
+        out = tmp_path / "out"
+        opts = main_window._build_process_options(
+            mode_copy=True,
+            output_dir=out,
+            overwrite_gps=True,
+            workers=4,
+        )
+        assert opts.output_dir == out
+        assert opts.overwrite_gps is True
+        assert opts.workers == 4
