@@ -217,6 +217,7 @@ class MainWindow(QMainWindow):
         self._gps_dir_edit.lineEdit().setPlaceholderText("GPS 轨迹 (GPX/KML/TCX 文件或目录)...")
         self._gps_dir_edit.lineEdit().setReadOnly(True)
         self._gps_dir_edit.setToolTip("点击「选择 ▾」按钮挑选 GPS 轨迹文件或目录")
+        self._gps_dir_edit.activated.connect(self._on_gps_history_activated)
         btn_gps = QPushButton("选择 ▾")
         btn_gps.clicked.connect(self._pick_gps_input)
         row1.addWidget(QLabel("GPS:"))
@@ -231,6 +232,7 @@ class MainWindow(QMainWindow):
         self._photo_dir_edit.lineEdit().setPlaceholderText("照片 (JPG/JPEG 文件或目录)...")
         self._photo_dir_edit.lineEdit().setReadOnly(True)
         self._photo_dir_edit.setToolTip("点击「选择 ▾」按钮挑选照片文件或目录")
+        self._photo_dir_edit.activated.connect(self._on_photo_history_activated)
         btn_photo = QPushButton("选择 ▾")
         btn_photo.clicked.connect(self._pick_photo_input)
         row2.addWidget(QLabel("照片:"))
@@ -391,6 +393,22 @@ class MainWindow(QMainWindow):
         d = QFileDialog.getExistingDirectory(self, "选择照片目录")
         if d:
             self._set_selection("photo", [Path(d)])
+
+    def _on_gps_history_activated(self, index: int):
+        """User picked a directory from the GPS combobox dropdown history —
+        sync the selection state to that path. `activated` only fires on user
+        interaction, not on programmatic setCurrentText/addItems."""
+        path_text = self._gps_dir_edit.itemText(index)
+        if path_text:
+            self._set_selection("gps", [Path(path_text)])
+
+    def _on_photo_history_activated(self, index: int):
+        """User picked a directory from the photo combobox dropdown history —
+        sync the selection state to that path. `activated` only fires on user
+        interaction, not on programmatic setCurrentText/addItems."""
+        path_text = self._photo_dir_edit.itemText(index)
+        if path_text:
+            self._set_selection("photo", [Path(path_text)])
 
     def _set_selection(self, kind: str, paths: list[Path]):
         """Store selection, render summary, and rescan labels."""
@@ -562,9 +580,7 @@ class MainWindow(QMainWindow):
 
     def _on_auto_tune(self):
         """Auto-tune parameters by re-scanning actual data."""
-        gps_dir = self._gps_dir_edit.currentText()
-        photo_dir = self._photo_dir_edit.currentText()
-        if not gps_dir or not photo_dir:
+        if self._gps_selection.is_empty or self._photo_selection.is_empty:
             QMessageBox.information(self, "提示", "请先选择 GPS 轨迹目录和照片目录")
             return
         reply = QMessageBox.question(
@@ -580,8 +596,8 @@ class MainWindow(QMainWindow):
         service = GPSTaggingService()
         self.statusBar().showMessage("正在分析数据...")
         try:
-            segments = service.scan_gpx(InputSelection.of([Path(gps_dir)]))
-            photos = service.scan_photos(InputSelection.of([Path(photo_dir)]))
+            segments = service.scan_gpx(self._gps_selection)
+            photos = service.scan_photos(self._photo_selection)
         except Exception as e:
             QMessageBox.warning(self, "错误", f"扫描失败: {e}")
             return
@@ -1336,8 +1352,12 @@ class MainWindow(QMainWindow):
     def _build_export_filename(self, ext: str) -> str:
         from datetime import date
         from gps_photo_tracker import __version__, __commit__
-        photo_dir = self._photo_dir_edit.currentText()
-        dir_name = Path(photo_dir).name if photo_dir else "results"
+        sel = self._photo_selection
+        dirs = [p for p in sel.paths if p.is_dir()]
+        if len(sel.paths) == 1 and len(dirs) == 1:
+            dir_name = dirs[0].name
+        else:
+            dir_name = "results"
         safe_name = self._sanitize_filename(dir_name)
         today = date.today().isoformat()
         commit = __commit__

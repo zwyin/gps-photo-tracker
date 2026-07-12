@@ -3218,17 +3218,28 @@ class TestKeyEvents:
 # ── MainWindow: export filename ─────────────────────────────
 
 class TestExportFilename:
-    def test_builds_filename_with_dir(self, main_window):
-        main_window._photo_dir_edit.setCurrentText("/photos/Tokyo Trip")
+    def test_builds_filename_with_dir(self, main_window, tmp_path):
+        d = tmp_path / "Tokyo Trip"
+        d.mkdir()
+        main_window._photo_selection = InputSelection.of([d])
         name = main_window._build_export_filename("csv")
         assert "Tokyo_Trip" in name
         assert name.endswith(".csv")
 
     def test_builds_filename_no_dir(self, main_window):
-        main_window._photo_dir_edit.setCurrentText("")
+        main_window._photo_selection = InputSelection()
         name = main_window._build_export_filename("md")
         assert name.startswith("GPS追踪_results_")
         assert name.endswith(".md")
+
+    def test_builds_filename_multi_file_uses_results(self, main_window, tmp_path):
+        """Regression: multi-file selection yields 'results', not a bogus name."""
+        f1 = tmp_path / "a.jpg"; f1.touch()
+        f2 = tmp_path / "b.jpg"; f2.touch()
+        main_window._photo_selection = InputSelection.of([f1, f2])
+        name = main_window._build_export_filename("csv")
+        assert name.startswith("GPS追踪_results_")
+        assert name.endswith(".csv")
 
 
 # ── MainWindow: collect table results ───────────────────────
@@ -3949,14 +3960,35 @@ class TestPathHistory:
             main_window._load_path_history()
         assert main_window._gps_dir_edit.count() >= 1
 
+    def test_history_activated_syncs_selection(self, main_window, tmp_path):
+        """Regression: picking a dir from the combobox dropdown history must
+        update _gps_selection. Before wiring `activated`, the combo text changed
+        but selection state stayed stale (same bug class as C1/I1)."""
+        d = tmp_path / "trip"
+        d.mkdir()
+        main_window._gps_dir_edit.clear()
+        main_window._gps_dir_edit.addItem(str(d))
+        with patch.object(main_window, "_auto_scan_gpx"):
+            main_window._on_gps_history_activated(0)
+        assert main_window._gps_selection.paths == (d,)
+
+    def test_photo_history_activated_syncs_selection(self, main_window, tmp_path):
+        d = tmp_path / "photos"
+        d.mkdir()
+        main_window._photo_dir_edit.clear()
+        main_window._photo_dir_edit.addItem(str(d))
+        with patch.object(main_window, "_auto_scan_photos"):
+            main_window._on_photo_history_activated(0)
+        assert main_window._photo_selection.paths == (d,)
+
 
 # ── MainWindow: auto tune ──────────────────────────────────
 
 class TestAutoTune:
     def test_auto_tune_updates_spins(self, main_window, tmp_path):
         from PySide6.QtWidgets import QMessageBox as QMB
-        main_window._gps_dir_edit.setCurrentText(str(tmp_path))
-        main_window._photo_dir_edit.setCurrentText(str(tmp_path))
+        main_window._gps_selection = InputSelection.of([tmp_path])
+        main_window._photo_selection = InputSelection.of([tmp_path])
         from gps_photo_tracker.core.models import MatcherConfig
         with patch("gps_photo_tracker.gui.main_window.QMessageBox.question",
                    return_value=QMB.StandardButton.Yes), \
@@ -3974,18 +4006,52 @@ class TestAutoTune:
         assert main_window._middle_spin.value() == 888
 
     def test_auto_tune_no_dirs_shows_info(self, main_window):
-        main_window._gps_dir_edit.setCurrentText("")
-        main_window._photo_dir_edit.setCurrentText("")
+        main_window._gps_selection = InputSelection()
+        main_window._photo_selection = InputSelection()
         with patch("gps_photo_tracker.gui.main_window.QMessageBox.information"):
             main_window._on_auto_tune()
 
     def test_auto_tune_declined(self, main_window, tmp_path):
         from PySide6.QtWidgets import QMessageBox as QMB
-        main_window._gps_dir_edit.setCurrentText(str(tmp_path))
-        main_window._photo_dir_edit.setCurrentText(str(tmp_path))
+        main_window._gps_selection = InputSelection.of([tmp_path])
+        main_window._photo_selection = InputSelection.of([tmp_path])
         with patch("gps_photo_tracker.gui.main_window.QMessageBox.question",
                    return_value=QMB.StandardButton.No):
             main_window._on_auto_tune()
+
+    def test_auto_tune_multi_file_selection(self, main_window, tmp_path):
+        """Regression: auto-tune must read selection state, not combo text.
+        Multi-file selection shows a summary string in the combo (not a path);
+        _on_auto_tune must still scan the actual files via InputSelection."""
+        from PySide6.QtWidgets import QMessageBox as QMB
+        gpx = tmp_path / "track.gpx"; gpx.touch()
+        f1 = tmp_path / "a.jpg"; f1.touch()
+        f2 = tmp_path / "b.jpg"; f2.touch()
+        with patch.object(main_window, '_auto_scan_gpx'), \
+             patch.object(main_window, '_auto_scan_photos'):
+            main_window._set_selection("gps", [gpx])
+            main_window._set_selection("photo", [f1, f2])
+        # Sanity: combo now shows a summary string, NOT a usable path
+        assert "个文件" in main_window._photo_dir_edit.currentText()
+        from gps_photo_tracker.core.models import MatcherConfig
+        captured = {}
+        def fake_scan_gpx(sel):
+            captured["gps_sel"] = sel
+            return []
+        def fake_scan_photos(sel):
+            captured["photo_sel"] = sel
+            return []
+        with patch("gps_photo_tracker.gui.main_window.QMessageBox.question",
+                   return_value=QMB.StandardButton.Yes), \
+             patch("gps_photo_tracker.gui.main_window.QMessageBox.information"), \
+             patch("gps_photo_tracker.service.tagging_service.GPSTaggingService") as MockSvc:
+            MockSvc.return_value.scan_gpx.side_effect = fake_scan_gpx
+            MockSvc.return_value.scan_photos.side_effect = fake_scan_photos
+            MockSvc.return_value.auto_tune.return_value = MatcherConfig()
+            main_window._on_auto_tune()
+        # The actual InputSelection was passed through — not Path(summary_str)
+        assert captured["gps_sel"].paths == (gpx,)
+        assert tuple(captured["photo_sel"].paths) == (f1, f2)
 
 
 # ── MainWindow: _open_log_viewer ──────────────────────────────
@@ -4768,8 +4834,8 @@ class TestLoadPathHistoryStr:
 class TestAutoTuneScanException:
     def test_scan_exception_shows_warning(self, main_window, tmp_path):
         from PySide6.QtWidgets import QMessageBox as QMB
-        main_window._gps_dir_edit.setCurrentText(str(tmp_path))
-        main_window._photo_dir_edit.setCurrentText(str(tmp_path))
+        main_window._gps_selection = InputSelection.of([tmp_path])
+        main_window._photo_selection = InputSelection.of([tmp_path])
         with patch("gps_photo_tracker.gui.main_window.QMessageBox.question",
                    return_value=QMB.StandardButton.Yes), \
              patch("gps_photo_tracker.service.tagging_service.GPSTaggingService") as MockSvc:
