@@ -8,7 +8,7 @@
 
 [English](../README.md)
 
-批量给照片打 GPS 地理标签——根据 GPS 轨迹（GPX/KML/TCX），自动为没有内置 GPS 的相机照片写入 EXIF 坐标。
+批量给照片打 GPS 地理标签——根据 GPS 轨迹（GPX/KML/TCX/FIT），自动为没有内置 GPS 的相机照片写入 EXIF 坐标。
 
 ![GPS Photo Tracker](images/screenshot.png)
 
@@ -30,7 +30,7 @@
 | 平台 | Win/Mac/Linux | 仅 Windows | 仅 Mac | Win/Mac | 命令行 | 仅 Windows |
 | 开源 | **是 (GPLv3)** | 否 | 否 | 否 | 是 | 否 |
 | 中文界面 | **支持** | 支持 | 不支持 | 支持 | 部分 | 不支持 |
-| 轨迹格式 | GPX<br>KML<br>TCX | GPX<br>NMEA<br>KML<br>+3 | GPX<br>NMEA<br>FIT<br>+1 | GPX | GPX<br>NMEA<br>KML<br>+3 | GPX |
+| 轨迹格式 | GPX<br>KML<br>TCX<br>FIT | GPX<br>NMEA<br>KML<br>+3 | GPX<br>NMEA<br>FIT<br>+1 | GPX | GPX<br>NMEA<br>KML<br>+3 | GPX |
 | 线性插值 | **支持** | 支持 | 支持 | 支持 | 支持 | 不支持 |
 | 二轮邻居跟随 | **支持** | 不支持 | 不支持 | 不支持 | 不支持 | 不支持 |
 | GPS 覆盖率（典型） | **~90%** | ~50-70% | ~60-80% | ~50-70% | ~50-70% | ~30-40% |
@@ -48,7 +48,7 @@
 
 ### 核心匹配
 
-- **多格式 GPS 轨迹支持** — GPX、KML（Google Earth）、TCX（Garmin），自动识别格式
+- **多格式 GPS 轨迹支持** — GPX、KML（Google Earth）、TCX（Garmin）、FIT（Garmin 运动表/码表），自动识别格式
 - **线性插值匹配** — 在相邻 GPS 轨迹点之间按时间比例插值计算照片位置，精度更高
 - **二轮邻居跟随** — 未匹配照片自动跟随最近的成功邻居；已有 GPS 的照片排除传播
 - **智能参数推荐** — 根据轨迹密度自动推荐参数；所有阈值均可手动调整

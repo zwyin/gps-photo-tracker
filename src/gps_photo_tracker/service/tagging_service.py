@@ -220,7 +220,7 @@ class GPSTaggingService:
         )
 
     def scan_gpx(self, selection: InputSelection, on_progress: Callable | None = None) -> list[GPXSegment]:
-        """Scan selection for track files (GPX, KML, TCX) and parse them."""
+        """Scan selection for track files (GPX, KML, TCX, FIT) and parse them."""
         start = time.time()
         track_files = self._file_provider.resolve_tracks(selection)
         all_segments: list[GPXSegment] = []
