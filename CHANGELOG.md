@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-07-13
+
+### Added
+
+- **FIT track format support** — parse Garmin `.fit` files (sport watches / bike computers: Garmin, Wahoo, Coros, Bryton, Suunto) via `garmin-fit-sdk`. Read-only, GPS-only; 1 file = 1 segment.
+
+### Changed
+
+- File picker and directory scan now accept `.fit` alongside GPX/KML/TCX.
+- macOS app registers `.fit`/`.kml`/`.tcx` document types (was GPX-only).
+
 ## [0.24.1] - 2026-07-12
 
 ### Changed

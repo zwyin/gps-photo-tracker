@@ -8,7 +8,7 @@
 
 [中文文档](docs/README_zh.md)
 
-Batch geotag photos using GPS tracks (GPX/KML/TCX) — automatically write EXIF GPS coordinates for camera photos without built-in GPS.
+Batch geotag photos using GPS tracks (GPX/KML/TCX/FIT) — automatically write EXIF GPS coordinates for camera photos without built-in GPS.
 
 ![GPS Photo Tracker](docs/images/screenshot.png)
 
@@ -30,7 +30,7 @@ Existing tools with linear interpolation achieve **30-50% coverage** — many ph
 | Platform | Win/Mac/Linux | Win only | Mac only | Win/Mac | CLI (all) | Win only |
 | Open source | **Yes (GPLv3)** | No | No | No | Yes (Artistic) | No |
 | Chinese UI | **Yes** | Yes | No | Yes | Partial | No |
-| GPS track formats | GPX<br>KML<br>TCX | GPX<br>NMEA<br>KML<br>+3 | GPX<br>NMEA<br>FIT<br>+1 | GPX | GPX<br>NMEA<br>KML<br>+3 | GPX |
+| GPS track formats | GPX<br>KML<br>TCX<br>FIT | GPX<br>NMEA<br>KML<br>+3 | GPX<br>NMEA<br>FIT<br>+1 | GPX | GPX<br>NMEA<br>KML<br>+3 | GPX |
 | Linear interpolation | **Yes** | Yes | Yes | Yes | Yes | No |
 | Two-pass neighbor follow | **Yes** | No | No | No | No | No |
 | GPS coverage (typical) | **~90%** | ~50-70% | ~60-80% | ~50-70% | ~50-70% | ~30-40% |
@@ -48,7 +48,7 @@ Existing tools with linear interpolation achieve **30-50% coverage** — many ph
 
 ### Core Matching
 
-- **Multi-format GPS track support** — GPX, KML (Google Earth), TCX (Garmin) with auto-detection
+- **Multi-format GPS track support** — GPX, KML (Google Earth), TCX (Garmin), FIT (Garmin sport watches) with auto-detection
 - **Linear interpolation matching** — Accurately interpolates positions between GPS track points
 - **Two-pass neighbor following** — Unmatched photos follow nearest successful neighbor; existing-GPS photos excluded from propagation
 - **Smart parameter tuning** — Auto-recommends parameters based on track density; all thresholds adjustable

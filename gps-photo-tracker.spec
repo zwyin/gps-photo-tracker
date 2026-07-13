@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for GPS Photo Tracker v0.9.0."""
+"""PyInstaller spec for GPS Photo Tracker v0.25.0."""
 
 import os
 import sys
@@ -26,6 +26,7 @@ a = Analysis(
         "gps_photo_tracker.core.kml_parser",
         "gps_photo_tracker.core.tcx_parser",
         "gps_photo_tracker.core.track_parser",
+        "gps_photo_tracker.core.fit_parser",
         "gps_photo_tracker.core.checkpoint",
         "gps_photo_tracker.core.concurrency",
         "gps_photo_tracker.core.orientation",
@@ -54,6 +55,7 @@ a = Analysis(
         "geopy",
         "geopy.distance",
         "tenacity",
+        "garmin_fit_sdk",
     ],
     hookspath=[],
     hooksconfig={},
@@ -106,14 +108,14 @@ app = BUNDLE(
     bundle_identifier="com.gps-photo-tracker.app",
     info_plist={
         "CFBundleName": "GPS Photo Tracker",
-        "CFBundleShortVersionString": "0.24.1",
-        "CFBundleVersion": "0.24.1",
+        "CFBundleShortVersionString": "0.25.0",
+        "CFBundleVersion": "0.25.0",
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "11.0",
         "CFBundleDocumentTypes": [
             {
-                "CFBundleTypeName": "GPX Track",
-                "CFBundleTypeExtensions": ["gpx"],
+                "CFBundleTypeName": "GPS Track",
+                "CFBundleTypeExtensions": ["gpx", "kml", "tcx", "fit"],
                 "CFBundleTypeRole": "Viewer",
             },
         ],

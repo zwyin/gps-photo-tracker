@@ -52,13 +52,13 @@ jobs:
             build_cmd: python -m PyInstaller gps-photo-tracker.spec --noconfirm
           - os: windows-latest
             platform: windows
-            build_cmd: python -m PyInstaller --onefile --windowed --name "GPS Photo Tracker" src/gps_photo_tracker/__main__.py
+            build_cmd: python -m PyInstaller --onefile --windowed --name "GPS Photo Tracker" --collect-all garmin_fit_sdk src/gps_photo_tracker/__main__.py
           - os: windows-latest
             platform: windows-debug
-            build_cmd: python -m PyInstaller --onefile --console --name "GPS-Photo-Tracker-debug" src/gps_photo_tracker/__main__.py
+            build_cmd: python -m PyInstaller --onefile --console --name "GPS-Photo-Tracker-debug" --collect-all garmin_fit_sdk src/gps_photo_tracker/__main__.py
           - os: ubuntu-latest
             platform: linux
-            build_cmd: python -m PyInstaller --onefile --windowed --name "GPS Photo Tracker" src/gps_photo_tracker/__main__.py
+            build_cmd: python -m PyInstaller --onefile --windowed --name "GPS Photo Tracker" --collect-all garmin_fit_sdk src/gps_photo_tracker/__main__.py
 
     steps:
       - uses: actions/checkout@v6

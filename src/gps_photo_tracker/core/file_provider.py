@@ -28,7 +28,7 @@ class FileProvider:
     """File system operations with retry for network disks."""
 
     _PHOTO_EXTS = (".jpg", ".jpeg")
-    _TRACK_EXTS = (".gpx", ".kml", ".tcx")
+    _TRACK_EXTS = (".gpx", ".kml", ".tcx", ".fit")
 
     def list_photos(self, directory: Path) -> list[Path]:
         """Recursively find all JPEG files in directory."""
@@ -39,6 +39,10 @@ class FileProvider:
             if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg")
         )
 
+    # NOTE: list_gpx / list_tracks below are legacy non-InputSelection helpers.
+    # The main path is resolve_tracks() → _expand(self._TRACK_EXTS).
+    # To add a track format, update _TRACK_EXTS above; these legacy methods
+    # are kept only for backward compatibility with any caller still using them.
     def list_gpx(self, directory: Path) -> list[Path]:
         """Find all GPX files in directory (non-recursive)."""
         if not directory.exists():

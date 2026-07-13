@@ -6,18 +6,20 @@ from gps_photo_tracker.core.gpx_parser import GPXParser
 from gps_photo_tracker.core.kml_parser import KMLParser
 from gps_photo_tracker.core.models import GPXParseError, GPXSegment
 from gps_photo_tracker.core.tcx_parser import TCXParser
+from gps_photo_tracker.core.fit_parser import FITParser
 
 logger = logging.getLogger("gps_tracker")
-_TRACK_EXTENSIONS = {".gpx", ".kml", ".tcx"}
+_TRACK_EXTENSIONS = {".gpx", ".kml", ".tcx", ".fit"}
 
 
 class TrackParser:
-    """Parse track files (GPX, KML, TCX) with auto-detection."""
+    """Parse track files (GPX, KML, TCX, FIT) with auto-detection."""
 
     def __init__(self):
         self._gpx = GPXParser()
         self._kml = KMLParser()
         self._tcx = TCXParser()
+        self._fit = FITParser()
 
     def parse_file(self, path: Path) -> list[GPXSegment]:
         ext = path.suffix.lower()
@@ -27,6 +29,8 @@ class TrackParser:
             return self._kml.parse_file(path)
         elif ext == ".tcx":
             return self._tcx.parse_file(path)
+        elif ext == ".fit":
+            return self._fit.parse_file(path)
         else:
             raise GPXParseError(f"Unsupported track format: {ext}")
 

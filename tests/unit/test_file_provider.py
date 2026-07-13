@@ -313,15 +313,25 @@ class TestResolveTracks:
         assert [p.name for p in out] == ["a.gpx"]
 
     def test_keeps_all_track_formats(self, tmp_path):
-        """gpx, kml, tcx are all accepted."""
+        """gpx, kml, tcx, fit are all accepted."""
         (tmp_path / "a.gpx").write_text("gpx")
         (tmp_path / "b.kml").write_text("kml")
         (tmp_path / "c.tcx").write_text("tcx")
-        (tmp_path / "d.jpg").write_bytes(b"fake")
+        (tmp_path / "d.fit").write_bytes(b"fit")
+        (tmp_path / "e.jpg").write_bytes(b"fake")
 
         out = FileProvider().resolve_tracks(InputSelection.of([tmp_path]))
 
-        assert sorted(p.name for p in out) == ["a.gpx", "b.kml", "c.tcx"]
+        assert sorted(p.name for p in out) == ["a.gpx", "b.kml", "c.tcx", "d.fit"]
+
+    def test_fit_file_resolved_directly(self, tmp_path):
+        """A single .fit file path is resolved as a track."""
+        f = tmp_path / "solo.fit"
+        f.write_bytes(b"fit")
+
+        out = FileProvider().resolve_tracks(InputSelection.of([f]))
+
+        assert [p.name for p in out] == ["solo.fit"]
 
     def test_non_recursive_from_directory(self, tmp_path):
         """Nested track files are NOT picked up (non-recursive)."""
