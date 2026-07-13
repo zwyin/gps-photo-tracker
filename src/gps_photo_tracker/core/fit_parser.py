@@ -63,6 +63,8 @@ class FITParser:
     @staticmethod
     def _to_track_point(record: dict) -> TrackPoint:
         dt = record.get("timestamp")
+        if dt is None:
+            raise GPXParseError(f"FIT record missing timestamp: {record!r}")
         if isinstance(dt, datetime) and dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         ts = dt.timestamp() if isinstance(dt, datetime) else float(dt)

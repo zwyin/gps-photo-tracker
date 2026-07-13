@@ -188,6 +188,19 @@ class TestFITParserErrors:
             with pytest.raises(GPXParseError, match="Failed to decode FIT"):
                 FITParser().parse_file(f)
 
+    def test_record_missing_timestamp_raises_gpxparseerror(self, tmp_path):
+        f = tmp_path / "nots.fit"
+        f.write_bytes(b"fake")
+        msgs = {"record_mesgs": [
+            {"position_lat": 35.0, "position_long": 139.0},  # 有 position 缺 timestamp
+        ]}
+        with patch("gps_photo_tracker.core.fit_parser.Stream") as MS, \
+             patch("gps_photo_tracker.core.fit_parser.Decoder") as MD:
+            MS.from_file.return_value = object()
+            MD.return_value.read.return_value = (msgs, [])
+            with pytest.raises(GPXParseError, match="missing timestamp"):
+                FITParser().parse_file(f)
+
 
 class TestFITParserContract:
     def test_returns_gpxsegment_type(self, tmp_path):
