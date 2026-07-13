@@ -35,6 +35,17 @@ class TestTrackParser:
             TrackParser().parse_file(tcx_file)
             MockParser.return_value.parse_file.assert_called_once()
 
+    def test_dispatches_fit(self, tmp_path):
+        fit_file = tmp_path / "test.fit"
+        fit_file.write_bytes(b"fake")
+        with patch("gps_photo_tracker.core.track_parser.FITParser") as MockParser:
+            mock_seg = GPXSegment(filename="test.fit", start=0, end=1,
+                                  points=[TrackPoint(timestamp=0, latitude=0, longitude=0)])
+            MockParser.return_value.parse_file.return_value = [mock_seg]
+            segments = TrackParser().parse_file(fit_file)
+            MockParser.return_value.parse_file.assert_called_once_with(fit_file)
+            assert len(segments) == 1
+
     def test_unknown_extension_raises(self, tmp_path):
         f = tmp_path / "test.xyz"
         f.write_text("fake", encoding="utf-8")
