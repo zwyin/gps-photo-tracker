@@ -1,13 +1,14 @@
 [project]
 name = "gps-photo-tracker"
 version = "0.24.1"
-description = "Batch process photos with GPS tracks (GPX/KML/TCX) to write EXIF GPS tags"
+description = "Batch process photos with GPS tracks (GPX/KML/TCX/FIT) to write EXIF GPS tags"
 license = {text = "GPL-3.0-or-later"}
 requires-python = ">=3.11"
 dependencies = [
     "PySide6>=6.6",
     "piexif>=1.1.3",
     "gpxpy>=1.6.0",
+    "garmin-fit-sdk>=21.115",
     "geopy>=2.4.0",
     "tenacity>=8.0.0",
     # macOS native file/dir picker (gui/mac_native_picker.py) uses NSOpenPanel

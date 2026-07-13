@@ -26,6 +26,7 @@ a = Analysis(
         "gps_photo_tracker.core.kml_parser",
         "gps_photo_tracker.core.tcx_parser",
         "gps_photo_tracker.core.track_parser",
+        "gps_photo_tracker.core.fit_parser",
         "gps_photo_tracker.core.checkpoint",
         "gps_photo_tracker.core.concurrency",
         "gps_photo_tracker.core.orientation",
@@ -54,6 +55,7 @@ a = Analysis(
         "geopy",
         "geopy.distance",
         "tenacity",
+        "garmin_fit_sdk",
     ],
     hookspath=[],
     hooksconfig={},
@@ -112,8 +114,8 @@ app = BUNDLE(
         "LSMinimumSystemVersion": "11.0",
         "CFBundleDocumentTypes": [
             {
-                "CFBundleTypeName": "GPX Track",
-                "CFBundleTypeExtensions": ["gpx"],
+                "CFBundleTypeName": "GPS Track",
+                "CFBundleTypeExtensions": ["gpx", "kml", "tcx", "fit"],
                 "CFBundleTypeRole": "Viewer",
             },
         ],
