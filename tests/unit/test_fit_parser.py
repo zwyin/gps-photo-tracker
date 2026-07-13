@@ -6,6 +6,17 @@ import pytest
 from gps_photo_tracker.core.fit_parser import FITParser
 from gps_photo_tracker.core.models import GPXParseError, GPXSegment, TrackPoint
 
+# Fixture strategy (license-gated):
+# garmin-fit-sdk repo has NO license file (GitHub/PyPI: license=null), so its
+# test .fit files CANNOT be copied into this GPL-3.0 project.
+# Unit tests above mock Decoder.read() — they cover all logic paths without a
+# real binary. End-to-end validation of a real .fit happens in the release
+# smoke test (open app → select .fit → segment count > 0), using a
+# user-provided or self-recorded file.
+# TODO(fixture): when a self-recorded .fit is available (license-safe), add
+# TestFITParserIntegration using tests/fixtures/sample.fit. Do NOT copy from
+# garmin-fit-sdk repo.
+
 
 def _rec(lat, lon, ts_iso, alt=None):
     """Build a flat record dict matching garmin_fit_sdk output shape."""
@@ -239,3 +250,30 @@ class TestFITParserContract:
             MD.return_value.read.return_value = (msgs, [])
             segs = FITParser().parse_file(f)
         assert abs(segs[0].points[0].timestamp - 1767254400.0) < 1.0
+
+
+class TestFITParserPerformance:
+    """Quantified baseline — avoid 'a few MB' hand-waving (spec § 7.3)."""
+
+    def test_50k_records_under_2_seconds(self, tmp_path):
+        import time
+        f = tmp_path / "big.fit"
+        f.write_bytes(b"fake")
+        # 50k records ~ a 14-hour 1Hz activity (ultra-endurance edge case)
+        base = datetime(2026, 1, 1, 8, 0, tzinfo=timezone.utc)
+        records = [
+            {"position_lat": 35.0 + i * 1e-6,
+             "position_long": 139.0 + i * 1e-6,
+             "timestamp": datetime.fromtimestamp(base.timestamp() + i, tz=timezone.utc)}
+            for i in range(50000)
+        ]
+        msgs = {"record_mesgs": records}
+        with patch("gps_photo_tracker.core.fit_parser.Stream") as MS, \
+             patch("gps_photo_tracker.core.fit_parser.Decoder") as MD:
+            MS.from_file.return_value = object()
+            MD.return_value.read.return_value = (msgs, [])
+            t0 = time.perf_counter()
+            segs = FITParser().parse_file(f)
+            elapsed = time.perf_counter() - t0
+        assert len(segs[0].points) == 50000
+        assert elapsed < 2.0, f"50k records took {elapsed:.2f}s (budget 2s)"
