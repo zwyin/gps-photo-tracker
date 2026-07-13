@@ -214,7 +214,7 @@ class MainWindow(QMainWindow):
         row1 = QHBoxLayout()
         self._gps_dir_edit = QComboBox()
         self._gps_dir_edit.setEditable(True)
-        self._gps_dir_edit.lineEdit().setPlaceholderText("GPS 轨迹 (GPX/KML/TCX 文件或目录)...")
+        self._gps_dir_edit.lineEdit().setPlaceholderText("GPS 轨迹 (GPX/KML/TCX/FIT 文件或目录)...")
         self._gps_dir_edit.lineEdit().setReadOnly(True)
         self._gps_dir_edit.setToolTip("点击「选择 ▾」按钮挑选 GPS 轨迹文件或目录")
         self._gps_dir_edit.activated.connect(self._on_gps_history_activated)
@@ -348,7 +348,7 @@ class MainWindow(QMainWindow):
 
     # ── File-or-directory selection ────────────────────────
 
-    _GPS_EXTS = (".gpx", ".kml", ".tcx")
+    _GPS_EXTS = (".gpx", ".kml", ".tcx", ".fit")
     _PHOTO_EXTS = (".jpg", ".jpeg")
 
     def _pick_gps_input(self):
@@ -1914,7 +1914,7 @@ class MainWindow(QMainWindow):
 
     # ── Drag and drop ───────────────────────────────────────
 
-    _TRACK_EXT = {".gpx", ".kml", ".tcx"}
+    _TRACK_EXT = {".gpx", ".kml", ".tcx", ".fit"}
     _IMAGE_EXT = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 
     def dragEnterEvent(self, event):
