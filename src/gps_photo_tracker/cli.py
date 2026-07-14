@@ -119,7 +119,24 @@ def _on_photo(args):
 
 
 def _write_csv(result, args):
-    pass  # Task 4 implements
+    """CLI 生成 CSV（每张照片一行，批量统计用）。HTML 由 service 在写模式生成。"""
+    import csv
+    csv_path = (args.output / "report.csv") if args.output else Path("report.csv")
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["filename", "path", "success", "method", "latitude",
+                    "longitude", "altitude", "time_diff", "reject_reason",
+                    "has_gps_before", "overwritten"])
+        for r in result.results:
+            w.writerow([
+                r.photo.filename, str(r.photo.path), r.success, r.method or "",
+                r.gps.latitude if r.gps else "", r.gps.longitude if r.gps else "",
+                r.gps.altitude if r.gps else "", r.time_diff or "",
+                r.reject_reason or "", r.photo.has_gps,
+                r.photo.has_gps and r.success and r.gps is not None,
+            ])
+    print(f"CSV report: {csv_path}", file=sys.stderr)
 
 
 def _exit_code(result) -> int:

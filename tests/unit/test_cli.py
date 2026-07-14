@@ -231,3 +231,55 @@ class TestCliOutputSeparation:
         captured = capsys.readouterr()
         assert "x.jpg" not in captured.out  # quiet suppresses per-photo
         assert "total:" in captured.out  # summary still printed
+
+
+class TestCliCsvReport:
+    def _result_with_photos(self):
+        from gps_photo_tracker.core.models import MatchResult, GPSInfo
+        r1 = MatchResult(photo=_photo(), success=True, gps=GPSInfo(35.0, 139.0, 50.0), method="nearest", time_diff=2.0)
+        return BatchResult(total=1, matched=1, skipped=0, failed=0, overwritten=0,
+                           success_rate=1.0, results=[r1], reject_groups={}, concurrent_workers=1)
+
+    def test_csv_written_to_output_dir_in_write_mode(self, tmp_path):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        out = tmp_path / "out"
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = MockSvc.return_value
+            inst.scan_gpx.return_value = [_seg()]
+            inst.scan_photos.return_value = [_photo()]
+            inst.process.return_value = self._result_with_photos()
+            main(["-t", "ride.gpx", "-o", str(out), "--report", str(tmp_path)])
+        csv_path = out / "report.csv"
+        assert csv_path.exists()
+        content = csv_path.read_text(encoding="utf-8")
+        assert "filename" in content  # header
+        assert "x.jpg" in content  # photo row
+        assert "35.0" in content  # lat
+
+    def test_csv_to_cwd_in_dry_run(self, tmp_path, monkeypatch, capsys):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        monkeypatch.chdir(tmp_path)
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = MockSvc.return_value
+            inst.scan_gpx.return_value = [_seg()]
+            inst.scan_photos.return_value = [_photo()]
+            inst.preview.return_value = self._result_with_photos()
+            main(["-t", "ride.gpx", "--report", str(tmp_path)])
+        csv_path = tmp_path / "report.csv"
+        assert csv_path.exists()
+        assert "CSV report" in capsys.readouterr().err
+
+    def test_csv_has_all_columns(self, tmp_path):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        out = tmp_path / "out"
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = MockSvc.return_value
+            inst.scan_gpx.return_value = [_seg()]
+            inst.scan_photos.return_value = [_photo()]
+            inst.process.return_value = self._result_with_photos()
+            main(["-t", "ride.gpx", "-o", str(out), "--report", str(tmp_path)])
+        header = (out / "report.csv").read_text(encoding="utf-8").splitlines()[0]
+        for col in ["filename", "path", "success", "method", "latitude",
+                    "longitude", "altitude", "time_diff", "reject_reason",
+                    "has_gps_before", "overwritten"]:
+            assert col in header
