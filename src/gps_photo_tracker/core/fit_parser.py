@@ -52,13 +52,32 @@ class FITParser:
             points=points,
         )]
 
+    # FIT position_lat/position_long are sint32 semicircles. garmin_fit_sdk's
+    # apply_scale_and_offset does NOT convert them (only altitude/speed/etc),
+    # so they arrive as raw int semicircles — convert to degrees here.
+    _SEMICIRCLES_TO_DEGREES = 180.0 / 2**31
+
+    @staticmethod
+    def _to_degrees(value):
+        """Convert semicircles (int) to degrees; pass through float degrees.
+
+        SDK leaves position_lat/position_long as int semicircles even with
+        apply_scale_and_offset=True. This is the FIT protocol's native unit
+        (semicircles = degrees * 2^31 / 180).
+        """
+        if isinstance(value, int):
+            return value * FITParser._SEMICIRCLES_TO_DEGREES
+        return float(value)
+
     @staticmethod
     def _has_valid_position(record: dict) -> bool:
         lat = record.get("position_lat")
         lon = record.get("position_long")
         if lat is None or lon is None:
             return False
-        return -90.0 <= float(lat) <= 90.0 and -180.0 <= float(lon) <= 180.0
+        lat = FITParser._to_degrees(lat)
+        lon = FITParser._to_degrees(lon)
+        return -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0
 
     @staticmethod
     def _to_track_point(record: dict) -> TrackPoint:
@@ -71,7 +90,7 @@ class FITParser:
         alt = record.get("enhanced_altitude", record.get("altitude"))
         return TrackPoint(
             timestamp=ts,
-            latitude=record["position_lat"],
-            longitude=record["position_long"],
+            latitude=FITParser._to_degrees(record["position_lat"]),
+            longitude=FITParser._to_degrees(record["position_long"]),
             altitude=alt,
         )
