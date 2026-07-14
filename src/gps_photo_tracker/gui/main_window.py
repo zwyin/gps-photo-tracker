@@ -80,6 +80,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("GPS Photo Tracker")
         self.setMinimumSize(1000, 600)
+        self.resize(1600, 1000)  # 默认大窗口；saved geometry 会 restore 覆盖
         self.setAcceptDrops(True)
 
         self._worker: Worker | None = None
