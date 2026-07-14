@@ -175,3 +175,59 @@ class TestCliWriteModes:
             inst.process.return_value = _result()
             main(["-t", "ride.gpx", "-o", str(out), "-j", "4", str(tmp_path)])
         assert inst.process.call_args.kwargs["options"].workers == 4
+
+
+class TestCliOutputSeparation:
+    def test_progress_goes_to_stderr(self, tmp_path, capsys):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        from gps_photo_tracker.core.models import ProgressPhase, ProgressUpdate
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = MockSvc.return_value
+            inst.scan_gpx.return_value = [_seg()]
+            inst.scan_photos.return_value = [_photo()]
+            def preview(segs, phs, cfg, on_progress=None, **kw):
+                if on_progress:
+                    on_progress(ProgressUpdate(phase=ProgressPhase.MATCHING, current=1, total=1,
+                                                current_file="x.jpg", elapsed_seconds=0.1))
+                return _result()
+            inst.preview.side_effect = preview
+            main(["-t", "ride.gpx", str(tmp_path)])
+        captured = capsys.readouterr()
+        assert "1/1" in captured.err  # progress → stderr
+        assert "1/1" not in captured.out  # not polluting stdout
+
+    def test_verbose_one_line_per_photo_stdout(self, tmp_path, capsys):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        from gps_photo_tracker.core.models import MatchResult, GPSInfo
+        mr = MatchResult(photo=_photo(), success=True, gps=GPSInfo(latitude=35, longitude=139), method="nearest")
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = MockSvc.return_value
+            inst.scan_gpx.return_value = [_seg()]
+            inst.scan_photos.return_value = [_photo()]
+            def preview(segs, phs, cfg, on_photo_processed=None, **kw):
+                if on_photo_processed:
+                    on_photo_processed(mr)
+                return _result()
+            inst.preview.side_effect = preview
+            main(["-t", "ride.gpx", "-v", str(tmp_path)])
+        captured = capsys.readouterr()
+        assert "x.jpg" in captured.out  # verbose → stdout
+        assert "ok" in captured.out
+
+    def test_quiet_suppresses_verbose(self, tmp_path, capsys):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        from gps_photo_tracker.core.models import MatchResult
+        mr = MatchResult(photo=_photo(), success=True, method="nearest")
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = MockSvc.return_value
+            inst.scan_gpx.return_value = [_seg()]
+            inst.scan_photos.return_value = [_photo()]
+            def preview(segs, phs, cfg, on_photo_processed=None, **kw):
+                if on_photo_processed:
+                    on_photo_processed(mr)
+                return _result()
+            inst.preview.side_effect = preview
+            main(["-t", "ride.gpx", "-q", str(tmp_path)])
+        captured = capsys.readouterr()
+        assert "x.jpg" not in captured.out  # quiet suppresses per-photo
+        assert "total:" in captured.out  # summary still printed
