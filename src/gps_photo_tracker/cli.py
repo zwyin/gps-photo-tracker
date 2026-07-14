@@ -67,14 +67,59 @@ def _run(args) -> int:
 
     config = MatcherConfig(time_offset=args.time_offset)
 
-    if args.output or args.overwrite:
-        # Task 2 fills copy/overwrite (process). Task 1 skeleton: fall through to preview.
-        pass
+    # photo_dir: keep_structure relative base. Single source → that path; multi → None + flat.
+    if len(args.photos) == 1:
+        photo_dir = Path(args.photos[0])
+        keep_structure = True
+    else:
+        photo_dir = None
+        keep_structure = False
+        if args.output:
+            print("warning: multiple photo sources with --output → flat output "
+                  "(keep_structure off); same-name files may collide", file=sys.stderr)
 
-    # dry-run (default) — Task 1 scope
-    result = service.preview(segments, photos, config)
+    if args.output or args.overwrite:
+        from gps_photo_tracker.core.models import ProcessMode, ProcessOptions
+        mode = ProcessMode.OVERWRITE if args.overwrite else ProcessMode.COPY
+        options = ProcessOptions(
+            mode=mode,
+            output_dir=args.output,
+            keep_structure=keep_structure,
+            overwrite_gps=args.overwrite,
+            workers=args.workers,
+            generate_report=args.report,
+        )
+        result = service.process(
+            segments, photos, config, options=options, photo_dir=photo_dir,
+            on_progress=_on_progress, on_photo_processed=_on_photo(args),
+        )
+    else:
+        result = service.preview(
+            segments, photos, config,
+            on_progress=_on_progress, on_photo_processed=_on_photo(args),
+        )
+
     _print_summary(result, args)
+    if args.report:
+        _write_csv(result, args)
     return _exit_code(result)
+
+
+def _on_progress(update):
+    print(f"\r{update.phase.value}: {update.current}/{update.total} {update.current_file}",
+          end="", file=sys.stderr)
+
+
+def _on_photo(args):
+    def _cb(result):
+        if args.verbose and not args.quiet:
+            status = "ok" if result.success else f"FAIL({result.reject_reason})"
+            print(f"{result.photo.filename}\t{status}")
+    return _cb
+
+
+def _write_csv(result, args):
+    pass  # Task 4 implements
 
 
 def _exit_code(result) -> int:

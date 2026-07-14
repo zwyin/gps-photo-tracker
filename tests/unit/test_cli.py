@@ -98,3 +98,80 @@ class TestCliExitCodes:
             code = main(["-t", "ride.gpx", str(tmp_path)])
         assert code == 1
         assert "no photos" in capsys.readouterr().err.lower()
+
+
+from gps_photo_tracker.core.models import ProcessMode
+
+
+class TestCliWriteModes:
+    def test_copy_mode_calls_process_with_copy(self, tmp_path):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        out = tmp_path / "out"
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = MockSvc.return_value
+            inst.scan_gpx.return_value = [_seg()]
+            inst.scan_photos.return_value = [_photo()]
+            inst.process.return_value = _result()
+            code = main(["-t", "ride.gpx", "-o", str(out), str(tmp_path)])
+        assert code == 0
+        inst.process.assert_called_once()
+        call_args = inst.process.call_args
+        options = call_args.kwargs.get("options") or call_args.args[3]
+        assert options.mode == ProcessMode.COPY
+        assert options.output_dir == out
+        assert options.overwrite_gps is False
+        # single photo source → photo_dir = that path, keep_structure=True
+        assert call_args.kwargs.get("photo_dir") == Path(str(tmp_path))
+        assert options.keep_structure is True
+
+    def test_overwrite_sets_overwrite_gps_true(self, tmp_path):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = MockSvc.return_value
+            inst.scan_gpx.return_value = [_seg()]
+            inst.scan_photos.return_value = [_photo()]
+            inst.process.return_value = _result()
+            code = main(["-t", "ride.gpx", "--overwrite", str(tmp_path)])
+        assert code == 0
+        options = inst.process.call_args.kwargs["options"]
+        assert options.mode == ProcessMode.OVERWRITE
+        assert options.overwrite_gps is True  # CRITICAL: else existing-GPS photos skipped
+
+    def test_multi_photo_sources_flat_no_keep_structure(self, tmp_path, capsys):
+        d1 = tmp_path / "d1"; d1.mkdir(); (d1 / "p.jpg").write_bytes(b"x")
+        d2 = tmp_path / "d2"; d2.mkdir(); (d2 / "p.jpg").write_bytes(b"x")
+        out = tmp_path / "out"
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = MockSvc.return_value
+            inst.scan_gpx.return_value = [_seg()]
+            inst.scan_photos.return_value = [_photo(), _photo()]
+            inst.process.return_value = _result(total=2, matched=2)
+            code = main(["-t", "ride.gpx", "-o", str(out), str(d1), str(d2)])
+        assert code == 0
+        call_kwargs = inst.process.call_args.kwargs
+        assert call_kwargs["photo_dir"] is None  # multi-source → None
+        assert call_kwargs["options"].keep_structure is False  # flat
+        err = capsys.readouterr().err.lower()
+        assert "flat" in err or "keep_structure" in err
+
+    def test_time_offset_passed_to_config(self, tmp_path):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = MockSvc.return_value
+            inst.scan_gpx.return_value = [_seg()]
+            inst.scan_photos.return_value = [_photo()]
+            inst.preview.return_value = _result()
+            main(["-t", "ride.gpx", "--time-offset", "3600", str(tmp_path)])
+        config = inst.preview.call_args.args[2]
+        assert config.time_offset == 3600
+
+    def test_workers_passed_to_options(self, tmp_path):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        out = tmp_path / "out"
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = MockSvc.return_value
+            inst.scan_gpx.return_value = [_seg()]
+            inst.scan_photos.return_value = [_photo()]
+            inst.process.return_value = _result()
+            main(["-t", "ride.gpx", "-o", str(out), "-j", "4", str(tmp_path)])
+        assert inst.process.call_args.kwargs["options"].workers == 4
