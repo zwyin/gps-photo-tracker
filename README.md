@@ -128,6 +128,27 @@ python -m gps_photo_tracker
 
 The program will automatically check dependencies on startup. If anything is missing, it shows a clear message telling you exactly what to install.
 
+### Option C: Command-Line (Batch / Automation)
+
+For batch processing, automation, or headless servers, use `gps-photo-tracker-cli`:
+
+```bash
+# Preview matches (default dry-run, no writes)
+gps-photo-tracker-cli -t ride.gpx ./photos/
+
+# Copy + write EXIF to a new directory (originals untouched)
+gps-photo-tracker-cli -t ride.gpx -o ./geotagged/ ./photos/
+
+# Write EXIF in-place (overwrite originals + existing GPS)
+gps-photo-tracker-cli -t ride.gpx --overwrite ./photos/
+
+# 4 workers, 1h time offset, CSV+HTML report
+gps-photo-tracker-cli -t ride.gpx -o ./out/ -j 4 \
+    --time-offset 3600 --report ./photos/
+```
+
+Run `gps-photo-tracker-cli --help` for full options. Exit codes: `0` success, `1` error, `2` partial failure.
+
 ### Basic Workflow
 
 The app uses a step-based guided workflow:

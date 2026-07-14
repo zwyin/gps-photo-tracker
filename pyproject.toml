@@ -1,6 +1,6 @@
 [project]
 name = "gps-photo-tracker"
-version = "0.25.0"
+version = "0.26.0"
 description = "Batch process photos with GPS tracks (GPX/KML/TCX/FIT) to write EXIF GPS tags"
 license = {text = "GPL-3.0-or-later"}
 requires-python = ">=3.11"
@@ -39,6 +39,7 @@ dev = [
 
 [project.scripts]
 gps-photo-tracker = "gps_photo_tracker.__main__:main"
+gps-photo-tracker-cli = "gps_photo_tracker.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

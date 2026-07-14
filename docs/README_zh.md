@@ -128,6 +128,27 @@ python -m gps_photo_tracker
 
 启动时程序会自动检查依赖。如果缺少某个包，会显示明确的提示，告诉你需要安装什么。
 
+### 方式三：命令行（批量 / 自动化）
+
+批处理、自动化或无头服务器，用 `gps-photo-tracker-cli`：
+
+```bash
+# 预览匹配（默认 dry-run，不写文件）
+gps-photo-tracker-cli -t ride.gpx ./photos/
+
+# 复制 + 写 EXIF 到新目录（原文件不动）
+gps-photo-tracker-cli -t ride.gpx -o ./geotagged/ ./photos/
+
+# 原文件写 EXIF（覆盖原文件 + 已有 GPS）
+gps-photo-tracker-cli -t ride.gpx --overwrite ./photos/
+
+# 4 worker、1 小时时间偏移、CSV+HTML 报告
+gps-photo-tracker-cli -t ride.gpx -o ./out/ -j 4 \
+    --time-offset 3600 --report ./photos/
+```
+
+运行 `gps-photo-tracker-cli --help` 查看全部选项。退出码：`0` 成功，`1` 出错，`2` 部分失败。
+
 ### 使用流程
 
 程序采用三步引导流程：
