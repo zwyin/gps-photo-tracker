@@ -1,28 +1,38 @@
 """Tests for FITParser (Garmin FIT, read-only GPS-only)."""
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from gps_photo_tracker.core.fit_parser import FITParser
 from gps_photo_tracker.core.models import GPXParseError, GPXSegment, TrackPoint
 
-# Fixture strategy (license-gated):
-# garmin-fit-sdk repo has NO license file (GitHub/PyPI: license=null), so its
-# test .fit files CANNOT be copied into this GPL-3.0 project.
-# Unit tests above mock Decoder.read() — they cover all logic paths without a
-# real binary. End-to-end validation of a real .fit happens in the release
-# smoke test (open app → select .fit → segment count > 0), using a
-# user-provided or self-recorded file.
-# TODO(fixture): when a self-recorded .fit is available (license-safe), add
-# TestFITParserIntegration using tests/fixtures/sample.fit. Do NOT copy from
-# garmin-fit-sdk repo.
+# Fixture: tests/fixtures/garmin-fenix-5-run.fit is a real Garmin fenix 5 run
+# recording, sourced from python-fitparse (MIT License,
+# https://github.com/dtcooper/python-fitparse) — MIT-compatible with this
+# GPL-3.0-or-later project. garmin-fit-sdk's own samples are NOT used (no
+# license file). See TestFITParserIntegration for end-to-end coverage.
 
 
 def _rec(lat, lon, ts_iso, alt=None):
-    """Build a flat record dict matching garmin_fit_sdk output shape."""
+    """Build a record dict with position in DEGREES (float)."""
     rec = {
         "position_lat": lat,
         "position_long": lon,
+        "timestamp": datetime.fromisoformat(ts_iso.replace("Z", "+00:00")),
+    }
+    if alt is not None:
+        rec["enhanced_altitude"] = alt
+    return rec
+
+
+def _rec_semicircles(lat_sc, lon_sc, ts_iso, alt=None):
+    """Build a record dict with position in SEMICIRCLES (int) — matches actual
+    garmin_fit_sdk output (apply_scale_and_offset does NOT convert
+    position_lat/position_long; they stay sint32 semicircles)."""
+    rec = {
+        "position_lat": lat_sc,
+        "position_long": lon_sc,
         "timestamp": datetime.fromisoformat(ts_iso.replace("Z", "+00:00")),
     }
     if alt is not None:
@@ -277,3 +287,65 @@ class TestFITParserPerformance:
             elapsed = time.perf_counter() - t0
         assert len(segs[0].points) == 50000
         assert elapsed < 2.0, f"50k records took {elapsed:.2f}s (budget 2s)"
+
+
+class TestFITParserSemicircles:
+    """SDK's apply_scale_and_offset does NOT convert position_lat/position_long
+    (they stay sint32 semicircles). FITParser must convert to degrees itself:
+    degrees = semicircles * 180 / 2^31."""
+
+    def test_semicircles_converted_to_degrees(self, tmp_path):
+        f = tmp_path / "semicircles.fit"
+        f.write_bytes(b"fake")
+        # 456099168 semicircles = 38.22979° ; -1463077146 semicircles = -122.63370°
+        msgs = {"record_mesgs": [_rec_semicircles(456099168, -1463077146, "2026-01-01T08:00:00Z", 50.0)]}
+        with patch("gps_photo_tracker.core.fit_parser.Stream") as MS, \
+             patch("gps_photo_tracker.core.fit_parser.Decoder") as MD:
+            MS.from_file.return_value = object()
+            MD.return_value.read.return_value = (msgs, [])
+            segs = FITParser().parse_file(f)
+        assert len(segs) == 1
+        p = segs[0].points[0]
+        assert abs(p.latitude - 38.22979) < 0.001
+        assert abs(p.longitude - (-122.63370)) < 0.001
+        assert p.altitude == 50.0
+
+    def test_semicircles_with_invalid_sentinel_filtered(self, tmp_path):
+        """A record whose semicircles convert to an out-of-range degree value
+        (e.g. extreme lat) must be filtered out."""
+        f = tmp_path / "bad.fit"
+        f.write_bytes(b"fake")
+        # 2_000_000_000 semicircles -> ~167° lat, out of [-90,90] -> filtered
+        msgs = {"record_mesgs": [
+            _rec_semicircles(2_000_000_000, -1463077146, "2026-01-01T08:00:00Z"),
+            _rec_semicircles(456099168, -1463077146, "2026-01-01T08:00:10Z"),
+        ]}
+        with patch("gps_photo_tracker.core.fit_parser.Stream") as MS, \
+             patch("gps_photo_tracker.core.fit_parser.Decoder") as MD:
+            MS.from_file.return_value = object()
+            MD.return_value.read.return_value = (msgs, [])
+            segs = FITParser().parse_file(f)
+        assert len(segs[0].points) == 1
+
+
+_FIXTURE = Path(__file__).parent.parent / "fixtures" / "garmin-fenix-5-run.fit"
+
+
+@pytest.mark.skipif(not _FIXTURE.exists(), reason="no MIT-licensed .fit fixture")
+class TestFITParserIntegration:
+    """End-to-end with a real Garmin fenix 5 .fit (MIT, from python-fitparse)."""
+
+    def test_real_fit_parses_to_nonempty_segment(self):
+        segs = FITParser().parse_file(_FIXTURE)
+        assert len(segs) == 1
+        assert len(segs[0].points) > 0
+        for p in segs[0].points:
+            assert -90 <= p.latitude <= 90
+            assert -180 <= p.longitude <= 180
+
+    def test_real_fit_coords_in_expected_range(self):
+        """garmin-fenix-5-run.fit is a California run (~38.2°N, ~-122.6°W)."""
+        segs = FITParser().parse_file(_FIXTURE)
+        p = segs[0].points[0]
+        assert 38.0 < p.latitude < 38.5
+        assert -123.0 < p.longitude < -122.0
