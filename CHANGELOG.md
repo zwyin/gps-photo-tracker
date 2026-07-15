@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-07-14
+
+### Added
+- **CLI mode** — `gps-photo-tracker-cli` for batch/automated/headless geotagging. Reuses GPSTaggingService; args align POSIX/exiftool conventions (photos positional, `-t`/`-o`/`--overwrite`/`-n`/`-j`/`--time-offset`/`-q`/`-v`/`--report`). Default dry-run; exit codes 0/1/2. `--report` outputs CSV (per-photo stats) + HTML.
+
 ## [0.25.0] - 2026-07-13
 
 ### Added
