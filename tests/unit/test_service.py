@@ -27,6 +27,7 @@ from gps_photo_tracker.core.models import (
     ReviewState,
 )
 from gps_photo_tracker.service.cancel_token import CancellationToken
+from gps_photo_tracker.core.concurrency import _copy_destination
 from gps_photo_tracker.service.tagging_service import GPSTaggingService
 
 
@@ -1299,7 +1300,7 @@ class TestCopyDestinationPaths:
             keep_structure=True,
         )
         # Path not relative to photo_dir → ValueError → fallback to photo_dir.name / filename
-        result = service._copy_destination(Path("/other/photo.jpg"), options, Path("/photos"))
+        result = _copy_destination(Path("/other/photo.jpg"), options, Path("/photos"))
         assert result == Path("/output") / "photos" / "photo.jpg"
 
     def test_keep_structure_preserves_relative_path(self):
@@ -1309,7 +1310,7 @@ class TestCopyDestinationPaths:
             output_dir=Path("/output"),
             keep_structure=True,
         )
-        result = service._copy_destination(
+        result = _copy_destination(
             Path("/photos/2026/feb/photo.jpg"), options, Path("/photos"),
         )
         assert result == Path("/output") / "2026" / "feb" / "photo.jpg"
@@ -1321,7 +1322,7 @@ class TestCopyDestinationPaths:
             output_dir=Path("/output"),
             keep_structure=False,
         )
-        result = service._copy_destination(
+        result = _copy_destination(
             Path("/photos/2026/feb/photo.jpg"), options, Path("/photos"),
         )
         assert result == Path("/output") / "photo.jpg"
