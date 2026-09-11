@@ -5816,3 +5816,63 @@ class TestBuildProcessOptions:
         assert opts.output_dir == out
         assert opts.overwrite_gps is True
         assert opts.workers == 4
+
+
+class TestClockCorrectionBanner:
+    """Camera clock auto-correction banner (task #12) — logic-level tests."""
+
+    def _seg(self):
+        from gps_photo_tracker.core.models import GPXSegment, TrackPoint
+        return GPXSegment(filename="t.gpx", start=1000.0, end=2000.0,
+                          points=[TrackPoint(timestamp=1500.0, latitude=35.0, longitude=139.0)])
+
+    def _results(self, stamps):
+        from gps_photo_tracker.core.models import MatchResult, PhotoInfo
+        return [
+            MatchResult(
+                photo=PhotoInfo(path=Path(f"/tmp/p{i}.jpg"), filename=f"p{i}.jpg",
+                                timestamp=ts, has_gps=False),
+                success=False, reject_reason="no_gps_coverage",
+            )
+            for i, ts in enumerate(stamps)
+        ]
+
+    def test_banner_hidden_by_default(self, main_window):
+        assert main_window._clock_banner.isHidden()
+        assert main_window._clock_apply_btn.isHidden()
+        assert main_window._clock_correction is None
+
+    def test_banner_shows_on_offset_detected(self, main_window):
+        # camera +3600s: stamps 4700..5500 vs track [1000, 2000]
+        results = self._results([4700.0 + i * 100.0 for i in range(9)])
+        main_window._update_clock_banner(results, [self._seg()])
+
+        assert not main_window._clock_banner.isHidden()
+        assert not main_window._clock_apply_btn.isHidden()
+        assert main_window._clock_correction is not None
+        assert main_window._clock_correction.offset_s == -3600
+        assert "-3600" in main_window._clock_banner.text()
+        assert "置信度" in main_window._clock_banner.text()
+
+    def test_banner_hidden_when_no_signal(self, main_window):
+        results = self._results([1100.0, 1300.0, 1500.0])  # healthy, inside track
+        main_window._update_clock_banner(results, [self._seg()])
+
+        assert main_window._clock_banner.isHidden()
+        assert main_window._clock_correction is None
+
+    def test_apply_widens_spin_range_and_reruns_preview(self, main_window, monkeypatch):
+        from gps_photo_tracker.core.clock_correction import ClockCorrection
+        main_window._clock_correction = ClockCorrection(
+            offset_s=7200, support=9, total=9, confidence=1.0, gain=9,
+            plateau_start_s=7100.0, plateau_end_s=7300.0,
+        )
+        assert main_window._offset_spin.maximum() == 3600  # default ±1h range
+
+        calls = []
+        monkeypatch.setattr(main_window, "_on_step1_preview", lambda: calls.append(1))
+        main_window._on_apply_clock_correction()
+
+        assert main_window._offset_spin.value() == 7200
+        assert main_window._offset_spin.maximum() == 7200  # range widened
+        assert calls == [1]  # preview re-run exactly once

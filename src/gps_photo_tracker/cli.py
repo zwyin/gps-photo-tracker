@@ -35,6 +35,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-n", "--dry-run", action="store_true", help="Explicit dry-run (default)")
     p.add_argument("-j", "--workers", type=int, default=1, help="Parallel workers (default: 1)")
     p.add_argument("--time-offset", type=int, default=0, help="Photo time offset seconds (default: 0)")
+    p.add_argument("--suggest-clock-offset", action="store_true",
+                   help="Detect camera clock offset from match results and print a "
+                        "'clock-offset-suggest:' line (does not apply it; rerun with "
+                        "--time-offset <s> to apply)")
     p.add_argument("-q", "--quiet", action="store_true", help="Only print final summary")
     p.add_argument("-v", "--verbose", action="store_true", help="Verbose: one line per photo")
     p.add_argument("--report", action="store_true", help="Write CSV + HTML reports")
@@ -100,9 +104,26 @@ def _run(args) -> int:
         )
 
     _print_summary(result, args)
+    if args.suggest_clock_offset:
+        _print_clock_suggestion(result, segments, args)
     if args.report:
         _write_csv(result, args)
     return _exit_code(result)
+
+
+def _print_clock_suggestion(result, segments, args):
+    """Detect camera clock offset (batch offset-distribution scan) and print
+    a machine-readable suggestion line to stdout. Never applies it."""
+    from gps_photo_tracker.core.clock_correction import detect_offset
+    correction = detect_offset(result.results, segments,
+                               current_offset_s=args.time_offset)
+    if correction is None:
+        print("clock-offset-suggest: none")
+        return
+    print(f"clock-offset-suggest: offset={correction.offset_s:+d}s "
+          f"confidence={correction.confidence:.0%} "
+          f"support={correction.support}/{correction.total} gain={correction.gain} "
+          f"(rerun with --time-offset {correction.offset_s})")
 
 
 def _on_progress(update):

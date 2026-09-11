@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **相机时钟自动校正**（任务 #12）— 从匹配结果批量扫描 offset 分布自动检测相机时钟偏差：`core/clock_correction.py` 将候选 offset 下的"照片落入轨迹覆盖数"建模为区间最大重叠问题（O(N·M log NM) 事件扫描），峰值即建议 offset（平台中心值），置信度 = 峰值支持数/有效照片数。四重守卫（净增益、不伤害已匹配照片、最少支持票、容差下限）确保无尖峰时返回 None 不误导。CLI 新增 `--suggest-clock-offset`（打印机器可读建议行）；GUI 匹配结果面板新增建议横幅，一键应用并自动重匹配。设计文档：`docs/superpowers/specs/2026-09-11-clock-autocorrect.md`（含"成功匹配对 time_diff 不携带 offset 信息"的关键分析）。
+
 ## [0.26.0] - 2026-07-14
 
 ### Added

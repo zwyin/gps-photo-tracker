@@ -283,3 +283,65 @@ class TestCliCsvReport:
                     "longitude", "altitude", "time_diff", "reject_reason",
                     "has_gps_before", "overwritten"]:
             assert col in header
+
+
+class TestCliSuggestClockOffset:
+    """--suggest-clock-offset: batch offset-distribution scan, prints suggestion."""
+
+    def _shifted_result(self):
+        """9 photos, camera +3600s: stamps 4700..5500 vs track [1000, 2000]."""
+        from gps_photo_tracker.core.models import MatchResult
+        results = [
+            MatchResult(
+                photo=PhotoInfo(path=Path(f"/tmp/p{i}.jpg"), filename=f"p{i}.jpg",
+                                timestamp=4700.0 + i * 100.0, has_gps=False),
+                success=False, reject_reason="no_gps_coverage",
+            )
+            for i in range(9)
+        ]
+        return BatchResult(total=9, matched=0, skipped=0, failed=9, overwritten=0,
+                           success_rate=0.0, results=results, reject_groups={},
+                           concurrent_workers=1)
+
+    def test_suggestion_printed_on_stdout(self, tmp_path, capsys):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = MockSvc.return_value
+            inst.scan_gpx.return_value = [_seg()]
+            inst.scan_photos.return_value = [_photo()]
+            inst.preview.return_value = self._shifted_result()
+            code = main(["-t", "ride.gpx", "--suggest-clock-offset", str(tmp_path)])
+        assert code == 2  # all failed → exit 2 unchanged by the flag
+        out = capsys.readouterr().out
+        assert "clock-offset-suggest: offset=-3600s" in out
+        assert "confidence=100%" in out
+        assert "support=9/9" in out
+        assert "--time-offset -3600" in out
+
+    def test_none_printed_when_no_signal(self, tmp_path, capsys):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        from gps_photo_tracker.core.models import MatchResult
+        healthy = BatchResult(
+            total=1, matched=1, skipped=0, failed=0, overwritten=0,
+            success_rate=1.0,
+            results=[MatchResult(photo=_photo(), success=True, method="interpolated")],
+            reject_groups={}, concurrent_workers=1,
+        )
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = MockSvc.return_value
+            inst.scan_gpx.return_value = [_seg()]
+            inst.scan_photos.return_value = [_photo()]
+            inst.preview.return_value = healthy
+            code = main(["-t", "ride.gpx", "--suggest-clock-offset", str(tmp_path)])
+        assert code == 0
+        assert "clock-offset-suggest: none" in capsys.readouterr().out
+
+    def test_flag_off_prints_nothing(self, tmp_path, capsys):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = MockSvc.return_value
+            inst.scan_gpx.return_value = [_seg()]
+            inst.scan_photos.return_value = [_photo()]
+            inst.preview.return_value = self._shifted_result()
+            main(["-t", "ride.gpx", str(tmp_path)])
+        assert "clock-offset-suggest" not in capsys.readouterr().out

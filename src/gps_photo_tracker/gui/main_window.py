@@ -330,6 +330,23 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(splitter, stretch=1)
 
+        # Camera clock correction banner (task #12): hidden unless a suggestion exists
+        self._clock_correction = None
+        banner_row = QHBoxLayout()
+        self._clock_banner = QLabel("")
+        self._clock_banner.setStyleSheet(
+            "padding: 6px 8px; background: #fff3cd; border-radius: 4px;"
+            " font-size: 12px; color: #664d03;"
+        )
+        self._clock_banner.setVisible(False)
+        self._clock_apply_btn = QPushButton("应用校正并重新匹配")
+        self._clock_apply_btn.setVisible(False)
+        self._clock_apply_btn.clicked.connect(self._on_apply_clock_correction)
+        banner_row.addWidget(self._clock_banner)
+        banner_row.addWidget(self._clock_apply_btn)
+        banner_row.addStretch()
+        layout.insertLayout(0, banner_row)
+
         return result_widget
 
     # ── Actions ─────────────────────────────────────────────
@@ -687,6 +704,7 @@ class MainWindow(QMainWindow):
         self._original_details.clear()
         self._protection_snapshots.clear()
         self._export_btn.setEnabled(False)
+        self._hide_clock_banner()  # stale suggestion from a previous run
 
         config = self._get_matcher_config()
         options = self._get_process_options()
@@ -1087,6 +1105,10 @@ class MainWindow(QMainWindow):
             )
             all_results.append(result)
         state.all_results = all_results
+
+        # Camera clock auto-correction (task #12): detect on reconstructed data
+        self._update_clock_banner(all_results, segments)
+
         dialog = ReviewDialog(state, self)
         dialog.exec()
 
@@ -1120,6 +1142,54 @@ class MainWindow(QMainWindow):
             "total": total, "matched": matched, "failed": failed,
             "skipped": 0, "overwritten": 0, "success_rate": rate,
         })
+
+    # ── Camera clock auto-correction (task #12) ─────────────
+
+    def _update_clock_banner(self, results: list[MatchResult], segments: list[GPXSegment]):
+        """Detect camera clock offset after a match run; show suggestion banner.
+
+        Detection failures never break the GUI — the banner just stays hidden.
+        """
+        from gps_photo_tracker.core.clock_correction import detect_offset
+        try:
+            correction = detect_offset(
+                results, segments, current_offset_s=self._offset_spin.value(),
+            )
+        except Exception:
+            logger.exception("时钟偏差检测失败")
+            correction = None
+        self._clock_correction = correction
+        if correction is None:
+            self._hide_clock_banner()
+            return
+        self._clock_banner.setText(
+            f"检测到相机时钟偏差 {correction.offset_s:+d} 秒"
+            f"（置信度 {correction.confidence:.0%}，"
+            f"基于 {correction.support}/{correction.total} 张，"
+            f"预计挽回 {correction.gain} 张）"
+        )
+        self._clock_banner.setVisible(True)
+        self._clock_apply_btn.setVisible(True)
+
+    def _hide_clock_banner(self):
+        self._clock_correction = None
+        self._clock_banner.setVisible(False)
+        self._clock_apply_btn.setVisible(False)
+
+    def _on_apply_clock_correction(self):
+        """Write the suggested offset into the spin (widening its ±1h range if
+        needed) and re-run the Step ① preview."""
+        if not self._clock_correction:
+            return
+        offset = self._clock_correction.offset_s
+        spin = self._offset_spin
+        if offset < spin.minimum():
+            spin.setMinimum(offset)
+        elif offset > spin.maximum():
+            spin.setMaximum(offset)
+        spin.setValue(offset)
+        self.statusBar().showMessage(f"已应用时钟校正 {offset:+d} 秒，重新匹配中…")
+        self._on_step1_preview()
 
     def _reopen_review_dialog(self):
         """Re-open ReviewDialog with current result data (reflects all prior edits)."""
