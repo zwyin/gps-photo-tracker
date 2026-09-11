@@ -17,6 +17,19 @@ from gps_photo_tracker.service.cancel_token import CancellationToken
 from gps_photo_tracker.service.tagging_service import GPSTaggingService
 
 
+def _segment_summary(seg) -> dict:
+    """Segment dict for GUI consumers: browser summary + points for the map panel."""
+    return {
+        "filename": seg.filename,
+        "start": seg.start,
+        "end": seg.end,
+        "point_count": len(seg.points),
+        "points": [
+            {"latitude": p.latitude, "longitude": p.longitude} for p in seg.points
+        ],
+    }
+
+
 class Worker(QThread):
     """Background thread for scan → match → write pipeline."""
 
@@ -82,15 +95,8 @@ class Worker(QThread):
         if self._excluded_filenames:
             segments = [s for s in segments if s.filename not in self._excluded_filenames]
 
-        # Emit segment summaries for GPX browser
-        seg_dicts = []
-        for seg in segments:
-            seg_dicts.append({
-                "filename": seg.filename,
-                "start": seg.start,
-                "end": seg.end,
-                "point_count": len(seg.points),
-            })
+        # Emit segment summaries for GPX browser + map panel
+        seg_dicts = [_segment_summary(seg) for seg in segments]
         self.scan_done_signal.emit(seg_dicts)
 
         # Emit photo summaries for photo browser

@@ -45,6 +45,7 @@ from gps_photo_tracker.gui.selection_list_dialog import SelectionListDialog
 from gps_photo_tracker.gui.config_panel import build_params_group, build_step_group
 from gps_photo_tracker.gui.detail_dialog import DetailDialog
 from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
+from gps_photo_tracker.gui.map_panel import MapPanel
 from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
 from gps_photo_tracker.gui.photo_preview import PhotoPreview
 from gps_photo_tracker.gui.progress_panel import build_progress_group
@@ -144,6 +145,12 @@ class MainWindow(QMainWindow):
         self._toggle_panel_action.setChecked(True)
         self._toggle_panel_action.triggered.connect(self._toggle_left_panel)
         view_menu.addAction(self._toggle_panel_action)
+
+        self._toggle_map_action = view_menu.addAction("地图面板")
+        self._toggle_map_action.setCheckable(True)
+        self._toggle_map_action.setChecked(True)
+        self._toggle_map_action.triggered.connect(self._toggle_map_panel)
+        view_menu.addAction(self._toggle_map_action)
 
         debug_menu = menu.addMenu("调试")
         log_action = debug_menu.addAction("查看日志")
@@ -317,6 +324,11 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self._photo_preview)
         splitter.setSizes([400, 200])
 
+        # Map preview (top): track polyline + photo markers, static image.
+        self._map_panel = MapPanel()
+        splitter.insertWidget(0, self._map_panel)
+        splitter.setSizes([220, 400, 150])
+
         # Restore saved splitter state
         settings = QSettings("GPSPhotoTracker", "GPSPhotoTracker")
         splitter_state = settings.value("right_splitter_state")
@@ -340,6 +352,9 @@ class MainWindow(QMainWindow):
             self._splitter.setSizes([300, max(sizes[1], 400)])
         else:
             self._splitter.setSizes([0, sum(sizes)])
+
+    def _toggle_map_panel(self, checked: bool):
+        self._map_panel.setVisible(checked)
 
     def _browse_output_dir(self):
         path = QFileDialog.getExistingDirectory(self, "选择输出目录")
@@ -1320,9 +1335,11 @@ class MainWindow(QMainWindow):
         if sorting_was_enabled:
             self._results_table.setSortingEnabled(True)
         self._update_stats_card()
+        self._map_panel.set_results(self._result_details)
 
     def _on_done(self, result_dict: dict):
         self._set_processing(False)
+        self._map_panel.set_results(self._result_details)
 
         if result_dict.get("cancelled"):
             self._progress_label.setText("已取消")
@@ -1479,6 +1496,7 @@ class MainWindow(QMainWindow):
         total_pts = sum(s.get("point_count", 0) for s in segments)
         self._gpx_browser_label.setText(f"GPS: {gpx_count} 段, {total_pts} 点 (点击查看)")
         self._scan_summary.setText(f"GPS: {gpx_count} 段, {total_pts} 点")
+        self._map_panel.set_track(segments)
 
     def _on_photos_scanned(self, photos: list[dict]):
         self._cached_photos = photos
@@ -1547,6 +1565,7 @@ class MainWindow(QMainWindow):
         rows = self._results_table.selectionModel().selectedRows()
         if not rows:
             self._photo_preview.clear()
+            self._map_panel.clear_selected()
             return
         visual_row = rows[0].row()
         data_row = self._get_detail_row(visual_row)
@@ -1555,6 +1574,10 @@ class MainWindow(QMainWindow):
             photo_path = detail.get("path", "")
             lat = detail.get("latitude")
             lon = detail.get("longitude")
+            if lat is not None and lon is not None:
+                self._map_panel.set_selected(lat, lon)
+            else:
+                self._map_panel.clear_selected()
             method = detail.get("method", "")
             method_text = self._METHOD_LABELS.get(method, "—")
             gps_str = f"{lat:.4f}, {lon:.4f}" if lat is not None and lon is not None else "—"
