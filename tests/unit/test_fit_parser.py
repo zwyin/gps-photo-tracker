@@ -90,7 +90,8 @@ class TestFITParserHappy:
             segs = FITParser().parse_file(f)
         assert segs[0].points[0].altitude is None
 
-    def test_multi_session_file_merges_into_one_segment(self, tmp_path):
+    def test_multi_session_file_without_laps_merges_into_one_segment(self, tmp_path):
+        """No lap_mesgs → legacy 1-file-1-segment behaviour (back-compat)."""
         f = tmp_path / "tri.fit"
         f.write_bytes(b"fake")
         msgs = {"record_mesgs": [
@@ -105,6 +106,106 @@ class TestFITParserHappy:
             segs = FITParser().parse_file(f)
         assert len(segs) == 1
         assert len(segs[0].points) == 3
+
+
+class TestFITParserLapSegments:
+    """lap_mesg / session_mesg based segment splitting (multi-sport FIT)."""
+
+    def _parse(self, tmp_path, msgs):
+        f = tmp_path / "multi.fit"
+        f.write_bytes(b"fake")
+        with patch("gps_photo_tracker.core.fit_parser.Stream") as MS, \
+             patch("gps_photo_tracker.core.fit_parser.Decoder") as MD:
+            MS.from_file.return_value = object()
+            MD.return_value.read.return_value = (msgs, [])
+            return FITParser().parse_file(f)
+
+    @staticmethod
+    def _boundary(ts_iso):
+        return {"timestamp": datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))}
+
+    def test_lap_mesgs_split_records_into_segments(self, tmp_path):
+        """3 sports × lap boundaries → 3 segments."""
+        msgs = {
+            "record_mesgs": [
+                _rec(35.0, 139.0, "2026-01-01T08:00:00Z"),
+                _rec(35.1, 139.1, "2026-01-01T08:30:00Z"),
+                _rec(36.0, 140.0, "2026-01-01T11:00:00Z"),
+                _rec(37.0, 141.0, "2026-01-01T13:00:00Z"),
+            ],
+            "lap_mesgs": [
+                self._boundary("2026-01-01T08:00:00Z"),   # sport 1 start
+                self._boundary("2026-01-01T11:00:00Z"),   # sport 2 start
+                self._boundary("2026-01-01T13:00:00Z"),   # sport 3 start
+            ],
+        }
+        segs = self._parse(tmp_path, msgs)
+        assert len(segs) == 3
+        assert [len(s.points) for s in segs] == [2, 1, 1]
+        assert segs[0].start < segs[1].start < segs[2].start
+
+    def test_records_before_first_lap_form_own_segment(self, tmp_path):
+        """Stray records before lap 1 (clock drift / partial lap) get their own segment."""
+        msgs = {
+            "record_mesgs": [
+                _rec(34.9, 138.9, "2026-01-01T07:50:00Z"),
+                _rec(35.0, 139.0, "2026-01-01T08:00:00Z"),
+                _rec(36.0, 140.0, "2026-01-01T11:00:00Z"),
+            ],
+            "lap_mesgs": [
+                self._boundary("2026-01-01T08:00:00Z"),
+                self._boundary("2026-01-01T11:00:00Z"),
+            ],
+        }
+        segs = self._parse(tmp_path, msgs)
+        assert len(segs) == 3
+        assert len(segs[0].points) == 1  # pre-lap stray
+        assert segs[0].points[0].latitude == 34.9
+
+    def test_session_mesgs_used_when_no_lap_mesgs(self, tmp_path):
+        """Fallback: session boundaries split when device emits no laps."""
+        msgs = {
+            "record_mesgs": [
+                _rec(35.0, 139.0, "2026-01-01T08:00:00Z"),
+                _rec(36.0, 140.0, "2026-01-01T11:00:00Z"),
+            ],
+            "session_mesgs": [
+                self._boundary("2026-01-01T08:00:00Z"),
+                self._boundary("2026-01-01T11:00:00Z"),
+            ],
+        }
+        segs = self._parse(tmp_path, msgs)
+        assert len(segs) == 2
+        assert len(segs[0].points) == 1
+
+    def test_single_lap_yields_one_segment(self, tmp_path):
+        """Single-sport FIT with 1 lap_mesg → unchanged behaviour (1 segment)."""
+        msgs = {
+            "record_mesgs": [
+                _rec(35.0, 139.0, "2026-01-01T08:00:00Z"),
+                _rec(35.1, 139.1, "2026-01-01T08:30:00Z"),
+            ],
+            "lap_mesgs": [self._boundary("2026-01-01T08:00:00Z")],
+        }
+        segs = self._parse(tmp_path, msgs)
+        assert len(segs) == 1
+        assert len(segs[0].points) == 2
+
+    def test_segment_fields_populated(self, tmp_path):
+        """Each segment carries filename/start/end for matcher routing."""
+        msgs = {
+            "record_mesgs": [
+                _rec(35.0, 139.0, "2026-01-01T08:00:00Z"),
+                _rec(36.0, 140.0, "2026-01-01T11:00:00Z"),
+            ],
+            "lap_mesgs": [
+                self._boundary("2026-01-01T08:00:00Z"),
+                self._boundary("2026-01-01T11:00:00Z"),
+            ],
+        }
+        segs = self._parse(tmp_path, msgs)
+        assert all(s.filename == "multi.fit" for s in segs)
+        assert segs[0].end <= segs[1].start  # no overlap after split
 
 
 class TestFITParserFiltering:

@@ -45,12 +45,54 @@ class FITParser:
             return []
 
         points.sort(key=lambda p: p.timestamp)
+
+        boundaries = self._segment_boundaries(messages)
+        if boundaries:
+            return self._split_at(points, boundaries, path.name)
         return [GPXSegment(
             filename=path.name,
             start=points[0].timestamp,
             end=points[-1].timestamp,
             points=points,
         )]
+
+    @staticmethod
+    def _segment_boundaries(messages: dict) -> list[float]:
+        """lap_mesg (preferred) / session_mesg timestamps → sorted POSIX boundaries.
+
+        Multi-sport FIT files (triathlon) record one lap per sport; splitting
+        segments at lap starts keeps the matcher's [start, end] routing honest
+        during transitions (spec §14 high-priority followup).
+        """
+        for key in ("lap_mesgs", "session_mesgs"):
+            mesgs = messages.get(key) or []
+            stamps = []
+            for m in mesgs:
+                dt = m.get("timestamp") if isinstance(m, dict) else None
+                if isinstance(dt, datetime):
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    stamps.append(dt.timestamp())
+            if len(stamps) >= 2:  # single boundary == single segment, no split needed
+                return sorted(set(stamps))
+        return []
+
+    @staticmethod
+    def _split_at(points: list, boundaries: list[float], filename: str) -> list[GPXSegment]:
+        """Split sorted points at boundary timestamps (point ts < b → earlier segment)."""
+        groups: list[list] = [[]]
+        b_iter = iter(boundaries)
+        b = next(b_iter, None)
+        for p in points:
+            while b is not None and p.timestamp >= b:
+                groups.append([])
+                b = next(b_iter, None)
+            groups[-1].append(p)
+        segments = [
+            GPXSegment(filename=filename, start=g[0].timestamp, end=g[-1].timestamp, points=g)
+            for g in groups if g
+        ]
+        return segments
 
     # FIT position_lat/position_long are sint32 semicircles. garmin_fit_sdk's
     # apply_scale_and_offset does NOT convert them (only altitude/speed/etc),
