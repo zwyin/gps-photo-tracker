@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **CLI `--review`** — interactive terminal review of failed matches (spec §13). After matching, walks each failed photo (filename / capture time / reject reason / time diff) and accepts: `Enter` keep, `g` pick nearest track point (±30 min window, mirrors GUI picker), `c` manual coordinates, `p`/`n` follow prev/next matched neighbor, `s` skip, `q` abort. Decisions go through `GPSTaggingService.prepare_review`/`apply_review` (same semantics as the GUI), then writes proceed via `write_phase`. Non-tty stdin (CI/pipe) degrades to a notice + preview summary without prompting; Ctrl-C/Ctrl-D exit cleanly with code 1.
+
 ## [0.26.0] - 2026-07-14
 
 ### Added
