@@ -39,6 +39,15 @@ def _photo(name, ts):
                      timestamp=ts, has_gps=False)
 
 
+def _key(name: str) -> str:
+    """Decision-dict key exactly as production builds it: str(PhotoInfo.path).
+
+    str(Path) normalizes separators per platform ('/tmp/x.jpg' becomes
+    '\\tmp\\x.jpg' on Windows), so hard-coded POSIX strings fail lookups there.
+    """
+    return str(Path(f"/tmp/{name}.jpg"))
+
+
 def _failed_batch():
     """1 matched (ok, ts=1500) + 2 failed (f1 ts=1560, f2 ts=1440)."""
     r_ok = MatchResult(photo=_photo("ok", 1500.0), success=True,
@@ -190,7 +199,7 @@ class TestReviewInteractive:
                                 spy_apply=spy)
         assert code == 2  # f2 still failed
         _, state = spy.calls[0]
-        dec = state.decisions["/tmp/f1.jpg"]
+        dec = state.decisions[_key("f1")]
         assert dec.action == ReviewAction.MANUAL_GPS
         assert dec.selected_point.timestamp == 1560.0  # nearest to f1
         assert dec.selected_point.latitude == 35.001
@@ -205,7 +214,7 @@ class TestReviewInteractive:
                                 spy_apply=spy)
         assert code == 2
         _, state = spy.calls[0]
-        dec = state.decisions["/tmp/f1.jpg"]
+        dec = state.decisions[_key("f1")]
         assert dec.action == ReviewAction.MANUAL_COORD
         assert dec.manual_lat == 35.5
         assert dec.manual_lon == 139.5
@@ -221,7 +230,7 @@ class TestReviewInteractive:
                                 spy_apply=spy)
         assert code == 2
         _, state = spy.calls[0]
-        dec = state.decisions["/tmp/f1.jpg"]
+        dec = state.decisions[_key("f1")]
         assert dec.action == ReviewAction.MANUAL_COORD
         assert dec.manual_lat == 35.5
         assert dec.manual_lon == 139.5
