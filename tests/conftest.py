@@ -20,37 +20,43 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 def pytest_unconfigure(config):
-    """Exit hard at unconfigure on POSIX — before any teardown stage can
-    crash. NOT on Windows: see the platform gate below.
+    """Exit hard at unconfigure — before any teardown stage can crash.
 
     Closed-but-alive QWidgets (the main_window fixture closes windows but
     never deletes them) accumulate across the suite; on headless CI
-    runners the post-summary teardown stages crashed the process: plain
-    interpreter finalization segfaulted (Linux) / aborted (macOS 'Pure
-    virtual function called'). Destroying widgets or the QApplication
-    from hooks was not a fix either — deletion order is platform/
-    plugin-state dependent (segfaulted on every CI runner while passing
-    locally).
+    runners the post-summary teardown kills the process on EVERY
+    platform, just with different signatures: Linux segfault, macOS
+    'libc++abi: Pure virtual function called!' abort, Windows a silent
+    exit 1 from a failing DLL detach (round 1 masked this behind real
+    test failures; round 5 showed a green summary followed by exit 1).
+    Destroying widgets or the QApplication from hooks was not a fix
+    either — deletion order is platform/plugin-state dependent
+    (segfaulted on every CI runner while passing locally).
 
-    Windows is the opposite case: hookless it exits cleanly (its round-1
-    failure was 3 real test bugs, since fixed), while every hard-exit
-    variant crashed it — atexit ran too late (a later-registered unload
-    step died with exit 1 first) and os._exit itself crashed with Qt
-    background threads alive. Hence: skip the hard exit on win32.
+    Windows needs a different hard exit than os._exit: the CRT teardown
+    path it still runs crashed with Qt background threads alive (rounds
+    3-4), and atexit ran too late (a later-registered unload step died
+    first). kernel32.TerminateProcess skips CRT teardown AND DLL detach
+    — no callbacks of any kind can run, let alone crash.
 
     By unconfigure time the terminal summary and pytest-cov report have
     been printed (they run in sessionfinish), and conftest's unconfigure
     runs BEFORE plugin unconfigure steps — so exiting here preserves all
-    output and skips every later teardown, where the POSIX crash lives.
+    output and skips every later teardown, where the crash lives.
     """
     import os
     import sys
 
-    if sys.platform == "win32":
-        return
+    code = getattr(config, "_gpspt_exit_code", 0)
     sys.stdout.flush()
     sys.stderr.flush()
-    os._exit(getattr(config, "_gpspt_exit_code", 0))
+    if sys.platform == "win32":
+        import ctypes
+
+        # TerminateProcess(-1, code): pseudo-handle to the current process;
+        # skips CRT teardown AND DLL detach — no callbacks can crash.
+        ctypes.windll.kernel32.TerminateProcess(ctypes.c_void_p(-1), code)
+    os._exit(code)
 
 
 def utc(h: int, m: int = 0, s: int = 0, day: int = 17, month: int = 2, year: int = 2026) -> float:
