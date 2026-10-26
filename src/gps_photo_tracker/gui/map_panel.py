@@ -9,6 +9,8 @@ Degradation is always graceful: missing key / missing data / network failure
 just show a hint message — map preview never blocks the tagging workflow.
 """
 
+import json
+
 from PySide6.QtCore import QUrl, Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
@@ -156,6 +158,16 @@ class MapPanel(QWidget):
         if error != QNetworkReply.NetworkError.NoError:
             self._show_message("地图加载失败（网络错误）")
             return
+        if data[:1] == b"{":  # AMap reports API errors as HTTP 200 + JSON
+            try:
+                err = json.loads(data)
+            except ValueError:
+                err = {}
+            if err.get("status") == "0":
+                self._show_message(
+                    f"地图服务错误（{err.get('info')} {err.get('infocode')}）"
+                )
+                return
         self._handle_png(url, data)
 
     def _handle_png(self, url: str, data: bytes) -> None:

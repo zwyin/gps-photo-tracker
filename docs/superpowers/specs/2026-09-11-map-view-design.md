@@ -71,7 +71,10 @@ review 对话框内嵌地图。
     `weight,color,alpha,,:lon,lat;...`（高德文档原样，fillcolor 留空不填充）；
     段间 `|` 连接，高德上限 4 组，超出丢弃（记录于 docstring）。
 - `build_markers_param(points, selected=None) -> str | None`
-  - 照片点 blue small 组 + 选中点 red large 组；>96 点均匀降采样。
+  - 照片点 blue small 组 + 选中点 red large 组；照片点均匀降采样至 ≤9
+    （高德文档标注上限 10/请求 = 9 打点 + 1 选中高亮。2026-10-26 实测
+    复验：10/40 个出图正常，55+ 个返回 UNKNOWN_ERROR 20003——初版
+    MAX_MARKERS=96 在批量场景必然失败，已修正）。
 - `sign_params(params, secret) -> str`：高德数字签名 = md5(按 key 排序的
   urlencode 串 + secret)。secret 存在时自动附加 `sig`。
 - `build_static_map_url(...) -> str`：端点
@@ -94,7 +97,9 @@ review 对话框内嵌地图。
   QNetworkAccessManager 异步拉取，完成后显示或报错。选中照片以独立
   red large marker 组呈现（静态图无原生交互，刷新即"高亮"）。
 - 降级：无 key → "未配置 AMAP_KEY（.env）"；无数据 → "暂无轨迹"；
-  网络失败 → 错误信息。主流程零依赖（地图失败不影响打标）。
+  网络失败 → 错误信息；高德 API 错（HTTP 200 + JSON status=0）→ 透出
+  info/infocode（不再笼统报"响应无效"，2026-10-26 修复）。
+  主流程零依赖（地图失败不影响打标）。
 - 集成点（main_window）：
   - `_build_right_panel`：右侧垂直 splitter 顶部加 MapPanel，"视图"菜单
     增加"地图面板"开关（checkable，镜像"配置面板"模式）；

@@ -22,10 +22,12 @@ ZOOM_MIN = 3
 ZOOM_MAX = 17
 DEFAULT_SIZE = (640, 360)  # must stay ≤ 1024*1024 (AMap limit)
 
-# AMap limits: ≤4 path style groups, ≤10 marker style groups per request.
+# AMap limits: ≤4 path style groups; documented marker cap is 10 per request
+# (live-checked 2026-10-26: >~50 markers fails with UNKNOWN_ERROR 20003 —
+# we stay at the documented value: 9 bulk photo dots + 1 selected highlight).
 MAX_PATH_GROUPS = 4
 MAX_PATH_POINTS = 128  # per segment, keeps the URL comfortably under limits
-MAX_MARKERS = 96
+MAX_MARKERS = 9
 
 _PATH_WEIGHT = "4"
 _PATH_COLOR = "0x0000FF"

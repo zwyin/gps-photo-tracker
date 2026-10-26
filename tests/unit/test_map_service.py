@@ -178,7 +178,8 @@ class TestBuildMarkersParam:
         pts = [(10.0 + i * 0.001, 100.0) for i in range(500)]
         got = build_markers_param(pts)
         points = got.split(",:")[1].split(";")
-        assert len(points) == 96
+        # AMap documented cap is 10 markers total: 9 bulk + 1 selected.
+        assert len(points) == 9
         assert points[0].endswith("10.000000")
         assert points[-1].endswith("10.499000")
 

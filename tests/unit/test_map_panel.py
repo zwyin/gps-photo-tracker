@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
+from PySide6.QtCore import QUrl
+from PySide6.QtNetwork import QNetworkReply
 from PySide6.QtWidgets import QApplication, QTableWidgetItem
 
 from gps_photo_tracker.core.geo import wgs84_to_gcj02
@@ -32,6 +34,25 @@ def _png_bytes() -> bytes:
     buf = io.BytesIO()
     Image.new("RGB", (8, 8), color=(30, 144, 255)).save(buf, "PNG")
     return buf.getvalue()
+
+
+class _FakeAmapErrorReply:
+    """Mimics a QNetworkReply delivering an AMap error (HTTP 200 + JSON)."""
+
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def url(self):
+        return QUrl("https://restapi.amap.com/v3/staticmap")
+
+    def error(self):
+        return QNetworkReply.NetworkError.NoError
+
+    def readAll(self):
+        return self._body
+
+    def deleteLater(self):
+        pass
 
 
 def _seg(points, filename="t.gpx"):
@@ -149,6 +170,17 @@ class TestMapPanelRefresh:
         panel = self._panel(qapp)
         panel._handle_png("https://example.com/map", b"not-an-image")
         assert "失败" in panel._image_label.text() or "无效" in panel._image_label.text()
+
+    def test_amap_json_error_surfaces_infocode(self, qapp):
+        # AMap reports API errors as HTTP 200 + JSON; the panel must surface
+        # info/infocode instead of a generic "invalid response".
+        panel = self._panel(qapp)
+        reply = _FakeAmapErrorReply(
+            b'{"status":"0","info":"UNKNOWN_ERROR","infocode":"20003"}'
+        )
+        panel._on_reply_finished(reply)
+        text = panel._image_label.text()
+        assert "20003" in text and "UNKNOWN_ERROR" in text
 
     def test_handle_png_stale_url_not_displayed(self, qapp):
         panel = self._panel(qapp)
