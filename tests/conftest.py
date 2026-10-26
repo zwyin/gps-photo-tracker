@@ -1,6 +1,5 @@
 """Test fixtures and data factories."""
 
-import gc
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,35 +15,25 @@ from gps_photo_tracker.core.models import (
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Controlled Qt teardown BEFORE interpreter shutdown.
+    """Skip interpreter finalization on Qt builds: exit hard via atexit.
 
     Closed-but-alive QWidgets (the main_window fixture closes windows but
     never deletes them) accumulate across the suite; on headless CI runners
-    they were destroyed only after the platform plugin tore down, crashing
-    at process exit AFTER the summary line ('libc++abi: Pure virtual
-    function called!' on macOS, segfault on Linux) — turning green runs
-    into red. Destroy them here while everything is still alive.
+    interpreter-finalization teardown crashed at process exit AFTER the
+    summary line ('libc++abi: Pure virtual function called!' on macOS,
+    segfault on Linux/Windows), turning green runs red. Deleting widgets
+    or the QApplication from THIS hook was not a fix either — deletion
+    order differs per platform and segfaulted on every CI runner while
+    passing locally. Instead, schedule os._exit as the LAST atexit
+    handler (atexit is LIFO and this registers before pytest's terminal
+    summary / pytest-cov report run in their own sessionfinish hooks):
+    everything still prints and flushes, then the process dies before
+    the finalization stage where the crash lives.
     """
-    try:
-        from PySide6.QtWidgets import QApplication
-        from shiboken6 import delete as shiboken_delete
-    except ImportError:
-        return  # PySide6 not installed (pure-core test environments)
-    app = QApplication.instance()
-    if app is None:
-        return
-    for w in app.topLevelWidgets():
-        w.close()
-    app.processEvents()
-    gc.collect()
-    # Delete the QApplication itself; Qt then destroys the remaining
-    # (closed-but-alive) widgets through its own ordered parent-child
-    # teardown. Per-widget shiboken_delete is NOT safe here: the snapshot
-    # list goes stale as parent deletions cascade into children.
-    try:
-        shiboken_delete(app)
-    except RuntimeError:
-        pass
+    import atexit
+    import os
+
+    atexit.register(lambda: os._exit(exitstatus))
 
 
 def utc(h: int, m: int = 0, s: int = 0, day: int = 17, month: int = 2, year: int = 2026) -> float:
