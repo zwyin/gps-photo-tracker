@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for GPS Photo Tracker v0.26.0."""
+"""PyInstaller spec for GPS Photo Tracker v0.27.0."""
 
 import os
 import sys
@@ -118,8 +118,8 @@ app = BUNDLE(
     bundle_identifier="com.gps-photo-tracker.app",
     info_plist={
         "CFBundleName": "GPS Photo Tracker",
-        "CFBundleShortVersionString": "0.26.0",
-        "CFBundleVersion": "0.26.0",
+        "CFBundleShortVersionString": "0.27.0",
+        "CFBundleVersion": "0.27.0",
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "11.0",
         "CFBundleDocumentTypes": [
