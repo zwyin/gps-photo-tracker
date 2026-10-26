@@ -20,27 +20,34 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 def pytest_unconfigure(config):
-    """Exit hard at unconfigure — before any teardown stage can crash.
+    """Exit hard at unconfigure on POSIX — before any teardown stage can
+    crash. NOT on Windows: see the platform gate below.
 
     Closed-but-alive QWidgets (the main_window fixture closes windows but
     never deletes them) accumulate across the suite; on headless CI
     runners the post-summary teardown stages crashed the process: plain
     interpreter finalization segfaulted (Linux) / aborted (macOS 'Pure
-    virtual function called'), and even an atexit os._exit was too late
-    on Windows (a later-registered atexit/unload step died with exit 1
-    before our LIFO-last handler ran). Destroying widgets or the
-    QApplication from hooks was not a fix either — deletion order is
-    platform/plugin-state dependent (segfaulted on every CI runner while
-    passing locally).
+    virtual function called'). Destroying widgets or the QApplication
+    from hooks was not a fix either — deletion order is platform/
+    plugin-state dependent (segfaulted on every CI runner while passing
+    locally).
+
+    Windows is the opposite case: hookless it exits cleanly (its round-1
+    failure was 3 real test bugs, since fixed), while every hard-exit
+    variant crashed it — atexit ran too late (a later-registered unload
+    step died with exit 1 first) and os._exit itself crashed with Qt
+    background threads alive. Hence: skip the hard exit on win32.
 
     By unconfigure time the terminal summary and pytest-cov report have
     been printed (they run in sessionfinish), and conftest's unconfigure
     runs BEFORE plugin unconfigure steps — so exiting here preserves all
-    output and skips every later teardown, where the crash lives.
+    output and skips every later teardown, where the POSIX crash lives.
     """
     import os
     import sys
 
+    if sys.platform == "win32":
+        return
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(getattr(config, "_gpspt_exit_code", 0))
