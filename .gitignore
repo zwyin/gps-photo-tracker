@@ -22,3 +22,4 @@ docs/dev-notes/
 .next/
 .codegraph/
 tests/unit/test_generic_source.py
+.zread/

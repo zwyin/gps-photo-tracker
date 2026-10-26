@@ -73,13 +73,19 @@ def wgs84_to_gcj02(lat: float, lng: float) -> tuple[float, float]:
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance in meters (sphere, R = 6,378,137 m).
 
+    True haversine formulation — unlike the acos/law-of-cosines form it is
+    numerically stable at small distances: identical inputs yield exactly
+    0.0 on every platform. (glibc's libm sums sin²+cos² to 1−1ULP, which
+    acos turns into a phantom ~9.5 cm — a Linux-only CI failure that
+    never reproduced on macOS/Windows libm.)
+
     Sufficient for the ~100 m … ~1,000 km checks here; not geodesic-grade.
     """
     pi180 = math.pi / 180.0
     arc_lat1 = lat1 * pi180
     arc_lat2 = lat2 * pi180
-    x = math.cos(arc_lat1) * math.cos(arc_lat2) * math.cos((lon1 - lon2) * pi180)
-    y = math.sin(arc_lat1) * math.sin(arc_lat2)
-    s = x + y
-    s = max(-1.0, min(1.0, s))
-    return math.acos(s) * _EARTH_R
+    half_dlat = (lat2 - lat1) * pi180 / 2.0
+    half_dlon = (lon2 - lon1) * pi180 / 2.0
+    a = (math.sin(half_dlat) ** 2
+         + math.cos(arc_lat1) * math.cos(arc_lat2) * math.sin(half_dlon) ** 2)
+    return 2.0 * _EARTH_R * math.asin(math.sqrt(min(1.0, a)))
