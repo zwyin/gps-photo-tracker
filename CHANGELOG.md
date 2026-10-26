@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **地图预览面板**（任务 #7）— 主窗口右侧新增地图面板：高德静态图渲染当前轨迹折线 + 已定位照片打点，列表选中照片时独立红色大标记高亮；300 ms 防抖刷新 + URL→QPixmap 内存缓存（16 张 FIFO）。WGS-84→GCJ-02 转换（`core/geo.py`，eviltransform 参考向量校验，境外轨迹不偏移）在数据入口统一完成。优雅降级贯穿全程：无 AMAP_KEY / 无数据 / 网络失败 / 高德 API 错误（透出 info/infocode）均显示占位提示，不影响打标主流程；零新增 pip 依赖。合并前独立 review 修复：marker 上限按高德文档收紧为 10/请求（9 打点 + 1 选中高亮；实测 55+ 个返回 UNKNOWN_ERROR 20003）。AMAP_KEY/AMAP_SECRET 经 `.env` 或环境变量配置。设计文档：`docs/superpowers/specs/2026-09-11-map-view-design.md`。
+
 ## [0.26.0] - 2026-07-14
 
 ### Added
