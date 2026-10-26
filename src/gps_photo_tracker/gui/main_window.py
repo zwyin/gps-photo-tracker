@@ -44,6 +44,12 @@ from gps_photo_tracker.gui.review_dialog import ReviewDialog
 from gps_photo_tracker.gui.selection_list_dialog import SelectionListDialog
 from gps_photo_tracker.gui.config_panel import build_params_group, build_step_group
 from gps_photo_tracker.gui.detail_dialog import DetailDialog
+from gps_photo_tracker.gui.drop_zone import (
+    DropZone,
+    MIXED_GPS,
+    MIXED_PHOTO,
+    classify_paths,
+)
 from gps_photo_tracker.gui.gpx_browser_dialog import GPXBrowserDialog
 from gps_photo_tracker.gui.photo_browser_dialog import PhotoBrowserDialog
 from gps_photo_tracker.gui.photo_preview import PhotoPreview
@@ -211,6 +217,11 @@ class MainWindow(QMainWindow):
         group = QGroupBox("文件选择")
         layout = QVBoxLayout(group)
 
+        # Drag-and-drop zone (highlighted drop target for tracks/photos)
+        self._drop_zone = DropZone()
+        self._drop_zone.pathsDropped.connect(self._on_dropped_paths)
+        layout.addWidget(self._drop_zone)
+
         # GPS directory
         row1 = QHBoxLayout()
         self._gps_dir_edit = QComboBox()
@@ -329,6 +340,23 @@ class MainWindow(QMainWindow):
         )
 
         layout.addWidget(splitter, stretch=1)
+
+        # Camera clock correction banner (task #12): hidden unless a suggestion exists
+        self._clock_correction = None
+        banner_row = QHBoxLayout()
+        self._clock_banner = QLabel("")
+        self._clock_banner.setStyleSheet(
+            "padding: 6px 8px; background: #fff3cd; border-radius: 4px;"
+            " font-size: 12px; color: #664d03;"
+        )
+        self._clock_banner.setVisible(False)
+        self._clock_apply_btn = QPushButton("应用校正并重新匹配")
+        self._clock_apply_btn.setVisible(False)
+        self._clock_apply_btn.clicked.connect(self._on_apply_clock_correction)
+        banner_row.addWidget(self._clock_banner)
+        banner_row.addWidget(self._clock_apply_btn)
+        banner_row.addStretch()
+        layout.insertLayout(0, banner_row)
 
         return result_widget
 
@@ -687,6 +715,7 @@ class MainWindow(QMainWindow):
         self._original_details.clear()
         self._protection_snapshots.clear()
         self._export_btn.setEnabled(False)
+        self._hide_clock_banner()  # stale suggestion from a previous run
 
         config = self._get_matcher_config()
         options = self._get_process_options()
@@ -1087,6 +1116,10 @@ class MainWindow(QMainWindow):
             )
             all_results.append(result)
         state.all_results = all_results
+
+        # Camera clock auto-correction (task #12): detect on reconstructed data
+        self._update_clock_banner(all_results, segments)
+
         dialog = ReviewDialog(state, self)
         dialog.exec()
 
@@ -1120,6 +1153,54 @@ class MainWindow(QMainWindow):
             "total": total, "matched": matched, "failed": failed,
             "skipped": 0, "overwritten": 0, "success_rate": rate,
         })
+
+    # ── Camera clock auto-correction (task #12) ─────────────
+
+    def _update_clock_banner(self, results: list[MatchResult], segments: list[GPXSegment]):
+        """Detect camera clock offset after a match run; show suggestion banner.
+
+        Detection failures never break the GUI — the banner just stays hidden.
+        """
+        from gps_photo_tracker.core.clock_correction import detect_offset
+        try:
+            correction = detect_offset(
+                results, segments, current_offset_s=self._offset_spin.value(),
+            )
+        except Exception:
+            logger.exception("时钟偏差检测失败")
+            correction = None
+        self._clock_correction = correction
+        if correction is None:
+            self._hide_clock_banner()
+            return
+        self._clock_banner.setText(
+            f"检测到相机时钟偏差 {correction.offset_s:+d} 秒"
+            f"（置信度 {correction.confidence:.0%}，"
+            f"基于 {correction.support}/{correction.total} 张，"
+            f"预计挽回 {correction.gain} 张）"
+        )
+        self._clock_banner.setVisible(True)
+        self._clock_apply_btn.setVisible(True)
+
+    def _hide_clock_banner(self):
+        self._clock_correction = None
+        self._clock_banner.setVisible(False)
+        self._clock_apply_btn.setVisible(False)
+
+    def _on_apply_clock_correction(self):
+        """Write the suggested offset into the spin (widening its ±1h range if
+        needed) and re-run the Step ① preview."""
+        if not self._clock_correction:
+            return
+        offset = self._clock_correction.offset_s
+        spin = self._offset_spin
+        if offset < spin.minimum():
+            spin.setMinimum(offset)
+        elif offset > spin.maximum():
+            spin.setMaximum(offset)
+        spin.setValue(offset)
+        self.statusBar().showMessage(f"已应用时钟校正 {offset:+d} 秒，重新匹配中…")
+        self._on_step1_preview()
 
     def _reopen_review_dialog(self):
         """Re-open ReviewDialog with current result data (reflects all prior edits)."""
@@ -1915,9 +1996,6 @@ class MainWindow(QMainWindow):
 
     # ── Drag and drop ───────────────────────────────────────
 
-    _TRACK_EXT = {".gpx", ".kml", ".tcx", ".fit"}
-    _IMAGE_EXT = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
-
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             if any(u.isLocalFile() for u in event.mimeData().urls()):
@@ -1938,48 +2016,37 @@ class MainWindow(QMainWindow):
         if not urls:
             event.ignore()
             return
-        gps_dir, photo_dir = self._classify_drop(urls)
-        if gps_dir:
-            self._set_selection("gps", [gps_dir])
-        if photo_dir:
-            self._set_selection("photo", [photo_dir])
-        if not gps_dir and not photo_dir:
-            QMessageBox.information(self, "拖放", "无法识别拖入的内容类型")
+        event.setDropAction(Qt.DropAction.CopyAction)
         event.accept()
+        self._on_dropped_paths([Path(u.toLocalFile()) for u in urls])
 
-    def _classify_drop(self, urls):
-        """Classify dropped URLs into GPS dir and/or photo dir."""
-        gps_dir = None
-        photo_dir = None
-        for url in urls:
-            p = Path(url.toLocalFile())
-            if p.is_file():
-                ext = p.suffix.lower()
-                if ext in self._TRACK_EXT and gps_dir is None:
-                    gps_dir = p.parent
-                elif ext in self._IMAGE_EXT and photo_dir is None:
-                    photo_dir = p.parent
-                continue
-            if not p.is_dir():
-                continue
-            # Use iterdir (non-recursive) to avoid UI freeze on large directories
-            children = list(p.iterdir())
-            has_track = any(f.suffix.lower() in self._TRACK_EXT for f in children if f.is_file())
-            has_image = any(f.suffix.lower() in self._IMAGE_EXT for f in children if f.is_file())
-            if has_track and has_image:
-                msg = QMessageBox(self)
-                msg.setWindowTitle("识别目录")
-                msg.setText(f"{p.name} 同时包含轨迹和照片文件。")
-                gps_btn = msg.addButton("作为 GPS 目录", QMessageBox.ButtonRole.AcceptRole)
-                photo_btn = msg.addButton("作为照片目录", QMessageBox.ButtonRole.RejectRole)
-                msg.addButton("取消", QMessageBox.ButtonRole.DestructiveRole)
-                msg.exec()
-                if msg.clickedButton() == gps_btn:
-                    gps_dir = p
-                elif msg.clickedButton() == photo_btn:
-                    photo_dir = p
-            elif has_track:
-                gps_dir = p
-            elif has_image:
-                photo_dir = p
-        return gps_dir, photo_dir
+    def _on_dropped_paths(self, paths: list[Path]):
+        """Shared handler for drop-zone and window-level drops: classify
+        by extension / directory content, merge multi-file selections,
+        and route each kind to its picker."""
+        tracks, photos = self._classify_drop(paths)
+        if tracks:
+            self._set_selection("gps", tracks)
+        if photos:
+            self._set_selection("photo", photos)
+        if not tracks and not photos:
+            QMessageBox.information(self, "拖放", "无法识别拖入的内容类型")
+
+    def _classify_drop(self, paths) -> tuple[list[Path], list[Path]]:
+        """Classify dropped paths into (track_paths, photo_paths)."""
+        return classify_paths(paths, mixed_dir_chooser=self._choose_mixed_dir)
+
+    def _choose_mixed_dir(self, p: Path) -> str | None:
+        """Ask how to treat a directory holding both tracks and photos."""
+        msg = QMessageBox(self)
+        msg.setWindowTitle("识别目录")
+        msg.setText(f"{p.name} 同时包含轨迹和照片文件。")
+        gps_btn = msg.addButton("作为 GPS 目录", QMessageBox.ButtonRole.AcceptRole)
+        photo_btn = msg.addButton("作为照片目录", QMessageBox.ButtonRole.RejectRole)
+        msg.addButton("取消", QMessageBox.ButtonRole.DestructiveRole)
+        msg.exec()
+        if msg.clickedButton() == gps_btn:
+            return MIXED_GPS
+        if msg.clickedButton() == photo_btn:
+            return MIXED_PHOTO
+        return None

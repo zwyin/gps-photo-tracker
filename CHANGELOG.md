@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **相机时钟自动校正**（任务 #12）— 从匹配结果批量扫描 offset 分布自动检测相机时钟偏差：`core/clock_correction.py` 将候选 offset 下的"照片落入轨迹覆盖数"建模为区间最大重叠问题（O(N·M log NM) 事件扫描），峰值即建议 offset（平台中心值），置信度 = 峰值支持数/有效照片数。四重守卫（净增益、不伤害已匹配照片、最少支持票、容差下限）确保无尖峰时返回 None 不误导。CLI 新增 `--suggest-clock-offset`（打印机器可读建议行）；GUI 匹配结果面板新增建议横幅，一键应用并自动重匹配。设计文档：`docs/superpowers/specs/2026-09-11-clock-autocorrect.md`（含"成功匹配对 time_diff 不携带 offset 信息"的关键分析）。
+- **GUI 拖拽 drop zone** — 主窗口「文件选择」区顶部新增可见拖放区域（`gui/drop_zone.py`）：拖入 GPS 轨迹（.gpx/.kml/.tcx/.fit）或照片（.jpg/.jpeg/.png/.tif/.tiff）文件/目录，按扩展名与目录内容自动分流到 GPS/照片选择框；拖入经过时高亮反馈（虚线框变蓝色实线）；多文件拖入合并为一次多路径选择（不再只取第一个文件的父目录）。混合目录（同时含轨迹与照片）保留交互式"作为 GPS 目录 / 作为照片目录"选择对话框。窗口级拖放复用同一分流逻辑。
+- **安装包增强** — PyInstaller spec 补齐 GUI 层 hiddenimports（`drop_zone`/`gps_point_picker`/`log_viewer`/`mac_native_picker`/`review_dialog`/`selection_list_dialog` 及 `core.path_layout`）；macOS 文档类型注册新增照片扩展名（jpg/jpeg/png/tif/tiff，原来只有 GPS 轨迹类型）。
+- **CLI `--review`** — interactive terminal review of failed matches (spec §13). After matching, walks each failed photo (filename / capture time / reject reason / time diff) and accepts: `Enter` keep, `g` pick nearest track point (±30 min window, mirrors GUI picker), `c` manual coordinates, `p`/`n` follow prev/next matched neighbor, `s` skip, `q` abort. Decisions go through `GPSTaggingService.prepare_review`/`apply_review` (same semantics as the GUI), then writes proceed via `write_phase`. Non-tty stdin (CI/pipe) degrades to a notice + preview summary without prompting; Ctrl-C/Ctrl-D exit cleanly with code 1.
+
+### Changed
+- 拖放文件现在作为精确的文件选择（拖 3 个 .gpx → 选中这 3 个文件），不再是"取父目录"；与文件选择器行为一致（多文件选择下 COPY 模式强制保留目录结构）。
+
 ## [0.26.0] - 2026-07-14
 
 ### Added

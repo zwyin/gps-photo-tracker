@@ -145,6 +145,11 @@ gps-photo-tracker-cli -t ride.gpx --overwrite ./photos/
 # 4 workers, 1h time offset, CSV+HTML report
 gps-photo-tracker-cli -t ride.gpx -o ./out/ -j 4 \
     --time-offset 3600 --report ./photos/
+
+# Interactive review of failed matches before writing (needs a terminal):
+# per failed photo: Enter=keep, g=pick nearby track point, c=manual coords,
+# p/n=follow prev/next matched photo, s=skip, q=abort
+gps-photo-tracker-cli -t ride.gpx -o ./geotagged/ --review ./photos/
 ```
 
 Run `gps-photo-tracker-cli --help` for full options. Exit codes: `0` success, `1` error, `2` partial failure.
