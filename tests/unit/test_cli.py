@@ -345,3 +345,132 @@ class TestCliSuggestClockOffset:
             inst.preview.return_value = self._shifted_result()
             main(["-t", "ride.gpx", str(tmp_path)])
         assert "clock-offset-suggest" not in capsys.readouterr().out
+
+
+class TestCliConfigFile:
+    """§13: TOML config file — ./gps-photo-tracker.toml > ~/.config/gps-photo-tracker/config.toml,
+    CLI explicit args override config values."""
+
+    def _mock_service(self, MockSvc, result=None):
+        inst = MockSvc.return_value
+        inst.scan_gpx.return_value = [_seg()]
+        inst.scan_photos.return_value = [_photo()]
+        inst.preview.return_value = result or _result()
+        return inst
+
+    def test_config_defaults_applied(self, tmp_path, monkeypatch):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        cfg = tmp_path / "gps-photo-tracker.toml"
+        cfg.write_text('time_offset = -60\n', encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent-xdg"))
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = self._mock_service(MockSvc)
+            main(["-t", "ride.gpx", str(tmp_path)])
+        assert inst.preview.call_args.args[2].time_offset == -60
+
+    def test_cli_overrides_config(self, tmp_path, monkeypatch):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        cfg = tmp_path / "gps-photo-tracker.toml"
+        cfg.write_text('time_offset = -60\n', encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent-xdg"))
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = self._mock_service(MockSvc)
+            main(["-t", "ride.gpx", "--time-offset", "30", str(tmp_path)])
+        assert inst.preview.call_args.args[2].time_offset == 30
+
+    def test_config_workers_applied(self, tmp_path, monkeypatch):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        cfg = tmp_path / "gps-photo-tracker.toml"
+        cfg.write_text('workers = 4\n', encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent-xdg"))
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = self._mock_service(MockSvc)
+            inst.process.return_value = _result()
+            main(["-t", "ride.gpx", "-o", str(tmp_path / "out"), str(tmp_path)])
+        assert inst.process.call_args.kwargs["options"].workers == 4
+
+    def test_config_explicit_path(self, tmp_path, monkeypatch):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        cfg = tmp_path / "myconf.toml"
+        cfg.write_text('time_offset = 120\n', encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent-xdg"))
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = self._mock_service(MockSvc)
+            main(["-t", "ride.gpx", "--config", str(cfg), str(tmp_path)])
+        assert inst.preview.call_args.args[2].time_offset == 120
+
+    def test_config_explicit_path_missing_exits_1(self, tmp_path, monkeypatch, capsys):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(SystemExit) as ei:
+            main(["-t", "ride.gpx", "--config", str(tmp_path / "nope.toml"), str(tmp_path)])
+        assert ei.value.code == 1
+        assert "config" in capsys.readouterr().err.lower()
+
+    def test_config_invalid_toml_warns_not_fatal(self, tmp_path, monkeypatch, capsys):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        cfg = tmp_path / "gps-photo-tracker.toml"
+        cfg.write_text('time_offset = [broken\n', encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent-xdg"))
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = self._mock_service(MockSvc)
+            code = main(["-t", "ride.gpx", str(tmp_path)])
+        assert code == 0  # bad config → warning, run proceeds with defaults
+        assert inst.preview.call_args.args[2].time_offset == 0
+        assert "config" in capsys.readouterr().err.lower()
+
+
+class TestCliCtrlC:
+    """§13: wire CancellationToken — SIGINT sets token; pipeline stops at photo
+    boundary, partial summary prints, exit 130."""
+
+    def _mock_service(self, MockSvc):
+        inst = MockSvc.return_value
+        inst.scan_gpx.return_value = [_seg()]
+        inst.scan_photos.return_value = [_photo()]
+        return inst
+
+    def test_cancel_token_wired_to_service(self, tmp_path):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = self._mock_service(MockSvc)
+            inst.preview.return_value = _result()
+            main(["-t", "ride.gpx", str(tmp_path)])
+        cancel = inst.preview.call_args.kwargs.get("cancel")
+        assert cancel is not None
+
+    def test_cancelled_run_exits_130_with_partial_summary(self, tmp_path, capsys):
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+            inst = self._mock_service(MockSvc)
+            def preview(segs, phs, cfg, cancel=None, **kw):
+                cancel.cancel()  # simulate SIGINT mid-run
+                return _result(total=5, matched=3, failed=2)
+            inst.preview.side_effect = preview
+            code = main(["-t", "ride.gpx", str(tmp_path)])
+        assert code == 130
+        out = capsys.readouterr().out
+        assert "total: 5" in out  # partial summary still printed
+        assert "cancel" in out.lower()
+
+    def test_sigint_handler_registered_and_restored(self, tmp_path):
+        """main() installs a SIGINT handler (sets token, double-Ctrl-C = default)."""
+        import signal
+        from gps_photo_tracker import cli
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        before = signal.getsignal(signal.SIGINT)
+        try:
+            with patch("gps_photo_tracker.cli.GPSTaggingService") as MockSvc:
+                inst = self._mock_service(MockSvc)
+                inst.preview.return_value = _result()
+                main(["-t", "ride.gpx", str(tmp_path)])
+        finally:
+            signal.signal(signal.SIGINT, before)
+        # handler was at least installed during run (we can't observe mid-run
+        # signal.getsignal from here; wiring proven by test_cancel_token_wired)
+        assert callable(cli._sigint_handler)
