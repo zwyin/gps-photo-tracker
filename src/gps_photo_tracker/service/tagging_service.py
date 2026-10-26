@@ -10,7 +10,7 @@ from gps_photo_tracker.core.file_provider import FileProvider
 from gps_photo_tracker.core.gps_matcher import GPSMatcher
 from gps_photo_tracker.core.track_parser import TrackParser
 from gps_photo_tracker.core.checkpoint import CheckpointManager
-from gps_photo_tracker.core.concurrency import BatchProcessor, WriteTask
+from gps_photo_tracker.core.concurrency import BatchProcessor, WriteTask, _copy_destination
 from gps_photo_tracker.core.orientation import OrientationReader
 from gps_photo_tracker.core.param_tuner import ParamTuner
 from gps_photo_tracker.core.report_builder import ReportBuilder
@@ -162,7 +162,7 @@ class GPSTaggingService:
             if result.method == "skipped" or result.method == "protected":
                 skipped += 1
                 if is_copy and options and options.output_dir:
-                    dst = self._copy_destination(result.photo.path, options, photo_dir)
+                    dst = _copy_destination(result.photo.path, options, photo_dir)
                     self._file_provider.copy_file(result.photo.path, dst)
             elif result.success and effective_gps:
                 matched += 1
@@ -185,7 +185,7 @@ class GPSTaggingService:
                                 self._op_logger.log_error(f"write: {result.photo.filename}", e)
                             if is_copy and options.output_dir:
                                 try:
-                                    dst = self._copy_destination(result.photo.path, options, photo_dir)
+                                    dst = _copy_destination(result.photo.path, options, photo_dir)
                                     self._file_provider.copy_file(result.photo.path, dst)
                                 except Exception as copy_err:
                                     if self._op_logger:
@@ -193,14 +193,14 @@ class GPSTaggingService:
                     else:
                         skipped += 1
                         if is_copy and options.output_dir:
-                            dst = self._copy_destination(result.photo.path, options, photo_dir)
+                            dst = _copy_destination(result.photo.path, options, photo_dir)
                             self._file_provider.copy_file(result.photo.path, dst)
             else:
                 failed += 1
                 reason = result.reject_reason or "unknown"
                 reject_groups.setdefault(reason, []).append(result.photo.filename)
                 if is_copy and options.output_dir:
-                    dst = self._copy_destination(result.photo.path, options, photo_dir)
+                    dst = _copy_destination(result.photo.path, options, photo_dir)
                     self._file_provider.copy_file(result.photo.path, dst)
 
             if on_photo_processed:
@@ -400,7 +400,7 @@ class GPSTaggingService:
                 if result.method in ("skipped", "protected"):
                     skipped += 1
                     if is_copy and options and options.output_dir:
-                        dst = self._copy_destination(result.photo.path, options, photo_dir)
+                        dst = _copy_destination(result.photo.path, options, photo_dir)
                         self._file_provider.copy_file(result.photo.path, dst)
                 else:
                     matched += 1
@@ -431,7 +431,7 @@ class GPSTaggingService:
                                         self._op_logger.log_error(f"write: {result.photo.filename}", e)
                                     if is_copy and options.output_dir:
                                         try:
-                                            dst = self._copy_destination(result.photo.path, options, photo_dir)
+                                            dst = _copy_destination(result.photo.path, options, photo_dir)
                                             self._file_provider.copy_file(result.photo.path, dst)
                                         except Exception as copy_err:
                                             if self._op_logger:
@@ -439,7 +439,7 @@ class GPSTaggingService:
                         else:
                             skipped += 1
                             if is_copy and options.output_dir:
-                                dst = self._copy_destination(result.photo.path, options, photo_dir)
+                                dst = _copy_destination(result.photo.path, options, photo_dir)
                                 self._file_provider.copy_file(result.photo.path, dst)
             else:
                 failed += 1
@@ -448,7 +448,7 @@ class GPSTaggingService:
                 reason = result.reject_reason or "unknown"
                 reject_groups.setdefault(reason, []).append(result.photo.filename)
                 if is_copy and options and options.output_dir:
-                    dst = self._copy_destination(result.photo.path, options, photo_dir)
+                    dst = _copy_destination(result.photo.path, options, photo_dir)
                     self._file_provider.copy_file(result.photo.path, dst)
 
             if on_photo_processed:
@@ -501,7 +501,7 @@ class GPSTaggingService:
                         try:
                             task = task_by_path.get(str(wr.photo_path))
                             if task:
-                                dst = self._copy_destination(task.match_result.photo.path, options, photo_dir)
+                                dst = _copy_destination(task.match_result.photo.path, options, photo_dir)
                                 self._file_provider.copy_file(task.match_result.photo.path, dst)
                         except Exception as copy_err:
                             if self._op_logger:
@@ -521,7 +521,7 @@ class GPSTaggingService:
                 # Fallback: copy all queued photos to output sequentially
                 for wt in write_tasks:
                     try:
-                        dst = self._copy_destination(wt.match_result.photo.path, options, photo_dir)
+                        dst = _copy_destination(wt.match_result.photo.path, options, photo_dir)
                         self._file_provider.copy_file(wt.match_result.photo.path, dst)
                     except Exception as copy_err:
                         failed += 1
@@ -587,7 +587,7 @@ class GPSTaggingService:
     def _write_photo(self, result: MatchResult, options: ProcessOptions, photo_dir: Path | None = None) -> Path | None:
         """Write GPS data to photo based on process mode. Returns destination path for COPY, None otherwise."""
         if options.mode == ProcessMode.COPY and options.output_dir:
-            dst = self._copy_destination(result.photo.path, options, photo_dir)
+            dst = _copy_destination(result.photo.path, options, photo_dir)
             dst.parent.mkdir(parents=True, exist_ok=True)
             EXIFWriter.write_gps(result.photo.path, dst, result.gps)
             return dst
@@ -595,15 +595,3 @@ class GPSTaggingService:
             EXIFWriter.write_gps(result.photo.path, result.photo.path, result.gps)
         return None
 
-    def _copy_destination(self, src_path: Path, options: ProcessOptions, photo_dir: Path | None = None) -> Path:
-        """Compute destination path, preserving directory structure if keep_structure."""
-        if options.keep_structure and options.output_dir and photo_dir:
-            try:
-                rel = src_path.relative_to(photo_dir)
-                # For flat photo directories (no subdirs), use photo_dir.name as wrapper
-                if rel.parent == Path("."):
-                    return options.output_dir / photo_dir.name / rel
-                return options.output_dir / rel
-            except ValueError:
-                return options.output_dir / photo_dir.name / src_path.name
-        return options.output_dir / src_path.name
