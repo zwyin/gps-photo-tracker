@@ -15,25 +15,35 @@ from gps_photo_tracker.core.models import (
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Skip interpreter finalization on Qt builds: exit hard via atexit.
+    """Stash the exit code for pytest_unconfigure (see hook below)."""
+    session.config._gpspt_exit_code = int(exitstatus)
+
+
+def pytest_unconfigure(config):
+    """Exit hard at unconfigure — before any teardown stage can crash.
 
     Closed-but-alive QWidgets (the main_window fixture closes windows but
-    never deletes them) accumulate across the suite; on headless CI runners
-    interpreter-finalization teardown crashed at process exit AFTER the
-    summary line ('libc++abi: Pure virtual function called!' on macOS,
-    segfault on Linux/Windows), turning green runs red. Deleting widgets
-    or the QApplication from THIS hook was not a fix either — deletion
-    order differs per platform and segfaulted on every CI runner while
-    passing locally. Instead, schedule os._exit as the LAST atexit
-    handler (atexit is LIFO and this registers before pytest's terminal
-    summary / pytest-cov report run in their own sessionfinish hooks):
-    everything still prints and flushes, then the process dies before
-    the finalization stage where the crash lives.
-    """
-    import atexit
-    import os
+    never deletes them) accumulate across the suite; on headless CI
+    runners the post-summary teardown stages crashed the process: plain
+    interpreter finalization segfaulted (Linux) / aborted (macOS 'Pure
+    virtual function called'), and even an atexit os._exit was too late
+    on Windows (a later-registered atexit/unload step died with exit 1
+    before our LIFO-last handler ran). Destroying widgets or the
+    QApplication from hooks was not a fix either — deletion order is
+    platform/plugin-state dependent (segfaulted on every CI runner while
+    passing locally).
 
-    atexit.register(lambda: os._exit(exitstatus))
+    By unconfigure time the terminal summary and pytest-cov report have
+    been printed (they run in sessionfinish), and conftest's unconfigure
+    runs BEFORE plugin unconfigure steps — so exiting here preserves all
+    output and skips every later teardown, where the crash lives.
+    """
+    import os
+    import sys
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(getattr(config, "_gpspt_exit_code", 0))
 
 
 def utc(h: int, m: int = 0, s: int = 0, day: int = 17, month: int = 2, year: int = 2026) -> float:
