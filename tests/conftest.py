@@ -14,6 +14,51 @@ from gps_photo_tracker.core.models import (
 )
 
 
+def pytest_sessionfinish(session, exitstatus):
+    """Stash the exit code for pytest_unconfigure (see hook below)."""
+    session.config._gpspt_exit_code = int(exitstatus)
+
+
+def pytest_unconfigure(config):
+    """Exit hard at unconfigure — before any teardown stage can crash.
+
+    Closed-but-alive QWidgets (the main_window fixture closes windows but
+    never deletes them) accumulate across the suite; on headless CI
+    runners the post-summary teardown kills the process on EVERY
+    platform, just with different signatures: Linux segfault, macOS
+    'libc++abi: Pure virtual function called!' abort, Windows a silent
+    exit 1 from a failing DLL detach (round 1 masked this behind real
+    test failures; round 5 showed a green summary followed by exit 1).
+    Destroying widgets or the QApplication from hooks was not a fix
+    either — deletion order is platform/plugin-state dependent
+    (segfaulted on every CI runner while passing locally).
+
+    Windows needs a different hard exit than os._exit: the CRT teardown
+    path it still runs crashed with Qt background threads alive (rounds
+    3-4), and atexit ran too late (a later-registered unload step died
+    first). kernel32.TerminateProcess skips CRT teardown AND DLL detach
+    — no callbacks of any kind can run, let alone crash.
+
+    By unconfigure time the terminal summary and pytest-cov report have
+    been printed (they run in sessionfinish), and conftest's unconfigure
+    runs BEFORE plugin unconfigure steps — so exiting here preserves all
+    output and skips every later teardown, where the crash lives.
+    """
+    import os
+    import sys
+
+    code = getattr(config, "_gpspt_exit_code", 0)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    if sys.platform == "win32":
+        import ctypes
+
+        # TerminateProcess(-1, code): pseudo-handle to the current process;
+        # skips CRT teardown AND DLL detach — no callbacks can crash.
+        ctypes.windll.kernel32.TerminateProcess(ctypes.c_void_p(-1), code)
+    os._exit(code)
+
+
 def utc(h: int, m: int = 0, s: int = 0, day: int = 17, month: int = 2, year: int = 2026) -> float:
     """UTC timestamp factory."""
     return datetime(year, month, day, h, m, s, tzinfo=timezone.utc).timestamp()

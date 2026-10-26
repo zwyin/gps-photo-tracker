@@ -83,6 +83,10 @@ def _build_parser(cfg: dict) -> argparse.ArgumentParser:
                    help=f"Parallel workers (default: {cfg.get('workers', 1)})")
     p.add_argument("--time-offset", type=int, default=cfg.get("time_offset", 0),
                    help=f"Photo time offset seconds (default: {cfg.get('time_offset', 0)})")
+    p.add_argument("--suggest-clock-offset", action="store_true",
+                   help="Detect camera clock offset from match results and print a "
+                        "'clock-offset-suggest:' line (does not apply it; rerun with "
+                        "--time-offset <s> to apply)")
     p.add_argument("-q", "--quiet", action="store_true", default=cfg.get("quiet", False),
                    help="Only print final summary")
     p.add_argument("-v", "--verbose", action="store_true", default=cfg.get("verbose", False),
@@ -174,6 +178,8 @@ def _run(args, token: CancellationToken | None = None) -> int:
     if cancelled:
         print("cancelled: partial results below")
     _print_summary(result, args)
+    if args.suggest_clock_offset:
+        _print_clock_suggestion(result, segments, args)
     if args.report:
         _write_csv(result, args)
     return 130 if cancelled else _exit_code(result)
@@ -249,9 +255,26 @@ def _run_review(args, service, segments, photos, config,
         result = _recount(final)
 
     _print_summary(result, args)
+    if args.suggest_clock_offset:
+        _print_clock_suggestion(result, segments, args)
     if args.report:
         _write_csv(result, args)
     return _exit_code(result)
+
+
+def _print_clock_suggestion(result, segments, args):
+    """Detect camera clock offset (batch offset-distribution scan) and print
+    a machine-readable suggestion line to stdout. Never applies it."""
+    from gps_photo_tracker.core.clock_correction import detect_offset
+    correction = detect_offset(result.results, segments,
+                               current_offset_s=args.time_offset)
+    if correction is None:
+        print("clock-offset-suggest: none")
+        return
+    print(f"clock-offset-suggest: offset={correction.offset_s:+d}s "
+          f"confidence={correction.confidence:.0%} "
+          f"support={correction.support}/{correction.total} gain={correction.gain} "
+          f"(rerun with --time-offset {correction.offset_s})")
 
 
 def _review_loop(state):
