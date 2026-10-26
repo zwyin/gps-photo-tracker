@@ -2959,54 +2959,44 @@ class TestSanitizeFilename:
 
 
 class TestClassifyDrop:
-    """Cover _classify_drop (L1769-1804)."""
+    """Cover _classify_drop (paths in → (track_paths, photo_paths) out)."""
 
     def test_gpx_file_classified_as_gps(self, main_window, tmp_path):
-        from PySide6.QtCore import QUrl
         gpx = tmp_path / "track.gpx"
         gpx.write_text("<gpx/>")
-        urls = [QUrl.fromLocalFile(str(gpx))]
-        gps_dir, photo_dir = main_window._classify_drop(urls)
-        assert gps_dir == tmp_path
-        assert photo_dir is None
+        tracks, photos = main_window._classify_drop([gpx])
+        assert tracks == [gpx]
+        assert photos == []
 
     def test_jpg_file_classified_as_photo(self, main_window, tmp_path):
-        from PySide6.QtCore import QUrl
         img = tmp_path / "photo.jpg"
         img.write_bytes(b"\xff\xd8\xff")
-        urls = [QUrl.fromLocalFile(str(img))]
-        gps_dir, photo_dir = main_window._classify_drop(urls)
-        assert gps_dir is None
-        assert photo_dir == tmp_path
+        tracks, photos = main_window._classify_drop([img])
+        assert tracks == []
+        assert photos == [img]
 
     def test_gps_dir_classified_by_track_files(self, main_window, tmp_path):
-        from PySide6.QtCore import QUrl
         gps_dir = tmp_path / "gps"
         gps_dir.mkdir()
         (gps_dir / "track.gpx").write_text("<gpx/>")
-        urls = [QUrl.fromLocalFile(str(gps_dir))]
-        gps, photo = main_window._classify_drop(urls)
-        assert gps == gps_dir
-        assert photo is None
+        tracks, photos = main_window._classify_drop([gps_dir])
+        assert tracks == [gps_dir]
+        assert photos == []
 
     def test_photo_dir_classified_by_images(self, main_window, tmp_path):
-        from PySide6.QtCore import QUrl
         photo_dir = tmp_path / "photos"
         photo_dir.mkdir()
         (photo_dir / "img.jpg").write_bytes(b"\xff\xd8\xff")
-        urls = [QUrl.fromLocalFile(str(photo_dir))]
-        gps, photo = main_window._classify_drop(urls)
-        assert gps is None
-        assert photo == photo_dir
+        tracks, photos = main_window._classify_drop([photo_dir])
+        assert tracks == []
+        assert photos == [photo_dir]
 
     def test_empty_dir_not_classified(self, main_window, tmp_path):
-        from PySide6.QtCore import QUrl
         empty = tmp_path / "empty"
         empty.mkdir()
-        urls = [QUrl.fromLocalFile(str(empty))]
-        gps, photo = main_window._classify_drop(urls)
-        assert gps is None
-        assert photo is None
+        tracks, photos = main_window._classify_drop([empty])
+        assert tracks == []
+        assert photos == []
 
 
 # ── MainWindow: drag/drop events ────────────────────────────
@@ -4577,7 +4567,7 @@ class TestApplyReviewToTable:
 
 class TestDropEventBranches:
     def test_drop_no_local_files(self, main_window):
-        """Drop with no local files → classify_drop returns (None, None), shows info."""
+        """Drop with no recognized content → classify_drop returns ([], []), shows info."""
         from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl
         from PySide6.QtGui import QDropEvent
         mime = QMimeData()
@@ -4585,46 +4575,40 @@ class TestDropEventBranches:
         mime.setUrls([QUrl("file:///tmp/test.txt")])
         event = QDropEvent(QPoint(0, 0), Qt.DropAction.CopyAction, mime,
                            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
-        with patch.object(main_window, "_classify_drop", return_value=(None, None)):
+        with patch.object(main_window, "_classify_drop", return_value=([], [])):
             with patch("gps_photo_tracker.gui.main_window.QMessageBox.information"):
                 main_window.dropEvent(event)
         assert event.isAccepted()
 
     def test_classify_drop_dir_both_track_and_image(self, main_window, tmp_path):
         """Directory with both tracks and images shows choice dialog."""
-        from PySide6.QtCore import QUrl
         mixed_dir = tmp_path / "mixed"
         mixed_dir.mkdir()
         (mixed_dir / "track.gpx").write_text("gpx")
         (mixed_dir / "photo.jpg").write_bytes(b"\xff\xd8")
-        url = QUrl.fromLocalFile(str(mixed_dir))
         with patch("gps_photo_tracker.gui.main_window.QMessageBox") as MockMB:
             mock_msg = MockMB.return_value
             mock_msg.exec.return_value = 0
             # Simulate clicking "作为 GPS 目录"
             mock_btn = mock_msg.addButton.return_value
             mock_msg.clickedButton.return_value = mock_btn
-            gps_dir, photo_dir = main_window._classify_drop([url])
-            # With clickedButton matching the first button added, gps_dir is set
-            assert gps_dir == mixed_dir or photo_dir == mixed_dir
+            tracks, photos = main_window._classify_drop([mixed_dir])
+            # With clickedButton matching the first button added, the dir goes to tracks
+            assert tracks == [mixed_dir] or photos == [mixed_dir]
 
     def test_classify_drop_unknown_file(self, main_window, tmp_path):
-        """File with unknown extension → neither gps nor photo dir."""
-        from PySide6.QtCore import QUrl
+        """File with unknown extension → neither track nor photo."""
         f = tmp_path / "data.txt"
         f.write_text("hello")
-        url = QUrl.fromLocalFile(str(f))
-        gps_dir, photo_dir = main_window._classify_drop([url])
-        assert gps_dir is None
-        assert photo_dir is None
+        tracks, photos = main_window._classify_drop([f])
+        assert tracks == []
+        assert photos == []
 
     def test_classify_drop_nonexistent_path(self, main_window):
-        """Non-existent path in URL → skipped."""
-        from PySide6.QtCore import QUrl
-        url = QUrl.fromLocalFile("/nonexistent/path")
-        gps_dir, photo_dir = main_window._classify_drop([url])
-        assert gps_dir is None
-        assert photo_dir is None
+        """Non-existent path → skipped."""
+        tracks, photos = main_window._classify_drop([Path("/nonexistent/path")])
+        assert tracks == []
+        assert photos == []
 
 
 # ── MainWindow: _on_step2_review ──────────────────────────────
@@ -5435,7 +5419,7 @@ class TestDropEventPhotoDir:
         mime.setUrls([QUrl.fromLocalFile(str(photo_dir / "test.jpg"))])
         event = QDropEvent(QPoint(0, 0), Qt.DropAction.CopyAction, mime,
                            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
-        with patch.object(main_window, "_classify_drop", return_value=(None, photo_dir)), \
+        with patch.object(main_window, "_classify_drop", return_value=([], [photo_dir])), \
              patch.object(main_window, "_clear_results"), \
              patch.object(main_window, "_auto_scan_photos"), \
              patch.object(main_window, "_add_path_history"):
@@ -5447,12 +5431,10 @@ class TestDropEventPhotoDir:
 
 class TestClassifyDropPhotoBtn:
     def test_mixed_dir_click_photo_button(self, main_window, tmp_path):
-        from PySide6.QtCore import QUrl
         mixed_dir = tmp_path / "mixed"
         mixed_dir.mkdir()
         (mixed_dir / "track.gpx").write_text("gpx")
         (mixed_dir / "photo.jpg").write_bytes(b"\xff\xd8")
-        url = QUrl.fromLocalFile(str(mixed_dir))
         actual_buttons = []
 
         def fake_addButton(text, role):
@@ -5465,9 +5447,9 @@ class TestClassifyDropPhotoBtn:
             mock_msg.addButton.side_effect = fake_addButton
             mock_msg.exec.return_value = 0
             mock_msg.clickedButton.side_effect = lambda: actual_buttons[1] if len(actual_buttons) >= 2 else None
-            gps_dir, photo_dir = main_window._classify_drop([url])
-            assert photo_dir == mixed_dir
-            assert gps_dir is None
+            tracks, photos = main_window._classify_drop([mixed_dir])
+            assert photos == [mixed_dir]
+            assert tracks == []
 
 
 # ── MainWindow: _reopen_review with latitude and decisions ────
@@ -5816,3 +5798,63 @@ class TestBuildProcessOptions:
         assert opts.output_dir == out
         assert opts.overwrite_gps is True
         assert opts.workers == 4
+
+
+class TestClockCorrectionBanner:
+    """Camera clock auto-correction banner (task #12) — logic-level tests."""
+
+    def _seg(self):
+        from gps_photo_tracker.core.models import GPXSegment, TrackPoint
+        return GPXSegment(filename="t.gpx", start=1000.0, end=2000.0,
+                          points=[TrackPoint(timestamp=1500.0, latitude=35.0, longitude=139.0)])
+
+    def _results(self, stamps):
+        from gps_photo_tracker.core.models import MatchResult, PhotoInfo
+        return [
+            MatchResult(
+                photo=PhotoInfo(path=Path(f"/tmp/p{i}.jpg"), filename=f"p{i}.jpg",
+                                timestamp=ts, has_gps=False),
+                success=False, reject_reason="no_gps_coverage",
+            )
+            for i, ts in enumerate(stamps)
+        ]
+
+    def test_banner_hidden_by_default(self, main_window):
+        assert main_window._clock_banner.isHidden()
+        assert main_window._clock_apply_btn.isHidden()
+        assert main_window._clock_correction is None
+
+    def test_banner_shows_on_offset_detected(self, main_window):
+        # camera +3600s: stamps 4700..5500 vs track [1000, 2000]
+        results = self._results([4700.0 + i * 100.0 for i in range(9)])
+        main_window._update_clock_banner(results, [self._seg()])
+
+        assert not main_window._clock_banner.isHidden()
+        assert not main_window._clock_apply_btn.isHidden()
+        assert main_window._clock_correction is not None
+        assert main_window._clock_correction.offset_s == -3600
+        assert "-3600" in main_window._clock_banner.text()
+        assert "置信度" in main_window._clock_banner.text()
+
+    def test_banner_hidden_when_no_signal(self, main_window):
+        results = self._results([1100.0, 1300.0, 1500.0])  # healthy, inside track
+        main_window._update_clock_banner(results, [self._seg()])
+
+        assert main_window._clock_banner.isHidden()
+        assert main_window._clock_correction is None
+
+    def test_apply_widens_spin_range_and_reruns_preview(self, main_window, monkeypatch):
+        from gps_photo_tracker.core.clock_correction import ClockCorrection
+        main_window._clock_correction = ClockCorrection(
+            offset_s=7200, support=9, total=9, confidence=1.0, gain=9,
+            plateau_start_s=7100.0, plateau_end_s=7300.0,
+        )
+        assert main_window._offset_spin.maximum() == 3600  # default ±1h range
+
+        calls = []
+        monkeypatch.setattr(main_window, "_on_step1_preview", lambda: calls.append(1))
+        main_window._on_apply_clock_correction()
+
+        assert main_window._offset_spin.value() == 7200
+        assert main_window._offset_spin.maximum() == 7200  # range widened
+        assert calls == [1]  # preview re-run exactly once

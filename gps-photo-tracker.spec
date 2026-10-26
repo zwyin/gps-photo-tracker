@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for GPS Photo Tracker v0.25.0."""
+"""PyInstaller spec for GPS Photo Tracker v0.26.0."""
 
 import os
 import sys
@@ -34,16 +34,23 @@ a = Analysis(
         "gps_photo_tracker.core.param_tuner",
         "gps_photo_tracker.core.report_builder",
         "gps_photo_tracker.core.models",
+        "gps_photo_tracker.core.path_layout",
         "gps_photo_tracker.gui",
         "gps_photo_tracker.gui.main_window",
         "gps_photo_tracker.gui.config_panel",
         "gps_photo_tracker.gui.map_panel",
         "gps_photo_tracker.gui.detail_dialog",
+        "gps_photo_tracker.gui.drop_zone",
+        "gps_photo_tracker.gui.gps_point_picker",
         "gps_photo_tracker.gui.gpx_browser_dialog",
+        "gps_photo_tracker.gui.log_viewer",
+        "gps_photo_tracker.gui.mac_native_picker",
         "gps_photo_tracker.gui.photo_browser_dialog",
         "gps_photo_tracker.gui.photo_preview",
         "gps_photo_tracker.gui.progress_panel",
         "gps_photo_tracker.gui.result_table",
+        "gps_photo_tracker.gui.review_dialog",
+        "gps_photo_tracker.gui.selection_list_dialog",
         "gps_photo_tracker.gui.settings_dialog",
         "gps_photo_tracker.gui.worker",
         "gps_photo_tracker.service",
@@ -111,14 +118,19 @@ app = BUNDLE(
     bundle_identifier="com.gps-photo-tracker.app",
     info_plist={
         "CFBundleName": "GPS Photo Tracker",
-        "CFBundleShortVersionString": "0.25.0",
-        "CFBundleVersion": "0.25.0",
+        "CFBundleShortVersionString": "0.26.0",
+        "CFBundleVersion": "0.26.0",
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "11.0",
         "CFBundleDocumentTypes": [
             {
                 "CFBundleTypeName": "GPS Track",
                 "CFBundleTypeExtensions": ["gpx", "kml", "tcx", "fit"],
+                "CFBundleTypeRole": "Viewer",
+            },
+            {
+                "CFBundleTypeName": "Photo Image",
+                "CFBundleTypeExtensions": ["jpg", "jpeg", "png", "tif", "tiff"],
                 "CFBundleTypeRole": "Viewer",
             },
         ],
