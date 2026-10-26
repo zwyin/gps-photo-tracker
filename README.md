@@ -85,13 +85,13 @@ Existing tools with linear interpolation achieve **30-50% coverage** — many ph
 
 ### Option A: Download Pre-built Package (Recommended)
 
-Download from [GitHub Releases](../../releases) (latest: v0.25.0):
+Download from [GitHub Releases](../../releases) (latest: v0.27.0):
 
 | Platform | File |
 |----------|------|
-| macOS | `GPS-Photo-Tracker-v0.25.0-macos.zip` |
-| Windows | `GPS-Photo-Tracker-v0.25.0-windows.zip` |
-| Linux | `GPS-Photo-Tracker-v0.25.0-linux.tar.gz` |
+| macOS | `GPS-Photo-Tracker-v0.27.0-macos.zip` |
+| Windows | `GPS-Photo-Tracker-v0.27.0-windows.zip` |
+| Linux | `GPS-Photo-Tracker-v0.27.0-linux.tar.gz` |
 
 Download from [GitHub Releases](../../releases), unzip, and double-click to run. No Python or any other software needed.
 
